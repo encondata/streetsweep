@@ -333,6 +333,13 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
                 TextButton(onClick = viewModel::pullAreasFromPortal, enabled = !settings.portalUrl.isNullOrBlank()) { Text("Get areas") }
                 TextButton(onClick = { viewModel.pushToPortal(false) }, enabled = !settings.portalUrl.isNullOrBlank()) { Text("Send coverage") }
             }
+            if (settings.portalUrl != TrackingSettings.DEFAULT_PORTAL_URL) {
+                ListItem(
+                    modifier = Modifier.clickable { viewModel.useHostedPortal() },
+                    headlineContent = { Text("Use the hosted server") },
+                    supportingContent = { Text(TrackingSettings.DEFAULT_PORTAL_URL) },
+                )
+            }
             ListItem(
                 headlineContent = { Text("Send after every drive") },
                 supportingContent = { Text("Pushes the streets you covered as soon as there is a network") },

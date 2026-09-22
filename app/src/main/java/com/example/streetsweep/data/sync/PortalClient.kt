@@ -26,6 +26,17 @@ class PortalClient(
         false
     }
 
+    /**
+     * Same check as [health], but it lets the failure through so the person is told what
+     * actually went wrong rather than a flat "no answer".
+     */
+    suspend fun ping(): String {
+        val ok = JSONObject(get("/api/health")).optBoolean("ok")
+        val where = normalise(baseUrl()) ?: throw PortalException("No server address set")
+        if (!ok) throw PortalException("$where answered, but not as the area builder")
+        return where
+    }
+
     /** Sends one batch. The server takes any subset, so callers can chunk the big parts. */
     suspend fun sync(payload: JSONObject): JSONObject = withContext(Dispatchers.IO) {
         val conn = open("/api/sync")

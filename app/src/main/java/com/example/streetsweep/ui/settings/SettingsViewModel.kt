@@ -55,7 +55,10 @@ class SettingsViewModel(private val container: AppContainer, private val context
     // ---- backup and export ----
 
     private inline fun work(crossinline block: suspend () -> String) = viewModelScope.launch {
-        if (_busy.value) return@launch
+        if (_busy.value) {
+            _message.value = "Still finishing the last one"
+            return@launch
+        }
         _busy.value = true
         _message.value = try {
             block()
@@ -91,11 +94,14 @@ class SettingsViewModel(private val container: AppContainer, private val context
 
     fun setPortalToken(value: String) = viewModelScope.launch { container.settings.setPortalToken(value) }
 
+    /** Puts the address back to the hosted one, undoing a temporary address used for testing. */
+    fun useHostedPortal() = viewModelScope.launch {
+        container.settings.setPortalUrl(TrackingSettings.DEFAULT_PORTAL_URL)
+    }
+
     fun setAutoPush(on: Boolean) = viewModelScope.launch { container.settings.setAutoPush(on) }
 
-    fun testPortal() = work {
-        if (container.portalClient.health()) "Server answered" else "No answer from that address"
-    }
+    fun testPortal() = work { "Reached " + container.portalClient.ping() }
 
     fun pullAreasFromPortal() = work {
         val added = container.portalSync.pullAreas()

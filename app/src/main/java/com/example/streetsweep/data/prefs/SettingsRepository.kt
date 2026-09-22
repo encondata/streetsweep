@@ -33,8 +33,8 @@ data class TrackingSettings(
     val autoStopIdleMinutes: Int = 0,
     val colourByRecency: Boolean = false,
     val inVehicleTriggerEnabled: Boolean = false,
-    /** Address of the area builder's server, e.g. http://192.168.1.5:8420. */
-    val portalUrl: String? = null,
+    /** Address of the area builder's server. Defaults to the hosted one. */
+    val portalUrl: String? = DEFAULT_PORTAL_URL,
     val portalToken: String? = null,
     val autoPushEnabled: Boolean = false,
     val lastPortalPushAt: Long = 0,
@@ -48,6 +48,7 @@ data class TrackingSettings(
         val IDLE_STOP_CHOICES = listOf(0, 15, 30, 60)
         const val DEFAULT_VALHALLA_URL = "https://valhalla1.openstreetmap.de"
         const val DEFAULT_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+        const val DEFAULT_PORTAL_URL = "https://streetsweep.hackspacelabs.com"
     }
 
     val hasAnyAutoTrigger: Boolean get() = bluetoothTriggerAddress != null || androidAutoTriggerEnabled
@@ -95,7 +96,7 @@ class SettingsRepository(context: Context) {
             autoStopIdleMinutes = p[Keys.IDLE_STOP] ?: 0,
             colourByRecency = p[Keys.RECENCY] ?: false,
             inVehicleTriggerEnabled = p[Keys.IN_VEHICLE] ?: false,
-            portalUrl = p[Keys.PORTAL_URL]?.takeIf { it.isNotBlank() },
+            portalUrl = p[Keys.PORTAL_URL]?.takeIf { it.isNotBlank() } ?: TrackingSettings.DEFAULT_PORTAL_URL,
             portalToken = p[Keys.PORTAL_TOKEN]?.takeIf { it.isNotBlank() },
             autoPushEnabled = p[Keys.AUTO_PUSH] ?: false,
             lastPortalPushAt = p[Keys.LAST_PUSH] ?: 0L,

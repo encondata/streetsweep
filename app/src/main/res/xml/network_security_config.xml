@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The area builder's address is typed in by whoever owns the app and is often a bare
+  address on their own network, such as 192.168.1.5:8420 or 127.0.0.1:8420 over an adb
+  tunnel. Android has no way to express "any private address", so plain HTTP has to stay
+  possible in general. Every host the app reaches on its own is pinned to HTTPS below, so
+  the only thing that can travel in the clear is a server the owner deliberately pointed
+  it at.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">streetsweep.hackspacelabs.com</domain>
+        <domain includeSubdomains="true">tile.openstreetmap.org</domain>
+        <domain includeSubdomains="true">overpass-api.de</domain>
+        <domain includeSubdomains="true">valhalla1.openstreetmap.de</domain>
+        <domain includeSubdomains="true">nominatim.openstreetmap.org</domain>
+    </domain-config>
+</network-security-config>
