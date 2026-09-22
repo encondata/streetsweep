@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: streetsweep-db
+    environment:
+      POSTGRES_USER: streetsweep
+      POSTGRES_PASSWORD: streetsweep
+      POSTGRES_DB: streetsweep
+    volumes:
+      - areas-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U streetsweep -d streetsweep"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  web:
+    build: .
+    image: streetsweep/area-builder
+    container_name: streetsweep-area-builder
+    environment:
+      DATABASE_URL: postgres://streetsweep:streetsweep@db:5432/streetsweep
+      SYNC_TOKEN: ${SYNC_TOKEN:-}
+    # Plain HTTP for a reverse proxy in front to forward to. Set BIND_ADDRESS to
+    # 127.0.0.1 in .env when that proxy runs on this same host.
+    ports:
+      - "${BIND_ADDRESS:-0.0.0.0}:${HOST_PORT:-8420}:80"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  areas-data:

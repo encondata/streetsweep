@@ -1,0 +1,1032 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StreetSweep Area Builder</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #eef2f0;
+    --surface: #ffffff;
+    --surface-2: #f6f8f7;
+    --ink: #16211e;
+    --ink-soft: #5b6b66;
+    --line: #d5dedb;
+    --teal: #0b6b57;
+    --teal-soft: #e1efea;
+    --amber: #b8762b;
+    --slate: #45607a;
+    --danger: #b3261e;
+    --ui: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0f1614;
+      --surface: #18211e;
+      --surface-2: #1f2a26;
+      --ink: #e6ede9;
+      --ink-soft: #9aaba5;
+      --line: #2c3833;
+      --teal: #5fbfa3;
+      --teal-soft: #1b3630;
+      --amber: #d9a05b;
+      --slate: #8fa9c2;
+      --danger: #e2796f;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: var(--ui);
+    background: var(--ground);
+    color: var(--ink);
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    height: 100%;
+  }
+  #panel {
+    background: var(--surface);
+    border-right: 1px solid var(--line);
+    overflow-y: auto;
+    padding: 18px 16px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  header h1 {
+    font-size: 17px; font-weight: 700; margin: 0; letter-spacing: -0.01em;
+  }
+  header p { margin: 4px 0 0; font-size: 12px; color: var(--ink-soft); line-height: 1.5; }
+  .eyebrow {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.09em;
+    color: var(--ink-soft); font-weight: 600; margin: 0 0 6px;
+  }
+  button {
+    font-family: var(--ui); font-size: 13px; font-weight: 600;
+    border-radius: 8px; border: 1px solid var(--line);
+    background: var(--surface-2); color: var(--ink);
+    padding: 9px 12px; cursor: pointer;
+  }
+  button:hover { border-color: var(--teal); }
+  button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+  button.primary { background: var(--teal); border-color: var(--teal); color: #fff; }
+  button.danger { color: var(--danger); }
+  button:disabled { opacity: 0.45; cursor: default; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .row > button { flex: 1 1 auto; }
+  label { display: block; font-size: 11px; color: var(--ink-soft); margin-bottom: 4px; font-weight: 600; }
+  input[type=text], select {
+    width: 100%; font-family: var(--ui); font-size: 13px; color: var(--ink);
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px;
+  }
+  .field { margin-bottom: 10px; }
+  .card {
+    border: 1px solid var(--line); border-radius: 10px;
+    background: var(--surface-2); padding: 12px;
+  }
+  ul.areas { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  li.area {
+    border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px;
+    background: var(--surface-2); cursor: pointer;
+  }
+  li.area.selected { border-color: var(--teal); background: var(--teal-soft); }
+  li.area .name { font-weight: 600; font-size: 13px; }
+  li.area .meta { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
+  .swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; }
+  .warn { color: var(--amber); }
+  .bad { color: var(--danger); }
+  .hint { font-size: 11px; color: var(--ink-soft); line-height: 1.55; }
+  .coords { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+  .tab {
+    flex: 1 1 0; border: none; background: none; border-radius: 0;
+    border-bottom: 2px solid transparent; color: var(--ink-soft);
+    padding: 8px 4px; font-size: 13px; font-weight: 600;
+  }
+  .tab:hover { border-color: transparent; color: var(--ink); }
+  .tab.active { color: var(--teal); border-bottom-color: var(--teal); }
+  .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 6px; }
+  .bar > span { display: block; height: 100%; background: var(--teal); }
+  .big { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; }
+  #map { height: 100%; width: 100%; }
+  #status {
+    position: absolute; z-index: 500; left: 50%; transform: translateX(-50%);
+    bottom: 18px; background: var(--surface); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 8px 16px; font-size: 12px; font-weight: 600;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.12);
+  }
+  #mapwrap { position: relative; }
+  .leaflet-container { background: var(--ground); font-family: var(--ui); }
+  @media (max-width: 760px) {
+    body { grid-template-columns: 1fr; grid-template-rows: 46vh 1fr; }
+    #panel { border-right: none; border-top: 1px solid var(--line); order: 2; }
+    #mapwrap { order: 1; }
+  }
+</style>
+</head>
+<body>
+<div id="panel">
+  <header>
+    <h1>StreetSweep Area Builder</h1>
+    <p>Outline the places you want to sweep, then export a GeoJSON file and import it on the phone.</p>
+    <p class="hint" id="storageMode" style="margin-top:6px">Connecting…</p>
+    <div id="tokenBox" hidden style="margin-top:8px">
+      <label for="tokenInput">Access token</label>
+      <div class="row">
+        <input type="password" id="tokenInput" placeholder="paste your token" style="flex:2 1 140px">
+        <button id="btnToken" class="primary" style="flex:0 0 auto">Unlock</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button id="tabDraw" class="tab active" role="tab">Draw</button>
+    <button id="tabCoverage" class="tab" role="tab">Coverage</button>
+  </div>
+
+  <div id="drawPanel">
+
+  <div>
+    <p class="eyebrow">Find a place</p>
+    <form id="searchForm" class="row">
+      <input type="text" id="searchBox" placeholder="Conroe TX, April Sound…" style="flex:2 1 160px">
+      <button type="submit" style="flex:0 0 auto">Go</button>
+    </form>
+  </div>
+
+  <div>
+    <p class="eyebrow">Draw</p>
+    <div class="row">
+      <button id="btnNew" class="primary">New area</button>
+      <button id="btnFinish" disabled>Finish</button>
+      <button id="btnCancel" disabled>Cancel</button>
+    </div>
+    <p class="hint" id="drawHint" style="margin-top:8px">
+      Click the map to drop corners. Drag a corner to move it, click the small dot between two
+      corners to add one there, and right-click a corner to remove it.
+    </p>
+  </div>
+
+  <div id="editor" hidden>
+    <p class="eyebrow">Selected area</p>
+    <div class="card">
+      <div class="field">
+        <label for="fName">Name</label>
+        <input type="text" id="fName" placeholder="April Sound">
+      </div>
+      <div class="field">
+        <label for="fLevel">Level</label>
+        <select id="fLevel">
+          <option value="NEIGHBORHOOD">Neighborhood</option>
+          <option value="CITY">City</option>
+          <option value="METRO">Metro area</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="fParent">Part of</label>
+        <select id="fParent"><option value="">Nothing</option></select>
+      </div>
+      <p class="coords" id="fStats"></p>
+      <div class="row" style="margin-top:8px">
+        <button id="btnZoom">Zoom to it</button>
+        <button id="btnDelete" class="danger">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <p class="eyebrow">Areas</p>
+    <ul class="areas" id="areaList"></ul>
+    <p class="hint" id="emptyNote">Nothing drawn yet.</p>
+  </div>
+
+  <div>
+    <p class="eyebrow">File</p>
+    <div class="row">
+      <button id="btnExport" class="primary">Export GeoJSON</button>
+      <button id="btnImport">Import…</button>
+    </div>
+    <input type="file" id="fileInput" accept=".geojson,.json,application/geo+json,application/json" hidden>
+    <p class="hint" style="margin-top:8px">
+      Import also accepts the app's own coverage export, so you can see the streets you have
+      already driven while deciding where an area should stop.
+    </p>
+  </div>
+  </div>
+
+  <div id="coveragePanel" hidden>
+    <p class="eyebrow">Overall</p>
+    <div class="card" id="covSummary">Loading…</div>
+
+    <p class="eyebrow" style="margin-top:16px">Areas</p>
+    <ul class="areas" id="covAreas"></ul>
+    <p class="hint" id="covAreasEmpty" hidden>The phone has not sent anything yet.</p>
+
+    <p class="eyebrow" style="margin-top:16px">Recent drives</p>
+    <ul class="areas" id="covDrives"></ul>
+
+    <div class="row" style="margin-top:14px">
+      <button id="btnRefreshCoverage" class="primary">Refresh</button>
+    </div>
+    <p class="hint" style="margin-top:8px">
+      Sent from the phone under Settings → Area builder server. Turn on “Send after every drive”
+      and this fills in on its own.
+    </p>
+  </div>
+</div>
+
+<div id="mapwrap">
+  <div id="map"></div>
+  <div id="status" hidden></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  // StreetSweep splits downloads on a fixed 0.1 degree grid and refuses an area
+  // needing more than this many cells, so the builder warns before you get there.
+  var CELL_DEG = 0.1;
+  var CELL_LIMIT = 400;
+  var LEVELS = { NEIGHBORHOOD: "Neighborhood", CITY: "City", METRO: "Metro area" };
+  var LEVEL_COLOR = { NEIGHBORHOOD: "#0b6b57", CITY: "#45607a", METRO: "#b8762b" };
+  var STORE_KEY = "streetsweep.areas.v1";
+
+  var map = L.map("map", { zoomControl: true }).setView([30.3704, -95.6251], 14);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  var contextLayer = L.layerGroup().addTo(map);   // driven streets from an app export
+  var areaLayer = L.layerGroup().addTo(map);
+  var editLayer = L.layerGroup().addTo(map);
+
+  var areas = [];          // { id, name, level, parent, latlngs, poly }
+  var selectedId = null;
+  var drawing = null;      // { latlngs, line }
+  var nextId = 1;
+
+  var el = function (id) { return document.getElementById(id); };
+
+  function status(text, tone) {
+    var s = el("status");
+    if (!text) { s.hidden = true; return; }
+    s.hidden = false;
+    s.textContent = text;
+    s.style.color = tone === "bad" ? "var(--danger)" : tone === "warn" ? "var(--amber)" : "var(--ink)";
+  }
+
+  // ---- geometry helpers -------------------------------------------------
+
+  function metersPerDegLng(lat) { return 111320 * Math.cos(lat * Math.PI / 180); }
+
+  var SQ_METERS_PER_SQ_MILE = 2589988.11;
+  var METERS_PER_MILE = 1609.344;
+  var FEET_PER_METER = 3.280839895;
+  var ACRES_PER_SQ_MILE = 640;
+
+  function areaSquareMiles(latlngs) {
+    if (latlngs.length < 3) return 0;
+    var lat0 = latlngs.reduce(function (a, p) { return a + p.lat; }, 0) / latlngs.length;
+    var mx = metersPerDegLng(lat0), my = 111132;
+    var sum = 0;
+    for (var i = 0; i < latlngs.length; i++) {
+      var a = latlngs[i], b = latlngs[(i + 1) % latlngs.length];
+      sum += (a.lng * mx) * (b.lat * my) - (b.lng * mx) * (a.lat * my);
+    }
+    return Math.abs(sum) / 2 / SQ_METERS_PER_SQ_MILE;
+  }
+
+  /** Acres read better than a fraction of a square mile for a neighbourhood. */
+  function fmtArea(sqMiles) {
+    if (sqMiles < 0.25) return Math.round(sqMiles * ACRES_PER_SQ_MILE) + " acres";
+    return sqMiles.toFixed(sqMiles < 10 ? 2 : 1) + " sq mi";
+  }
+
+  function fmtDistance(meters) {
+    var miles = meters / METERS_PER_MILE;
+    if (miles < 0.1) return Math.round(meters * FEET_PER_METER) + " ft";
+    return miles.toFixed(miles < 10 ? 2 : 1) + " mi";
+  }
+
+  function fmtDuration(ms) {
+    var minutes = Math.max(0, Math.round(ms / 60000));
+    var hours = Math.floor(minutes / 60);
+    return hours > 0 ? hours + "h " + (minutes % 60) + "m" : minutes + "m";
+  }
+
+  function cellCount(latlngs) {
+    if (!latlngs.length) return 0;
+    var s = Infinity, n = -Infinity, w = Infinity, e = -Infinity;
+    latlngs.forEach(function (p) {
+      s = Math.min(s, p.lat); n = Math.max(n, p.lat);
+      w = Math.min(w, p.lng); e = Math.max(e, p.lng);
+    });
+    var rows = Math.floor(n / CELL_DEG) - Math.floor(s / CELL_DEG) + 1;
+    var cols = Math.floor(e / CELL_DEG) - Math.floor(w / CELL_DEG) + 1;
+    return rows * cols;
+  }
+
+  // ---- storage ----------------------------------------------------------
+  // Served from the container, areas live in Postgres. Opened straight off disk there is
+  // no API, so the page falls back to this browser's storage and says so.
+
+  var backend = { online: false };
+  var TOKEN_KEY = "streetsweep.token";
+  var token = null;
+  try { token = localStorage.getItem(TOKEN_KEY); } catch (e) { /* storage may be blocked */ }
+
+  function apiJson(path, method, body) {
+    var headers = {};
+    if (body) headers["Content-Type"] = "application/json";
+    if (token) headers["Authorization"] = "Bearer " + token;
+    return fetch(path, {
+      method: method || "GET",
+      headers: headers,
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (r) {
+      if (r.status === 204) return null;
+      return r.json().then(function (j) {
+        if (!r.ok) {
+          var err = new Error(j && j.error ? j.error : "Request failed");
+          err.status = r.status;
+          throw err;
+        }
+        return j;
+      });
+    });
+  }
+
+  function showTokenBox(message) {
+    el("tokenBox").hidden = false;
+    var banner = el("storageMode");
+    banner.textContent = message;
+    banner.className = "hint warn";
+    el("tokenInput").focus();
+  }
+
+  el("btnToken").addEventListener("click", function () {
+    var value = el("tokenInput").value.trim();
+    if (!value) return;
+    token = value;
+    try { localStorage.setItem(TOKEN_KEY, token); } catch (e) { /* kept for this page only */ }
+    el("tokenBox").hidden = true;
+    el("tokenInput").value = "";
+    coverageLoaded = false;
+    load();
+  });
+  el("tokenInput").addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") { ev.preventDefault(); el("btnToken").click(); }
+  });
+
+  /** A rejected token is worth forgetting, so the next load asks again. */
+  function forgetToken() {
+    token = null;
+    try { localStorage.removeItem(TOKEN_KEY); } catch (e) { /* nothing to clear */ }
+  }
+
+  function payload(area) {
+    return {
+      name: area.name,
+      level: area.level,
+      parentName: area.parent || null,
+      polygon: area.latlngs.map(function (p) { return [p.lat, p.lng]; })
+    };
+  }
+
+  function setMode(online) {
+    backend.online = online;
+    var banner = el("storageMode");
+    banner.textContent = online
+      ? "Saved to the server as you draw."
+      : "Offline: areas stay in this browser only. Export before you clear its data.";
+    banner.className = online ? "hint" : "hint warn";
+  }
+
+  function saveLocal() {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify(areas.map(function (a) {
+        return { id: a.id, name: a.name, level: a.level, parent: a.parent,
+                 latlngs: a.latlngs.map(function (p) { return [p.lat, p.lng]; }) };
+      })));
+    } catch (e) { /* private window or storage disabled; the export still works */ }
+  }
+
+  var pendingSave = {};
+
+  /** Writes an area back, coalescing the flurry of edits a drag produces. */
+  function persist(area) {
+    if (!backend.online) { saveLocal(); return; }
+    if (pendingSave[area.id]) clearTimeout(pendingSave[area.id]);
+    pendingSave[area.id] = setTimeout(function () {
+      delete pendingSave[area.id];
+      var request = area.serverId
+        ? apiJson("/api/areas/" + area.serverId, "PUT", payload(area))
+        : apiJson("/api/areas", "POST", payload(area));
+      request.then(function (res) {
+        if (res && res.area) area.serverId = res.area.id;
+      }).catch(function (e) { status("Not saved: " + e.message, "bad"); });
+    }, 400);
+  }
+
+  function persistAll() { areas.forEach(persist); }
+
+  function forget(area) {
+    if (!backend.online) { saveLocal(); return; }
+    if (!area.serverId) return;
+    apiJson("/api/areas/" + area.serverId, "DELETE")
+      .catch(function (e) { status("Not deleted: " + e.message, "bad"); });
+  }
+
+  function clearAllAreas() {
+    areas.forEach(function (a) { areaLayer.removeLayer(a.poly); });
+    areas = [];
+    selectedId = null;
+    clearHandles();
+    el("editor").hidden = true;
+  }
+
+  function adoptFromServer(list) {
+    clearAllAreas();
+    (list || []).forEach(function (a) {
+      var pts = a.polygon.map(function (p) { return L.latLng(p[0], p[1]); });
+      if (pts.length < 3) return;
+      var area = addArea(pts, a.name, a.level, a.parentName);
+      area.serverId = a.id;
+    });
+    renderList();
+  }
+
+  function loadLocalAreas() {
+    setMode(false);
+    try {
+      var raw = localStorage.getItem(STORE_KEY);
+      if (raw) {
+        JSON.parse(raw).forEach(function (a) {
+          addArea(a.latlngs.map(function (p) { return L.latLng(p[0], p[1]); }), a.name, a.level, a.parent);
+        });
+      }
+    } catch (e) { /* ignore a corrupt cache rather than losing the page */ }
+    renderList();
+    if (areas.length) zoomTo(areas[0]);
+  }
+
+  function load() {
+    // /api/config answers without a token, purely to say whether one is wanted.
+    fetch("/api/config")
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error("no api")); })
+      .then(function (cfg) {
+        if (cfg.needsToken && !token) {
+          setMode(true);
+          showTokenBox("This server needs an access token before it will show anything.");
+          return null;
+        }
+        return apiJson("/api/areas").then(function (res) {
+          setMode(true);
+          el("tokenBox").hidden = true;
+          adoptFromServer(res.areas);
+          if (areas.length) zoomTo(areas[areas.length - 1]);
+        });
+      })
+      .catch(function (e) {
+        if (e && e.status === 401) {
+          forgetToken();
+          setMode(true);
+          showTokenBox("That token was not accepted. Try again.");
+          return;
+        }
+        loadLocalAreas();
+      });
+  }
+
+  // ---- area model -------------------------------------------------------
+
+  function addArea(latlngs, name, level, parent) {
+    var area = {
+      id: nextId++,
+      name: name || "Area " + nextId,
+      level: LEVELS[level] ? level : "NEIGHBORHOOD",
+      parent: parent || "",
+      latlngs: latlngs
+    };
+    area.poly = L.polygon(latlngs, {
+      color: LEVEL_COLOR[area.level], weight: 2, opacity: 0.9,
+      fillColor: LEVEL_COLOR[area.level], fillOpacity: 0.12
+    }).addTo(areaLayer);
+    area.poly.on("click", function (ev) { L.DomEvent.stop(ev); select(area.id); });
+    areas.push(area);
+    return area;
+  }
+
+  function removeArea(area) {
+    areaLayer.removeLayer(area.poly);
+    areas = areas.filter(function (a) { return a !== area; });
+    areas.forEach(function (a) { if (a.parent === area.name) a.parent = ""; });
+  }
+
+  function byId(id) { return areas.filter(function (a) { return a.id === id; })[0]; }
+
+  function zoomTo(area) { map.fitBounds(area.poly.getBounds(), { padding: [40, 40] }); }
+
+  // ---- editing handles --------------------------------------------------
+
+  function clearHandles() { editLayer.clearLayers(); }
+
+  function drawHandles(area) {
+    clearHandles();
+    var pts = area.latlngs;
+    pts.forEach(function (p, i) {
+      var m = L.circleMarker(p, {
+        radius: 7, color: "#fff", weight: 2,
+        fillColor: LEVEL_COLOR[area.level], fillOpacity: 1
+      }).addTo(editLayer);
+      m.on("mousedown", function () { startDrag(area, i, m); });
+      m.on("contextmenu", function (ev) {
+        L.DomEvent.stop(ev);
+        if (area.latlngs.length <= 3) { status("An area needs at least three corners", "bad"); return; }
+        area.latlngs.splice(i, 1);
+        refresh(area);
+      });
+    });
+    for (var i = 0; i < pts.length; i++) {
+      (function (index) {
+        var a = pts[index], b = pts[(index + 1) % pts.length];
+        var mid = L.latLng((a.lat + b.lat) / 2, (a.lng + b.lng) / 2);
+        var m = L.circleMarker(mid, {
+          radius: 4, color: LEVEL_COLOR[area.level], weight: 2,
+          fillColor: "#fff", fillOpacity: 1
+        }).addTo(editLayer);
+        m.on("mousedown", function () {
+          area.latlngs.splice(index + 1, 0, mid);
+          refresh(area);
+          startDrag(area, index + 1, null);
+        });
+      })(i);
+    }
+  }
+
+  var dragging = null;
+  function startDrag(area, index) {
+    dragging = { area: area, index: index };
+    map.dragging.disable();
+  }
+  map.on("mousemove", function (ev) {
+    if (!dragging) return;
+    dragging.area.latlngs[dragging.index] = ev.latlng;
+    dragging.area.poly.setLatLngs(dragging.area.latlngs);
+  });
+  map.on("mouseup", function () {
+    if (!dragging) return;
+    var area = dragging.area;
+    dragging = null;
+    map.dragging.enable();
+    refresh(area);
+  });
+
+  function refresh(area) {
+    area.poly.setLatLngs(area.latlngs);
+    area.poly.setStyle({ color: LEVEL_COLOR[area.level], fillColor: LEVEL_COLOR[area.level] });
+    if (selectedId === area.id) { drawHandles(area); showEditor(area); }
+    renderList();
+    persist(area);
+  }
+
+  // ---- selection and the form ------------------------------------------
+
+  function select(id) {
+    selectedId = id;
+    var area = byId(id);
+    if (!area) { clearHandles(); el("editor").hidden = true; renderList(); return; }
+    drawHandles(area);
+    showEditor(area);
+    renderList();
+  }
+
+  function showEditor(area) {
+    el("editor").hidden = false;
+    el("fName").value = area.name;
+    el("fLevel").value = area.level;
+
+    var parentSelect = el("fParent");
+    parentSelect.innerHTML = "<option value=''>Nothing</option>";
+    areas.filter(function (a) { return a.id !== area.id; }).forEach(function (a) {
+      var o = document.createElement("option");
+      o.value = a.name; o.textContent = a.name + " (" + LEVELS[a.level] + ")";
+      parentSelect.appendChild(o);
+    });
+    parentSelect.value = area.parent || "";
+
+    var cells = cellCount(area.latlngs);
+    var sqMiles = areaSquareMiles(area.latlngs);
+    var cellWord = cells === 1 ? " map cell" : " map cells";
+    var note = cells > CELL_LIMIT
+      ? "<span class='bad'>" + cells + cellWord + " — over the " + CELL_LIMIT + " the app allows. Split it up.</span>"
+      : cells > 120
+        ? "<span class='warn'>" + cells + cellWord + " — expect a long download.</span>"
+        : cells + cellWord + " to download";
+    el("fStats").innerHTML =
+      area.latlngs.length + " corners · " + fmtArea(sqMiles) + "<br>" + note;
+  }
+
+  el("fName").addEventListener("input", function () {
+    var a = byId(selectedId); if (!a) return;
+    var old = a.name;
+    a.name = el("fName").value;
+    // Children point at their parent by name, so a rename has to follow them.
+    areas.forEach(function (x) { if (x.parent === old) { x.parent = a.name; persist(x); } });
+    renderList(); persist(a);
+  });
+  el("fLevel").addEventListener("change", function () {
+    var a = byId(selectedId); if (!a) return;
+    a.level = el("fLevel").value;
+    refresh(a);
+  });
+  el("fParent").addEventListener("change", function () {
+    var a = byId(selectedId); if (!a) return;
+    a.parent = el("fParent").value; renderList(); persist(a);
+  });
+  el("btnZoom").addEventListener("click", function () {
+    var a = byId(selectedId); if (a) zoomTo(a);
+  });
+  el("btnDelete").addEventListener("click", function () {
+    var a = byId(selectedId); if (!a) return;
+    removeArea(a);
+    forget(a);
+    selectedId = null; clearHandles(); el("editor").hidden = true;
+    renderList();
+    status("Deleted " + a.name);
+  });
+
+  function renderList() {
+    var list = el("areaList");
+    list.innerHTML = "";
+    areas.forEach(function (a) {
+      var li = document.createElement("li");
+      li.className = "area" + (a.id === selectedId ? " selected" : "");
+      var cells = cellCount(a.latlngs);
+      li.innerHTML =
+        "<div class='name'><span class='swatch' style='background:" + LEVEL_COLOR[a.level] + "'></span>" +
+        escapeHtml(a.name) + "</div>" +
+        "<div class='meta'>" + LEVELS[a.level] + (a.parent ? " in " + escapeHtml(a.parent) : "") +
+        " · " + fmtArea(areaSquareMiles(a.latlngs)) + " · " + cells + (cells === 1 ? " cell" : " cells") + "</div>";
+      li.addEventListener("click", function () { select(a.id); });
+      list.appendChild(li);
+    });
+    el("emptyNote").hidden = areas.length > 0;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  // ---- drawing a new outline -------------------------------------------
+
+  el("btnNew").addEventListener("click", function () {
+    selectedId = null; clearHandles(); el("editor").hidden = true; renderList();
+    drawing = { latlngs: [], line: L.polyline([], { color: "#b3261e", weight: 3, dashArray: "6 6" }).addTo(editLayer) };
+    el("btnFinish").disabled = false;
+    el("btnCancel").disabled = false;
+    el("btnNew").disabled = true;
+    status("Click the map to drop corners, then Finish");
+  });
+
+  function endDrawing() {
+    if (drawing) { editLayer.removeLayer(drawing.line); drawing.line = null; }
+    drawing = null;
+    el("btnFinish").disabled = true;
+    el("btnCancel").disabled = true;
+    el("btnNew").disabled = false;
+  }
+
+  el("btnCancel").addEventListener("click", function () { endDrawing(); clearHandles(); status(""); });
+
+  el("btnFinish").addEventListener("click", function () {
+    if (!drawing || drawing.latlngs.length < 3) { status("Three corners at least", "bad"); return; }
+    var pts = drawing.latlngs.slice();
+    endDrawing();
+    var area = addArea(pts, "", "NEIGHBORHOOD", "");
+    area.name = "Area " + areas.length;
+    select(area.id);
+    persist(area);
+    status("Name it on the left");
+    el("fName").focus();
+    el("fName").select();
+  });
+
+  map.on("click", function (ev) {
+    if (!drawing) return;
+    drawing.latlngs.push(ev.latlng);
+    drawing.line.setLatLngs(drawing.latlngs.concat(drawing.latlngs.length > 2 ? [drawing.latlngs[0]] : []));
+    status(drawing.latlngs.length + " corners — Finish when it closes the shape");
+  });
+  map.on("dblclick", function (ev) {
+    if (drawing) { L.DomEvent.stop(ev); el("btnFinish").click(); }
+  });
+
+  // ---- import and export ------------------------------------------------
+
+  el("btnExport").addEventListener("click", function () {
+    if (!areas.length) { status("Nothing to export yet", "bad"); return; }
+    var features = areas.map(function (a) {
+      var ring = a.latlngs.map(function (p) { return [round(p.lng), round(p.lat)]; });
+      ring.push(ring[0]);
+      return {
+        type: "Feature",
+        properties: { kind: "area", name: a.name, level: a.level, parent: a.parent || undefined },
+        geometry: { type: "Polygon", coordinates: [ring] }
+      };
+    });
+    var blob = new Blob([JSON.stringify({ type: "FeatureCollection", features: features }, null, 2)],
+                        { type: "application/geo+json" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "streetsweep-areas.geojson";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+    status("Exported " + areas.length + " area" + (areas.length === 1 ? "" : "s"));
+  });
+
+  function round(v) { return Math.round(v * 1e6) / 1e6; }
+
+  el("btnImport").addEventListener("click", function () { el("fileInput").click(); });
+  el("fileInput").addEventListener("change", function (ev) {
+    var file = ev.target.files && ev.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try { importGeoJson(JSON.parse(reader.result)); }
+      catch (e) { status("That file is not GeoJSON", "bad"); }
+      el("fileInput").value = "";
+    };
+    reader.readAsText(file);
+  });
+
+  function importGeoJson(doc) {
+    var features = (doc && doc.features) || [];
+    var added = 0, context = 0;
+    contextLayer.clearLayers();
+
+    if (backend.online) {
+      // Let the server store the areas, then take back exactly what it kept.
+      apiJson("/api/areas/import", "POST", doc)
+        .then(function (res) {
+          var kept = (res && res.areas) || [];
+          return apiJson("/api/areas").then(function (all) {
+            adoptFromServer(all.areas);
+            if (kept.length) zoomTo(areas[areas.length - 1]);
+            return kept.length;
+          });
+        })
+        .then(function (count) {
+          var lines = drawContext(features);
+          status("Loaded " + count + " area" + (count === 1 ? "" : "s") +
+                 (lines ? " and " + lines + " driven streets for reference" : ""));
+        })
+        .catch(function (e) { status("Import failed: " + e.message, "bad"); });
+      return;
+    }
+
+    features.forEach(function (f) {
+      var g = f.geometry || {}, p = f.properties || {};
+      if (g.type === "Polygon" && (p.kind === "area" || p.kind === undefined)) {
+        var ring = g.coordinates[0] || [];
+        var pts = ring.map(function (c) { return L.latLng(c[1], c[0]); });
+        // GeoJSON rings repeat the first point; the app's polygons do not.
+        if (pts.length > 1 && pts[0].equals(pts[pts.length - 1])) pts.pop();
+        if (pts.length < 3) return;
+        addArea(pts, p.name, normaliseLevel(p.level), p.parent);
+        added++;
+      } else if (g.type === "LineString" || g.type === "Point") {
+        context += drawContextFeature(g);
+      }
+    });
+    renderList();
+    saveLocal();
+    if (added) zoomTo(areas[areas.length - 1]);
+    else if (context) map.fitBounds(contextLayer.getBounds(), { padding: [40, 40] });
+    status("Loaded " + added + " area" + (added === 1 ? "" : "s") +
+           (context ? " and " + context + " driven streets for reference" : ""));
+  }
+
+  /** Driven streets and marked spots from an app export, drawn underneath for reference. */
+  function drawContextFeature(g) {
+    if (g.type === "LineString") {
+      L.polyline(g.coordinates.map(function (c) { return [c[1], c[0]]; }),
+                 { color: "#0b6b57", weight: 3, opacity: 0.55 }).addTo(contextLayer);
+      return 1;
+    }
+    if (g.type === "Point") {
+      L.circleMarker([g.coordinates[1], g.coordinates[0]],
+                     { radius: 4, color: "#b3261e", fillColor: "#b3261e", fillOpacity: 1 }).addTo(contextLayer);
+    }
+    return 0;
+  }
+
+  function drawContext(features) {
+    var lines = 0;
+    features.forEach(function (f) {
+      var g = f.geometry || {};
+      if (g.type === "LineString" || g.type === "Point") lines += drawContextFeature(g);
+    });
+    return lines;
+  }
+
+  function normaliseLevel(level) {
+    if (typeof level === "number") return ["NEIGHBORHOOD", "CITY", "METRO"][level] || "NEIGHBORHOOD";
+    return LEVELS[level] ? level : "NEIGHBORHOOD";
+  }
+
+  // ---- coverage tab ------------------------------------------------------
+  // What the phone has reported: which streets it has driven and how far each area has got.
+
+  var coverageLayer = L.layerGroup();
+  var coverageLoaded = false;
+
+  function completionColor(percent) {
+    if (percent >= 95) return "#0b6b57";
+    if (percent >= 60) return "#4c9a80";
+    if (percent >= 25) return "#b8762b";
+    return "#8a8399";
+  }
+
+  function setTab(name) {
+    var coverage = name === "coverage";
+    el("tabDraw").className = "tab" + (coverage ? "" : " active");
+    el("tabCoverage").className = "tab" + (coverage ? " active" : "");
+    el("drawPanel").hidden = coverage;
+    el("coveragePanel").hidden = !coverage;
+
+    if (coverage) {
+      if (drawing) { endDrawing(); }
+      clearHandles();
+      map.removeLayer(areaLayer);
+      map.removeLayer(editLayer);
+      coverageLayer.addTo(map);
+      if (!coverageLoaded) loadCoverage();
+    } else {
+      map.removeLayer(coverageLayer);
+      areaLayer.addTo(map);
+      editLayer.addTo(map);
+      if (selectedId) select(selectedId);
+    }
+  }
+
+  el("tabDraw").addEventListener("click", function () { setTab("draw"); });
+  el("tabCoverage").addEventListener("click", function () { setTab("coverage"); });
+  el("btnRefreshCoverage").addEventListener("click", function () { coverageLoaded = false; loadCoverage(); });
+
+  function loadCoverage() {
+    el("covSummary").textContent = "Loading…";
+    apiJson("/api/coverage").then(function (data) {
+      coverageLoaded = true;
+      drawCoverage(data);
+      renderCoverage(data);
+    }).catch(function (e) {
+      if (e && e.status === 401) {
+        forgetToken();
+        showTokenBox("That token was not accepted. Try again.");
+        el("covSummary").textContent = "Locked.";
+        return;
+      }
+      el("covSummary").innerHTML = "<span class='bad'>Could not reach the server: " + escapeHtml(e.message) + "</span>";
+    });
+  }
+
+  function drawCoverage(data) {
+    coverageLayer.clearLayers();
+    var bounds = null;
+
+    (data.edges || []).forEach(function (e) {
+      if (!e.shape || e.shape.length < 2) return;
+      L.polyline(e.shape, { color: "#0b6b57", weight: 4, opacity: 0.85 }).addTo(coverageLayer);
+    });
+
+    (data.areas || []).forEach(function (a) {
+      if (!a.polygon || a.polygon.length < 3) return;
+      var percent = percentOf(a.stats);
+      var poly = L.polygon(a.polygon, {
+        color: completionColor(percent), weight: 2, fillOpacity: 0.06, fillColor: completionColor(percent)
+      }).addTo(coverageLayer);
+      poly.bindTooltip(a.name + " · " + percent + "%", { permanent: false });
+      bounds = bounds ? bounds.extend(poly.getBounds()) : poly.getBounds();
+    });
+
+    (data.pois || []).forEach(function (p) {
+      L.circleMarker([p.lat, p.lng], { radius: 4, color: "#b3261e", fillColor: "#b3261e", fillOpacity: 1 })
+        .bindTooltip(p.note || "Marked spot").addTo(coverageLayer);
+    });
+
+    if (bounds) map.fitBounds(bounds, { padding: [40, 40] });
+  }
+
+  function percentOf(stats) {
+    if (!stats || !stats.metersTotal) return 0;
+    return Math.round((stats.metersDriven / stats.metersTotal) * 100);
+  }
+
+  function renderCoverage(data) {
+    var areas = data.areas || [];
+    var drives = data.drives || [];
+    var totals = data.totals || {};
+
+    var streetsDone = areas.reduce(function (n, a) { return n + (a.stats.done || 0); }, 0);
+    var streetsTotal = areas.reduce(function (n, a) { return n + (a.stats.total || 0); }, 0);
+    var drivenMeters = areas.reduce(function (n, a) { return n + (a.stats.metersDriven || 0); }, 0);
+    var totalMeters = areas.reduce(function (n, a) { return n + (a.stats.metersTotal || 0); }, 0);
+    var overall = totalMeters ? Math.round((drivenMeters / totalMeters) * 100) : 0;
+    var driveMiles = drives.reduce(function (n, d) { return n + (d.distanceMeters || 0); }, 0);
+    var freshMiles = drives.reduce(function (n, d) { return n + (d.newMeters || 0); }, 0);
+    var hours = drives.reduce(function (n, d) { return n + Math.max(0, (d.endedAt || d.startedAt) - d.startedAt); }, 0);
+
+    el("covSummary").innerHTML = areas.length === 0 && drives.length === 0
+      ? "Nothing sent from the phone yet."
+      : "<div class='big'>" + overall + "%</div>" +
+        "<div class='bar'><span style='width:" + Math.min(100, overall) + "%'></span></div>" +
+        "<p class='coords' style='margin:8px 0 0'>" +
+          streetsDone + " of " + streetsTotal + " streets · " +
+          fmtDistance(drivenMeters) + " of " + fmtDistance(totalMeters) + "<br>" +
+          drives.length + " drives · " + fmtDistance(driveMiles) + " · " + fmtDuration(hours) + " driving<br>" +
+          fmtDistance(freshMiles) + " of streets covered for the first time<br>" +
+          (totals.edges || 0) + " segments stored" +
+          (totals.edgesShown < totals.edges ? " (" + totals.edgesShown + " drawn)" : "") +
+        "</p>";
+
+    var list = el("covAreas");
+    list.innerHTML = "";
+    areas.forEach(function (a) {
+      var percent = percentOf(a.stats);
+      var li = document.createElement("li");
+      li.className = "area";
+      li.innerHTML =
+        "<div class='name'><span class='swatch' style='background:" + completionColor(percent) + "'></span>" +
+          escapeHtml(a.name) + " · " + percent + "%</div>" +
+        "<div class='bar'><span style='width:" + Math.min(100, percent) + "%'></span></div>" +
+        "<div class='meta'>" + (a.stats.done || 0) + " of " + (a.stats.total || 0) + " streets · " +
+          fmtDistance(a.stats.metersDriven || 0) + " of " + fmtDistance(a.stats.metersTotal || 0) +
+          ((a.stats.excluded || 0) ? " · " + a.stats.excluded + " excluded" : "") + "</div>";
+      li.addEventListener("click", function () {
+        if (a.polygon && a.polygon.length >= 3) map.fitBounds(L.polygon(a.polygon).getBounds(), { padding: [40, 40] });
+      });
+      list.appendChild(li);
+    });
+    el("covAreasEmpty").hidden = areas.length > 0;
+
+    var driveList = el("covDrives");
+    driveList.innerHTML = "";
+    drives.slice(0, 10).forEach(function (d) {
+      var li = document.createElement("li");
+      li.className = "area";
+      var when = new Date(d.startedAt);
+      li.innerHTML =
+        "<div class='name'>" + when.toLocaleDateString() + " " +
+          when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + "</div>" +
+        "<div class='meta'>" + fmtDistance(d.distanceMeters || 0) + " · " +
+          fmtDuration(Math.max(0, (d.endedAt || d.startedAt) - d.startedAt)) +
+          ((d.newMeters || 0) > 0 ? " · +" + fmtDistance(d.newMeters) + " new" : "") +
+          (d.trigger ? " · " + escapeHtml(String(d.trigger).toLowerCase()) : "") + "</div>";
+      driveList.appendChild(li);
+    });
+  }
+
+  // ---- place search (Nominatim, one request per submit) ------------------
+
+  el("searchForm").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var q = el("searchBox").value.trim();
+    if (!q) return;
+    status("Looking up " + q + "…");
+    fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(q), {
+      headers: { "Accept": "application/json" }
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (results) {
+        if (!results.length) { status("No such place", "bad"); return; }
+        var r = results[0];
+        if (r.boundingbox) {
+          map.fitBounds([[+r.boundingbox[0], +r.boundingbox[2]], [+r.boundingbox[1], +r.boundingbox[3]]]);
+        } else {
+          map.setView([+r.lat, +r.lon], 15);
+        }
+        status(r.display_name.split(",").slice(0, 2).join(","));
+      })
+      .catch(function () { status("Lookup failed — check your connection", "bad"); });
+  });
+
+  load();
+  renderList();
+})();
+</script>
+</body>
+</html>

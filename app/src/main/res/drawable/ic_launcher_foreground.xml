@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Sweep motion lines -->
+    <path
+        android:pathData="M28,40 L36,40 M22,48 L31,48 M24,56 L31,56"
+        android:strokeColor="#FFF3DC"
+        android:strokeLineCap="round"
+        android:strokeWidth="3" />
+    <!-- Broom, tilted -->
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:rotation="35">
+        <!-- Handle -->
+        <path
+            android:pathData="M54,29 L54,58"
+            android:strokeColor="#FFF3DC"
+            android:strokeLineCap="round"
+            android:strokeWidth="6" />
+        <!-- Ferrule band -->
+        <path
+            android:fillColor="#F2B84B"
+            android:pathData="M44,58 h20 v6 h-20 z" />
+        <!-- Bristles -->
+        <path
+            android:fillColor="#FFF3DC"
+            android:pathData="M42,64 L66,64 L69,82 L39,82 Z" />
+        <!-- Bristle separators -->
+        <path
+            android:pathData="M48,66 L47,80 M54,66 L54,80 M60,66 L61,80"
+            android:strokeColor="#0B6B57"
+            android:strokeWidth="1.5" />
+    </group>
+</vector>

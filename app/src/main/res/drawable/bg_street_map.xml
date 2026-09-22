@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="360dp"
+    android:height="360dp"
+    android:viewportWidth="360"
+    android:viewportHeight="360">
+    <path
+        android:fillColor="#EEF3F1"
+        android:pathData="M0,0h360v360h-360z" />
+    <!-- blocks -->
+    <path
+        android:fillColor="#E3EBE7"
+        android:pathData="M18,18h70v54h-70z M104,18h90v54h-90z M210,18h60v54h-60z M286,18h56v54h-56z M18,88h70v84h-70z M104,88h90v84h-90z M210,88h132v40h-132z M210,144h132v28h-132z M18,188h176v60h-176z M210,188h60v60h-60z M286,188h56v60h-56z M18,264h70v78h-70z M104,264h90v78h-90z M210,264h132v78h-132z" />
+    <!-- minor streets -->
+    <path
+        android:pathData="M96,0 V360 M202,0 V360 M278,0 V360 M0,80 H360 M0,136 H360 M0,256 H360"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="6" />
+    <!-- major streets -->
+    <path
+        android:pathData="M0,180 H360 M0,180 H360"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="10" />
+    <path
+        android:pathData="M0,180 H360"
+        android:strokeColor="#CBD8D3"
+        android:strokeWidth="1" />
+    <!-- diagonal avenue -->
+    <path
+        android:pathData="M0,330 L360,30"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="12" />
+    <path
+        android:pathData="M0,330 L360,30"
+        android:strokeColor="#D4E0DB"
+        android:strokeWidth="1.5" />
+    <!-- parkway -->
+    <path
+        android:pathData="M0,300 C80,280 120,330 200,300 C260,280 300,260 360,270"
+        android:strokeColor="#F2B84B"
+        android:strokeAlpha="0.28"
+        android:strokeWidth="7" />
+    <!-- water -->
+    <path
+        android:fillColor="#CFE3DD"
+        android:pathData="M300,0 C320,40 340,50 360,0 Z" />
+</vector>
