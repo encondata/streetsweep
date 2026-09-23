@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources xmlns:tools="http://schemas.android.com/tools">
+<resources>
 
     <style name="Theme.StreetSweep" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/brand_window</item>
@@ -8,7 +8,6 @@
     <style name="Theme.StreetSweep.Splash" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/brand_window</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>
-        <item name="android:windowSplashScreenBrandingImage" tools:targetApi="31">@drawable/splash_wordmark</item>
         <item name="postSplashScreenTheme">@style/Theme.StreetSweep</item>
     </style>
 </resources>

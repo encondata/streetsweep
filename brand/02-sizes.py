@@ -77,16 +77,32 @@ SPLASH_DP = {"mdpi": 288, "hdpi": 432, "xhdpi": 576, "xxhdpi": 864, "xxxhdpi": 1
 for name, px in SPLASH_DP.items():
     save(fit(mark, px, float(SPLASH_PIN_DP) / SPLASH_CANVAS_DP), APP, "drawable-" + name, "splash_icon.png")
 
-# The name only. The strapline cannot work here: at any width the branding slot allows
-# it lands about five density-independent pixels tall, which is a smudge rather than
-# words -- it would need the wordmark to be 322dp wide to reach even eight.
-for name, scale in (("mdpi", 1), ("hdpi", 1.5), ("xhdpi", 2), ("xxhdpi", 3), ("xxxhdpi", 4)):
-    w = int(round(SPLASH_WORD_DP * scale))
-    h = max(1, int(round(word.height * w / word.width)))
-    save(word.resize((w, h), Image.LANCZOS), APP, "drawable-" + name, "splash_wordmark.png")
-    save(wordL.resize((w, h), Image.LANCZOS), APP, "drawable-night-" + name, "splash_wordmark.png")
-print("splash: pin %ddp of %ddp, name %ddp wide (%.0fdp tall)"
-      % (SPLASH_PIN_DP, SPLASH_CANVAS_DP, SPLASH_WORD_DP, SPLASH_WORD_DP * word.height / word.width))
+# The lockup the app draws itself while it starts: the pin with the name directly
+# beneath it, the way the logo was drawn. One nodpi copy per tone rather than five
+# densities, because it is scaled to a fraction of the screen width at runtime.
+def stack(top, bottom, gap_frac=0.05):
+    w = max(top.width, bottom.width)
+    gap = int(round(w * gap_frac))
+    canvas = Image.new("RGBA", (w, top.height + gap + bottom.height), (0, 0, 0, 0))
+    canvas.alpha_composite(top, ((w - top.width) // 2, 0))
+    canvas.alpha_composite(bottom, ((w - bottom.width) // 2, top.height + gap))
+    return canvas
+
+LOCKUP_PX = 1500     # covers 84% of the widest phone at the highest density
+for src, folder in ((word_full, "drawable-nodpi"), (wordL_full, "drawable-night-nodpi")):
+    lock = stack(mark, src)
+    h = max(1, int(round(lock.height * LOCKUP_PX / lock.width)))
+    out = lock.resize((LOCKUP_PX, h), Image.LANCZOS)
+    # A palette cuts this from 1.3 MB to about 200 KB. Checked against the full-colour
+    # version at the size a phone actually draws it: no banding to see.
+    out = out.quantize(colors=256, method=Image.FASTOCTREE, dither=Image.FLOYDSTEINBERG)
+    path = os.path.join(APP, folder, "splash_lockup.png")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    out.save(path, optimize=True)
+    print("  lockup %-24s %dx%d  %d KB" % (folder, LOCKUP_PX, h, os.path.getsize(path) // 1024))
+
+# No wordmark is generated for the system splash's branding slot any more: the name
+# lives in the lockup above, where it has room to be read.
 
 # ------------------------------------------------------------------- web icons
 WHITE = (255, 255, 255, 255)
