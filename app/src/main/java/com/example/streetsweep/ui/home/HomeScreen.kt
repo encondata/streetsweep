@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material3.HorizontalDivider
 import com.example.streetsweep.data.RouteState
+import com.example.streetsweep.ui.common.ProgressRing
 import com.example.streetsweep.domain.GuidanceMode
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Flag
@@ -678,29 +679,38 @@ private fun StatusCard(
                     Spacer(Modifier.width(8.dp))
                     Text("${a.name}: downloading streets ${a.area.chunksDone}/${a.area.chunksTotal}", style = MaterialTheme.typography.bodySmall)
                 }
-                else -> {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                "${a.name} · ${a.stats.done} of ${a.stats.total} streets · ${a.stats.percent}%",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Text(
-                                "${a.level.label} · ${Geo.formatDistance(a.stats.metersDriven)} of ${Geo.formatDistance(a.stats.metersTotal)}" +
-                                    (if (a.stats.partial > 0) " · ${a.stats.partial} partly" else "") +
-                                    (if (a.stats.excluded > 0) " · ${a.stats.excluded} excluded" else "") +
-                                    (a.area.lastError?.let { " · download failed" } ?: ""),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        AddMenuButton(outlined = false, onAddArea = onAddArea, onExcludeShape = onExcludeShape)
+                else -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    // The ring carries what is left as well as what is done, which a bare
+                    // percentage does not.
+                    ProgressRing(
+                        fraction = (a.stats.percent / 100f).coerceIn(0f, 1f),
+                        diameter = 58.dp,
+                        thickness = 7.dp,
+                    ) {
+                        Text(
+                            "${a.stats.percent}%",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
                     }
-                    LinearProgressIndicator(
-                        progress = { (a.stats.percent / 100f).coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    )
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(a.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "${a.stats.done} of ${a.stats.total} streets · ${a.level.label}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            "${Geo.formatDistance(a.stats.metersDriven)} of ${Geo.formatDistance(a.stats.metersTotal)}" +
+                                (if (a.stats.partial > 0) " · ${a.stats.partial} partly" else "") +
+                                (if (a.stats.excluded > 0) " · ${a.stats.excluded} excluded" else "") +
+                                (a.area.lastError?.let { " · download failed" } ?: ""),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    AddMenuButton(outlined = false, onAddArea = onAddArea, onExcludeShape = onExcludeShape)
                 }
             }
         }

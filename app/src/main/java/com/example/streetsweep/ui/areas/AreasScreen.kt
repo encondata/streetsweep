@@ -30,6 +30,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.ui.draw.clip
+import com.example.streetsweep.ui.common.ProgressRing
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -138,7 +142,18 @@ fun AreasScreen(
                                 Text(a.level.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                             }
                             if (!a.area.isDownloading) {
-                                Text("${a.stats.percent}%", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                                ProgressRing(
+                                    fraction = (a.stats.percent / 100f).coerceIn(0f, 1f),
+                                    diameter = 52.dp,
+                                    thickness = 6.dp,
+                                ) {
+                                    Text(
+                                        "${a.stats.percent}%",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                                Spacer(Modifier.width(4.dp))
                             }
                             var menu by remember { mutableStateOf(false) }
                             Box {
@@ -193,10 +208,30 @@ fun AreasScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                                LinearProgressIndicator(
-                                    progress = { (a.stats.percent / 100f).coerceIn(0f, 1f) },
-                                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                                )
+                                // What is left, and a way straight to it. The street list
+                                // was previously only in the overflow menu.
+                                Spacer(Modifier.height(10.dp))
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable { onOpenStreets(a.area.id) }
+                                        .padding(vertical = 8.dp, horizontal = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        if (a.stats.remaining == 0) "Every street driven" else
+                                            "${a.stats.remaining} street${if (a.stats.remaining == 1) "" else "s"} remaining",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                        contentDescription = "Street list",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
                         }
                     }

@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Settings
@@ -36,12 +37,15 @@ import com.example.streetsweep.ui.settings.SettingsScreen
 
 private enum class Destination(val route: String, val label: String, val icon: ImageVector) {
     Home("home", "Map", Icons.Default.Map),
-    Sessions("sessions", "Drives", Icons.AutoMirrored.Filled.List),
     Areas("areas", "Areas", Icons.Default.Layers),
+    Progress("progress", "Progress", Icons.Default.BarChart),
     Settings("settings", "Settings", Icons.Default.Settings),
 }
 
 private const val SESSION_ROUTE = "session/{id}"
+
+/** Screens that hang off Progress, so its tab stays lit while you are in them. */
+private val DRIVE_ROUTES = setOf("drives", SESSION_ROUTE, "places")
 
 /** Root of the app's UI: bottom navigation between the map, the drive list and settings. */
 @Composable
@@ -65,7 +69,7 @@ fun StreetSweepApp() {
                 Destination.entries.forEach { dest ->
                     NavigationBarItem(
                         selected = currentRoute == dest.route ||
-                            (dest == Destination.Sessions && currentRoute == SESSION_ROUTE),
+                            (dest == Destination.Progress && currentRoute in DRIVE_ROUTES),
                         onClick = { navigateTop(dest) },
                         icon = { Icon(dest.icon, contentDescription = null) },
                         label = { Text(dest.label) },
@@ -89,14 +93,16 @@ fun StreetSweepApp() {
             composable(Destination.Home.route) {
                 HomeScreen(onOpenSettings = { navigateTop(Destination.Settings) })
             }
-            composable(Destination.Sessions.route) {
+            composable(Destination.Progress.route) {
+                StatsScreen(onOpenDrives = { navController.navigate("drives") })
+            }
+            composable("drives") {
                 SessionsScreen(
+                    onBack = { navController.popBackStack() },
                     onOpenSession = { id -> navController.navigate("session/$id") },
                     onOpenPlaces = { navController.navigate("places") },
-                    onOpenStats = { navController.navigate("stats") },
                 )
             }
-            composable("stats") { StatsScreen(onBack = { navController.popBackStack() }) }
             composable("places") {
                 PlacesScreen(onBack = { navController.popBackStack() }, onShowOnMap = { navigateTop(Destination.Home) })
             }

@@ -7,10 +7,14 @@ import java.time.format.FormatStyle
 
 object Format {
     private val dateTime: DateTimeFormatter = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)
+    private val date: DateTimeFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
     private val time: DateTimeFormatter = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
 
     fun dateTime(epochMillis: Long): String =
         dateTime.format(Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault()))
+
+    fun date(epochMillis: Long): String =
+        date.format(Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault()))
 
     fun time(epochMillis: Long): String =
         time.format(Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault()))

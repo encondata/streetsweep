@@ -57,8 +57,8 @@ import com.example.streetsweep.ui.map.TrackMapController
 @Composable
 fun SessionsScreen(
     onOpenSession: (Long) -> Unit,
+    onBack: (() -> Unit)? = null,
     onOpenPlaces: () -> Unit = {},
-    onOpenStats: () -> Unit = {},
     viewModel: SessionsViewModel = containerViewModel { c, _ -> SessionsViewModel(c) },
 ) {
     val sessions by viewModel.sessions.collectAsStateWithLifecycle()
@@ -70,8 +70,14 @@ fun SessionsScreen(
         topBar = {
             TopAppBar(
                 title = { Text("Drives") },
+                navigationIcon = {
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    }
+                },
                 actions = {
-                    IconButton(onClick = onOpenStats) { Icon(Icons.Default.InsertChart, contentDescription = "Progress") }
                     IconButton(onClick = onOpenPlaces) { Icon(Icons.Default.Flag, contentDescription = "Marked spots") }
                 },
             )

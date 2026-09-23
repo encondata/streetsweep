@@ -20,10 +20,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * How long the logo stays up after the launcher has handed over. Short of this it reads
- * as a flicker rather than as the app opening; much past it and it is in the way.
+ * How long the opening screen stays up after the launcher has handed over. There are three
+ * lines of text on it now, and they fade in a beat after the logo, so it needs longer than
+ * a bare mark would to be read rather than glimpsed.
  */
-private const val LOCKUP_MS = 900L
+private const val LOCKUP_MS = 1_500L
 
 /** If the first settings read ever stalls, show the app anyway rather than hold the logo. */
 private const val GIVE_UP_MS = 4_000L
