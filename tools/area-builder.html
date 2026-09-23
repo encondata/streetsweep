@@ -3,15 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>StreetSweep Area Builder</title>
+<title>StreetSweep</title>
 <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/site.webmanifest">
 <meta name="theme-color" content="#1d3557">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <script>
 // Runs before the first paint, so the page never flashes the wrong theme. The palette
 // is keyed on data-theme alone, and "system" is resolved here rather than in CSS, which
@@ -71,6 +69,8 @@
   });
 })();
 </script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
   :root {
     color-scheme: light;
@@ -139,6 +139,20 @@
     --shadow-2: 0 10px 26px rgba(0,0,0,.50);
     --shadow-accent: 0 3px 12px rgba(30,138,40,.45);
   }
+  :root {
+    --rail: #0d2136;
+    --rail-line: #17304a;
+    --rail-ink: #93a9c0;
+    --rail-ink-strong: #ffffff;
+    --rail-hover: #16304a;
+  }
+  :root[data-theme="dark"] {
+    --rail: #061320;
+    --rail-line: #142738;
+    --rail-ink: #7d94ab;
+    --rail-ink-strong: #ffffff;
+    --rail-hover: #12263a;
+  }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
@@ -146,163 +160,159 @@
     background: var(--ground);
     color: var(--ink);
     display: grid;
-    grid-template-columns: 348px 1fr;
+    grid-template-columns: 68px 1fr;
     height: 100%;
+    overflow: hidden;
     -webkit-font-smoothing: antialiased;
   }
-  #panel {
-    position: relative;
-    background: var(--grad-panel);
-    border-right: 1px solid var(--line);
-    overflow-y: auto;
-    padding: 18px 16px 28px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    scrollbar-width: thin;
-    scrollbar-color: var(--line-strong) transparent;
+
+  /* ---- the rail ---------------------------------------------------------- */
+  #rail {
+    background: var(--rail);
+    border-right: 1px solid var(--rail-line);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 12px 0; gap: 4px;
   }
-  /* The sweep, as a three-pixel rule: navy at the start, green by the end. */
-  #panel::before {
-    content: ""; position: sticky; top: -18px; z-index: 2;
-    display: block; height: 3px; margin: -18px -16px 0;
-    background: var(--grad-rule);
+  #rail .mark { width: 36px; height: 36px; margin-bottom: 14px; }
+  .railbtn {
+    width: 52px; padding: 9px 0 7px; border: none; background: none; cursor: pointer;
+    border-radius: 12px; color: var(--rail-ink); display: grid; justify-items: center; gap: 3px;
+    font: 600 9px/1.1 var(--ui); letter-spacing: .02em; box-shadow: none;
+    transition: background .15s, color .15s;
   }
-  #panel::-webkit-scrollbar { width: 10px; }
-  #panel::-webkit-scrollbar-thumb {
+  .railbtn svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+  .railbtn:hover { background: var(--rail-hover); color: var(--rail-ink-strong); box-shadow: none; transform: none; }
+  .railbtn[aria-current="true"] { background: var(--grad-accent); color: var(--accent-ink); box-shadow: var(--shadow-accent); }
+  .railbtn:focus-visible { outline: 3px solid var(--accent-ring); outline-offset: -2px; }
+  #rail .spacer { flex: 1 1 auto; }
+
+  /* ---- the bar across the top -------------------------------------------- */
+  #shell { display: grid; grid-template-rows: 58px 1fr; min-width: 0; min-height: 0; }
+  #topbar {
+    display: flex; align-items: center; gap: 14px; padding: 0 16px;
+    background: var(--surface); border-bottom: 1px solid var(--line);
+  }
+  #topbar .word { height: 22px; width: auto; flex: 0 0 auto; }
+  #topbar .word.on-dark { display: none; }
+  :root[data-theme="dark"] #topbar .word.on-light { display: none; }
+  :root[data-theme="dark"] #topbar .word.on-dark { display: block; }
+  #searchForm { flex: 1 1 auto; max-width: 420px; display: flex; gap: 8px; }
+  #searchForm input { flex: 1 1 auto; }
+  .seg {
+    display: flex; padding: 3px; gap: 2px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--surface-2); flex: 0 0 auto;
+  }
+  .seg button {
+    border: none; background: none; box-shadow: none; border-radius: 999px;
+    padding: 5px 12px; font-size: 12px; font-weight: 600; color: var(--ink-soft); cursor: pointer;
+  }
+  .seg button:hover { color: var(--ink); background: var(--surface); box-shadow: none; transform: none; }
+  .seg button[aria-pressed="true"] { background: var(--grad-accent); color: var(--accent-ink); box-shadow: var(--shadow-accent); }
+  #citySelect { width: auto; min-width: 140px; flex: 0 0 auto; }
+
+  /* ---- map and the panel beside it --------------------------------------- */
+  #stage { display: grid; grid-template-columns: 1fr 372px; min-height: 0; }
+  #mapwrap { position: relative; min-width: 0; }
+  #map { position: absolute; inset: 0; }
+  .leaflet-container { background: var(--ground); font-family: var(--ui); }
+
+  #legend {
+    position: absolute; left: 14px; bottom: 26px; z-index: 500;
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    -webkit-backdrop-filter: saturate(160%) blur(10px); backdrop-filter: saturate(160%) blur(10px);
+    border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px;
+    box-shadow: var(--shadow-2); display: flex; flex-direction: column; gap: 7px;
+  }
+  #legend .row2 { display: flex; align-items: center; gap: 9px; font-size: 11px; font-weight: 600; }
+  #legend .key { width: 20px; height: 4px; border-radius: 2px; flex: 0 0 auto; }
+  #legend .key.hollow { height: 0; border-top: 2px dashed var(--slate); }
+
+  #status {
+    position: absolute; z-index: 600; left: 50%; transform: translateX(-50%); top: 14px;
+    color: var(--ink); background: color-mix(in srgb, var(--surface) 86%, transparent);
+    -webkit-backdrop-filter: saturate(160%) blur(10px); backdrop-filter: saturate(160%) blur(10px);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 8px 16px; font-size: 12px; font-weight: 600; box-shadow: var(--shadow-2);
+  }
+
+  #side {
+    background: var(--surface); border-left: 1px solid var(--line);
+    overflow-y: auto; padding: 16px; min-height: 0;
+    scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
+  }
+  #side::-webkit-scrollbar { width: 10px; }
+  #side::-webkit-scrollbar-thumb {
     background: var(--line-strong); border-radius: 99px;
     border: 3px solid transparent; background-clip: content-box;
   }
-  header h1 {
-    font-size: 17px; font-weight: 700; margin: 0; letter-spacing: -0.01em;
+  .view { display: flex; flex-direction: column; gap: 20px; }
+  .view[hidden] { display: none; }
+  .viewhead h2 { font-size: 17px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+  .viewhead p { margin: 4px 0 0; font-size: 12px; color: var(--ink-soft); line-height: 1.5; }
+
+  @media (max-width: 980px) {
+    body { grid-template-columns: 56px 1fr; }
+    #stage { grid-template-columns: 1fr; grid-template-rows: 44vh 1fr; }
+    #side { border-left: none; border-top: 1px solid var(--line); }
+    .railbtn { font-size: 0; gap: 0; }
   }
-  .brand {
-    display: flex; align-items: center; gap: 10px;
-    margin: 0 0 12px; padding-bottom: 12px;
-    border-bottom: 1px solid var(--line);
-  }
-  .brand img.mark {
-    width: 36px; height: 36px; flex: 0 0 auto;
-    filter: drop-shadow(0 2px 5px rgba(2,20,42,.22));
-  }
-  .brand img.word { height: 28px; width: auto; }
-  .theme-switch {
-    margin-left: auto; display: flex; gap: 2px; flex: 0 0 auto;
-    padding: 2px; border-radius: 999px;
-    border: 1px solid var(--line); background: var(--surface-2);
-  }
-  .theme-switch button {
-    width: 26px; height: 26px; padding: 0; border: none; border-radius: 999px;
-    background: none; box-shadow: none; color: var(--ink-soft);
-    display: grid; place-items: center; cursor: pointer;
-    transition: background .15s, color .15s;
-  }
-  .theme-switch button:hover {
-    background: var(--surface); color: var(--ink); box-shadow: none; transform: none;
-  }
-  .theme-switch button[aria-pressed="true"] {
-    background: var(--grad-accent); color: var(--accent-ink); box-shadow: var(--shadow-accent);
-  }
-  .theme-switch svg { width: 15px; height: 15px; display: block; }
-  .brand .on-dark { display: none; }
-  :root[data-theme="dark"] .brand .on-light { display: none; }
-  :root[data-theme="dark"] .brand .on-dark { display: block; }
-  header p { margin: 4px 0 0; font-size: 12px; color: var(--ink-soft); line-height: 1.5; }
-  #drawPanel, #coveragePanel {
-    display: flex; flex-direction: column; gap: 20px;
-  }
-  /* An id selector outranks the browser's own [hidden] rule, so without this the
-     inactive tab's panel keeps rendering and the tabs stop working. */
-  #drawPanel[hidden], #coveragePanel[hidden] { display: none; }
-  #coveragePanel .card + .card { margin-top: -10px; }
+  /* ---- shared pieces ------------------------------------------------------ */
   .eyebrow {
     font-size: 10px; text-transform: uppercase; letter-spacing: 0.10em;
     color: var(--ink-soft); font-weight: 700; margin: 0 0 9px;
     display: flex; align-items: center; gap: 8px;
   }
-  .eyebrow::after {
-    content: ""; flex: 1 1 auto; height: 1px; background: var(--line);
-  }
+  .eyebrow::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--line); }
   button {
     font-family: var(--ui); font-size: 13px; font-weight: 600;
     border-radius: var(--r); border: 1px solid var(--line-strong);
     background: var(--surface); color: var(--ink);
-    padding: 9px 12px; cursor: pointer;
-    box-shadow: var(--shadow-1);
+    padding: 9px 12px; cursor: pointer; box-shadow: var(--shadow-1);
     transition: border-color .15s, box-shadow .15s, transform .08s, background .15s;
   }
   button:hover { border-color: var(--accent); box-shadow: var(--shadow-2); }
   button:active { transform: translateY(1px); box-shadow: var(--shadow-1); }
   button:focus-visible { outline: 3px solid var(--accent-ring); outline-offset: 1px; }
-  button.primary {
-    background: var(--grad-accent); border-color: transparent;
-    color: var(--accent-ink); box-shadow: var(--shadow-accent);
-  }
+  button.primary { background: var(--grad-accent); border-color: transparent; color: var(--accent-ink); box-shadow: var(--shadow-accent); }
   button.primary:hover { filter: brightness(1.06); box-shadow: var(--shadow-accent), var(--shadow-2); }
-  button.danger { color: var(--danger); border-color: var(--line-strong); }
+  button.danger { color: var(--danger); }
   button.danger:hover { border-color: var(--danger); }
-  button:disabled { opacity: 0.45; cursor: default; box-shadow: none; transform: none; }
+  button:disabled { opacity: .45; cursor: default; box-shadow: none; transform: none; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; }
   .row > button { flex: 1 1 auto; }
   label { display: block; font-size: 11px; color: var(--ink-soft); margin-bottom: 4px; font-weight: 600; }
-  input[type=text], input[type=password], select {
+  input[type=text], input[type=password], select, textarea {
     width: 100%; font-family: var(--ui); font-size: 13px; color: var(--ink);
     background: var(--surface); border: 1px solid var(--line-strong);
-    border-radius: var(--r); padding: 9px 10px;
-    transition: border-color .15s, box-shadow .15s;
+    border-radius: var(--r); padding: 9px 10px; transition: border-color .15s, box-shadow .15s;
   }
-  input[type=text]:focus, input[type=password]:focus, select:focus {
-    outline: none; border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-ring);
+  textarea { resize: vertical; min-height: 62px; line-height: 1.5; }
+  input:focus, select:focus, textarea:focus {
+    outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring);
   }
   .field { margin-bottom: 10px; }
-  .card {
-    border: 1px solid var(--line); border-radius: var(--r-lg);
-    background: var(--surface); padding: 13px;
-    box-shadow: var(--shadow-1);
-  }
-  ul.areas { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .card { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); padding: 13px; box-shadow: var(--shadow-1); }
+  .card + .card { margin-top: 10px; }
+  .hint { font-size: 11px; color: var(--ink-soft); line-height: 1.55; margin: 9px 0 0; }
+  .coords { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); }
+  .warn { color: var(--amber); }
+  .bad { color: var(--danger); }
+  .swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; box-shadow: 0 0 0 1px rgba(0,0,0,.10); }
+
+  ul.areas { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
   li.area {
     position: relative; overflow: hidden;
-    border: 1px solid var(--line); border-radius: var(--r);
-    padding: 9px 10px 9px 13px;
-    background: var(--surface); cursor: pointer;
-    box-shadow: var(--shadow-1);
+    border: 1px solid var(--line); border-radius: var(--r); padding: 10px 11px 10px 14px;
+    background: var(--surface); cursor: pointer; box-shadow: var(--shadow-1);
     transition: border-color .15s, box-shadow .15s, transform .12s, background .15s;
   }
-  /* A green edge marks the one you are working on, the way the logo marks what is done. */
-  li.area::before {
-    content: ""; position: absolute; inset: 0 auto 0 0; width: 3px;
-    background: var(--grad-accent); opacity: 0; transition: opacity .15s;
-  }
+  li.area::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--grad-accent); opacity: 0; transition: opacity .15s; }
   li.area:hover { border-color: var(--line-strong); box-shadow: var(--shadow-2); transform: translateY(-1px); }
   li.area.selected { border-color: var(--accent); background: var(--accent-soft); }
   li.area.selected::before { opacity: 1; }
   li.area .name { font-weight: 600; font-size: 13px; }
   li.area .meta { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
-  .swatch {
-    display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px;
-    box-shadow: 0 0 0 1px rgba(0,0,0,.10);
-  }
-  .warn { color: var(--amber); }
-  .bad { color: var(--danger); }
-  .hint { font-size: 11px; color: var(--ink-soft); line-height: 1.55; margin: 9px 0 0; }
-  .coords { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); }
-  .tabs {
-    display: flex; gap: 4px; border-bottom: 1px solid var(--line);
-    position: sticky; top: 0; z-index: 1;
-    background: var(--surface); margin: 0 -16px; padding: 0 16px;
-  }
-  .tab {
-    flex: 1 1 0; border: none; background: none; border-radius: 0;
-    border-bottom: 2px solid transparent; color: var(--ink-soft);
-    padding: 10px 4px; font-size: 13px; font-weight: 600;
-    box-shadow: none; transition: color .15s, border-color .15s;
-  }
-  .tab:hover { border-color: transparent; color: var(--ink); box-shadow: none; transform: none; }
-  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-  /* The same ring the app draws: a number says how much is done, the ring also shows
-     how much is left, which is what decides whether you finish an area today. */
+
   .ringrow { display: flex; align-items: center; gap: 18px; }
   .ring { flex: 0 0 auto; display: block; overflow: visible; }
   .ring circle { fill: none; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; }
@@ -314,223 +324,345 @@
   .legend .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
   .legend .lbl { color: var(--ink-soft); flex: 1 1 auto; }
   .legend .val { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  .bar { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; box-shadow: inset 0 0 0 1px var(--line); }
+  .bar > span { display: block; height: 100%; border-radius: 99px; background: var(--grad-accent); transition: width .45s cubic-bezier(.4,0,.2,1); }
+
+  /* three figures side by side, as under the completion bar */
+  .figures { display: flex; gap: 8px; }
+  .figure { flex: 1 1 0; min-width: 0; }
+  .figure .n { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+  .figure .t { font-size: 10px; color: var(--ink-soft); line-height: 1.3; }
+
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; font-size: 12px; }
+  .kv dt { color: var(--ink-soft); }
+  .kv dd { margin: 0; text-align: right; }
+
   .tallies { display: flex; gap: 14px; }
   .tally { flex: 1 1 0; display: flex; align-items: center; gap: 11px; }
   .tally .pip { width: 4px; height: 34px; border-radius: 2px; flex: 0 0 auto; }
   .tally .n { font-size: 22px; font-weight: 700; line-height: 1.15; }
   .tally .t { font-size: 11px; color: var(--ink-soft); }
-  .stat { display: flex; align-items: center; gap: 12px; }
-  .stat .n { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
-  .stat .t { font-size: 11px; color: var(--ink-soft); }
-  .act { display: flex; align-items: center; gap: 11px; }
-  .act .mark {
-    width: 22px; height: 22px; border-radius: 50%; flex: 0 0 auto;
-    display: grid; place-items: center; font-size: 12px; font-weight: 700; color: #fff;
+
+  .statgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .statgrid .card { padding: 12px; margin: 0; }
+  .statgrid .n { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+  .statgrid .t { font-size: 10px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .07em; font-weight: 700; }
+
+  /* drive rows carry a small picture of the ground they covered */
+  li.drive { display: flex; align-items: center; gap: 11px; }
+  .thumb { width: 48px; height: 40px; border-radius: 7px; background: var(--surface-2); border: 1px solid var(--line); flex: 0 0 auto; overflow: hidden; }
+  .thumb svg { display: block; width: 100%; height: 100%; }
+  .badge { font-size: 11px; font-weight: 700; color: var(--accent); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+  .swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+  .swatches button {
+    width: 26px; height: 26px; border-radius: 50%; padding: 0; box-shadow: none;
+    border: 2px solid transparent;
   }
-  .act .pct { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 13px; white-space: nowrap; }
-  .remaining {
-    margin-top: 9px; padding: 7px 10px; border-radius: 8px;
-    background: var(--surface-2); border: 1px solid var(--line);
-    font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 8px;
-  }
-  .remaining .chev { margin-left: auto; color: var(--ink-soft); }
-  .bar {
-    height: 8px; border-radius: 99px; background: var(--surface-2);
-    overflow: hidden; margin-top: 6px;
-    box-shadow: inset 0 0 0 1px var(--line);
-  }
-  .bar > span {
-    display: block; height: 100%; border-radius: 99px;
-    background: var(--grad-accent);
-    box-shadow: 0 0 8px var(--accent-ring);
-    transition: width .45s cubic-bezier(.4,0,.2,1);
-  }
-  .big {
-    font-size: 30px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1;
-    background: linear-gradient(135deg, var(--navy-800), var(--green-600));
-    -webkit-background-clip: text; background-clip: text; color: transparent;
-  }
-  :root[data-theme="dark"] .big {
-    background: linear-gradient(135deg, #bcd6f0, var(--accent));
-    -webkit-background-clip: text; background-clip: text; color: transparent;
-  }
-  #map { height: 100%; width: 100%; }
-  #status {
-    position: absolute; z-index: 500; left: 50%; transform: translateX(-50%);
-    bottom: 18px; color: var(--ink);
-    background: color-mix(in srgb, var(--surface) 82%, transparent);
-    -webkit-backdrop-filter: saturate(160%) blur(10px);
-    backdrop-filter: saturate(160%) blur(10px);
-    border: 1px solid var(--line); border-radius: 999px;
-    padding: 9px 18px; font-size: 12px; font-weight: 600;
-    box-shadow: var(--shadow-2);
-  }
-  #mapwrap { position: relative; }
-  .leaflet-container { background: var(--ground); font-family: var(--ui); }
-  .leaflet-control-zoom a,
-  .leaflet-bar a {
-    background: var(--surface); color: var(--ink);
-    border-color: var(--line) !important;
-  }
-  .leaflet-control-zoom a:hover, .leaflet-bar a:hover {
-    background: var(--surface-2); color: var(--accent);
-  }
+  .swatches button[aria-pressed="true"] { border-color: var(--ink); box-shadow: 0 0 0 3px var(--accent-ring); }
+
+  .tools { display: flex; flex-direction: column; gap: 6px; }
+  .tools button { text-align: left; display: flex; align-items: center; gap: 9px; }
+  .tools button svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+
+  .leaflet-control-zoom a, .leaflet-bar a { background: var(--surface); color: var(--ink); border-color: var(--line) !important; }
+  .leaflet-control-zoom a:hover, .leaflet-bar a:hover { background: var(--surface-2); color: var(--accent); }
   .leaflet-bar { box-shadow: var(--shadow-2) !important; border-radius: var(--r) !important; overflow: hidden; }
-  .leaflet-control-attribution {
-    background: color-mix(in srgb, var(--surface) 78%, transparent) !important;
-    color: var(--ink-soft) !important;
-  }
+  .leaflet-control-attribution { background: color-mix(in srgb, var(--surface) 78%, transparent) !important; color: var(--ink-soft) !important; }
   .leaflet-control-attribution a { color: var(--slate) !important; }
-  @media (prefers-reduced-motion: reduce) {
-    * { transition: none !important; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+  /* the theme switch, as it was */
+  .theme-switch {
+    display: flex; gap: 2px; flex: 0 0 auto;
+    padding: 2px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--surface-2);
   }
-  @media (max-width: 760px) {
-    body { grid-template-columns: 1fr; grid-template-rows: 46vh 1fr; }
-    #panel { border-right: none; border-top: 1px solid var(--line); order: 2; }
-    #panel::before { display: none; }
-    #mapwrap { order: 1; }
+  .theme-switch button {
+    width: 26px; height: 26px; padding: 0; border: none; border-radius: 999px;
+    background: none; box-shadow: none; color: var(--ink-soft);
+    display: grid; place-items: center; cursor: pointer;
+    transition: background .15s, color .15s;
   }
+  .theme-switch button:hover { background: var(--surface); color: var(--ink); box-shadow: none; transform: none; }
+  .theme-switch button[aria-pressed="true"] { background: var(--grad-accent); color: var(--accent-ink); box-shadow: var(--shadow-accent); }
+  .theme-switch svg { width: 15px; height: 15px; display: block; }
 </style>
 </head>
 <body>
-<div id="panel">
-  <header>
-    <div class="brand">
-      <img class="mark" src="/logo-mark.png" alt="" width="34" height="34">
-      <img class="word on-light" src="/wordmark.png" srcset="/wordmark.png 1x, /wordmark@2x.png 2x"
-           alt="StreetSweep" height="26">
-      <img class="word on-dark" src="/wordmark-light.png"
-           srcset="/wordmark-light.png 1x, /wordmark-light@2x.png 2x" alt="StreetSweep" height="26">
-      <div class="theme-switch" role="group" aria-label="Colour theme">
-        <button type="button" data-theme-set="system" title="Match the system" aria-label="Match the system" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8.4"/><path d="M12 3.6a8.4 8.4 0 0 1 0 16.8Z" fill="currentColor" stroke="none"/></svg></button>
-        <button type="button" data-theme-set="light" title="Light" aria-label="Light" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.2v2.4M12 19.4v2.4M2.2 12h2.4M19.4 12h2.4M5 5l1.7 1.7M17.3 17.3 19 19M19 5l-1.7 1.7M6.7 17.3 5 19"/></svg></button>
-        <button type="button" data-theme-set="dark" title="Dark" aria-label="Dark" aria-pressed="false"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.8 8.8 0 1 0 11.1 11.1Z"/></svg></button>
-      </div>
+<aside id="rail">
+  <img class="mark" src="/logo-mark.png" alt="StreetSweep" width="36" height="36">
+  <button class="railbtn" data-view="map" aria-current="true">
+    <svg viewBox="0 0 24 24"><path d="M9 4 3 6.5v14L9 18l6 2.5 6-2.5v-14L15 6.5 9 4Z"/><path d="M9 4v14M15 6.5v14"/></svg>Map
+  </button>
+  <button class="railbtn" data-view="areas">
+    <svg viewBox="0 0 24 24"><path d="M4 8.5 12 4l8 4.5-8 4.5-8-4.5Z"/><path d="m4 15.5 8 4.5 8-4.5"/></svg>Areas
+  </button>
+  <button class="railbtn" data-view="drives">
+    <svg viewBox="0 0 24 24"><path d="M5 16.5h14M6.5 16.5v2M17.5 16.5v2"/><path d="M6 16.5 7.6 10a2 2 0 0 1 1.9-1.4h5a2 2 0 0 1 1.9 1.4L18 16.5"/><path d="M8.5 13.2h7"/></svg>Drives
+  </button>
+  <button class="railbtn" data-view="stats">
+    <svg viewBox="0 0 24 24"><path d="M5 19V11M12 19V5M19 19v-6"/></svg>Stats
+  </button>
+  <button class="railbtn" data-view="export">
+    <svg viewBox="0 0 24 24"><path d="M12 15V4"/><path d="m8 8 4-4 4 4"/><path d="M4 16v3h16v-3"/></svg>Export
+  </button>
+  <div class="spacer"></div>
+  <button class="railbtn" data-view="settings">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"/></svg>Settings
+  </button>
+</aside>
+
+<div id="shell">
+  <header id="topbar">
+    <img class="word on-light" src="/wordmark.png" srcset="/wordmark.png 1x, /wordmark@2x.png 2x" alt="StreetSweep" height="22">
+    <img class="word on-dark" src="/wordmark-light.png" srcset="/wordmark-light.png 1x, /wordmark-light@2x.png 2x" alt="StreetSweep" height="22">
+    <form id="searchForm">
+      <input type="text" id="searchBox" placeholder="Search areas, cities or a place…">
+      <button type="submit" style="flex:0 0 auto">Go</button>
+    </form>
+    <select id="citySelect" title="Jump to a city"><option value="">All cities</option></select>
+    <div class="seg" id="basemap" role="group" aria-label="Base map">
+      <button type="button" data-base="standard" aria-pressed="true">Map</button>
+      <button type="button" data-base="satellite" aria-pressed="false">Satellite</button>
+      <button type="button" data-base="hybrid" aria-pressed="false">Hybrid</button>
     </div>
-    <h1>Area Builder</h1>
-    <p>Outline the places you want to sweep, then export a GeoJSON file and import it on the phone.</p>
-    <p class="hint" id="storageMode" style="margin-top:6px">Connecting…</p>
-    <div id="tokenBox" hidden style="margin-top:8px">
-      <label for="tokenInput">Access token</label>
-      <div class="row">
-        <input type="password" id="tokenInput" placeholder="paste your token" style="flex:2 1 140px">
-        <button id="btnToken" class="primary" style="flex:0 0 auto">Unlock</button>
-      </div>
+    <div class="theme-switch" role="group" aria-label="Colour theme">
+      <button type="button" data-theme-set="system" title="Match the system" aria-label="Match the system" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8.4"/><path d="M12 3.6a8.4 8.4 0 0 1 0 16.8Z" fill="currentColor" stroke="none"/></svg></button>
+      <button type="button" data-theme-set="light" title="Light" aria-label="Light" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.2v2.4M12 19.4v2.4M2.2 12h2.4M19.4 12h2.4M5 5l1.7 1.7M17.3 17.3 19 19M19 5l-1.7 1.7M6.7 17.3 5 19"/></svg></button>
+      <button type="button" data-theme-set="dark" title="Dark" aria-label="Dark" aria-pressed="false"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.8 8.8 0 1 0 11.1 11.1Z"/></svg></button>
     </div>
   </header>
 
-  <div class="tabs" role="tablist">
-    <button id="tabDraw" class="tab active" role="tab">Draw</button>
-    <button id="tabCoverage" class="tab" role="tab">Coverage</button>
-  </div>
-
-  <div id="drawPanel">
-
-  <div>
-    <p class="eyebrow">Find a place</p>
-    <form id="searchForm" class="row">
-      <input type="text" id="searchBox" placeholder="Conroe TX, April Sound…" style="flex:2 1 160px">
-      <button type="submit" style="flex:0 0 auto">Go</button>
-    </form>
-  </div>
-
-  <div>
-    <p class="eyebrow">Draw</p>
-    <div class="row">
-      <button id="btnNew" class="primary">New area</button>
-      <button id="btnFinish" disabled>Finish</button>
-      <button id="btnCancel" disabled>Cancel</button>
-    </div>
-    <p class="hint" id="drawHint">
-      Click the map to drop corners. Drag a corner to move it, click the small dot between two
-      corners to add one there, and right-click a corner to remove it.
-    </p>
-  </div>
-
-  <div id="editor" hidden>
-    <p class="eyebrow">Selected area</p>
-    <div class="card">
-      <div class="field">
-        <label for="fName">Name</label>
-        <input type="text" id="fName" placeholder="April Sound">
-      </div>
-      <div class="field">
-        <label for="fLevel">Level</label>
-        <select id="fLevel">
-          <option value="NEIGHBORHOOD">Neighborhood</option>
-          <option value="CITY">City</option>
-          <option value="METRO">Metro area</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="fParent">Part of</label>
-        <select id="fParent"><option value="">Nothing</option></select>
-      </div>
-      <p class="coords" id="fStats"></p>
-      <div class="row" style="margin-top:8px">
-        <button id="btnZoom">Zoom to it</button>
-        <button id="btnDelete" class="danger">Delete</button>
+  <div id="stage">
+    <div id="mapwrap">
+      <div id="map"></div>
+      <div id="status" hidden></div>
+      <div id="legend">
+        <div class="row2"><span class="key" style="background:var(--accent)"></span>Driven</div>
+        <div class="row2"><span class="key" style="background:var(--line-strong)"></span>Not yet driven</div>
+        <div class="row2"><span class="key hollow"></span>Area boundary</div>
       </div>
     </div>
+
+    <aside id="side">
+
+      <section class="view" data-view="map">
+        <div class="viewhead">
+          <h2 id="mapTitle">Pick an area</h2>
+          <p id="mapSubtitle">Click an outline on the map, or choose one under Areas, to see how far through it you are.</p>
+        </div>
+        <div id="areaDetail" hidden></div>
+        <p class="hint" id="storageMode">Connecting…</p>
+        <div id="tokenBox" hidden>
+          <label for="tokenInput">Access token</label>
+          <div class="row">
+            <input type="password" id="tokenInput" placeholder="paste your token" style="flex:2 1 140px">
+            <button id="btnToken" class="primary" style="flex:0 0 auto">Unlock</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" data-view="areas" hidden>
+        <div class="viewhead">
+          <h2>Areas</h2>
+          <p>Draw a neighbourhood, a city or any shape you want to finish. Corners drag, and the dot between two of them adds another.</p>
+        </div>
+        <div>
+          <p class="eyebrow">Tools</p>
+          <div class="tools">
+            <button id="btnNew" class="primary"><svg viewBox="0 0 24 24"><path d="m4 20 4-1 10-10-3-3L5 16l-1 4Z"/><path d="m14 6 3 3"/></svg>Draw a new area</button>
+            <button id="btnFinish" disabled><svg viewBox="0 0 24 24"><path d="m5 12 5 5L19 7"/></svg>Finish</button>
+            <button id="btnCancel" disabled><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>Cancel</button>
+          </div>
+          <p class="hint" id="drawHint">Click the map to drop corners. Drag a corner to move it, click the small dot between two corners to add one there, and right-click a corner to remove it.</p>
+        </div>
+
+        <div id="editor" hidden>
+          <p class="eyebrow">Selected area</p>
+          <div class="card">
+            <div class="field">
+              <label for="fName">Name</label>
+              <input type="text" id="fName" placeholder="April Sound">
+            </div>
+            <div class="field">
+              <label for="fCity">City</label>
+              <input type="text" id="fCity" placeholder="Conroe, TX">
+            </div>
+            <div class="field">
+              <label for="fLevel">Level</label>
+              <select id="fLevel">
+                <option value="NEIGHBORHOOD">Neighborhood</option>
+                <option value="CITY">City</option>
+                <option value="METRO">Metro area</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="fParent">Part of</label>
+              <select id="fParent"><option value="">Nothing</option></select>
+            </div>
+            <div class="field">
+              <label for="fNotes">Notes</label>
+              <textarea id="fNotes" placeholder="Primary neighbourhood. West side."></textarea>
+            </div>
+            <div class="field">
+              <label>Colour</label>
+              <div class="swatches" id="fColor"></div>
+            </div>
+            <p class="coords" id="fStats"></p>
+            <div class="row" style="margin-top:10px">
+              <button id="btnZoom">Zoom to</button>
+              <button id="btnDelete" class="danger">Delete</button>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <p class="eyebrow">Your areas</p>
+          <ul class="areas" id="areaList"></ul>
+          <p class="hint" id="emptyNote">Nothing drawn yet.</p>
+        </div>
+      </section>
+
+      <section class="view" data-view="drives" hidden>
+        <div class="viewhead">
+          <h2>Drives</h2>
+          <p>Every drive the phone has sent, and the ground each one covered.</p>
+        </div>
+        <div id="driveDetail" hidden></div>
+        <div>
+          <p class="eyebrow">History</p>
+          <ul class="areas" id="driveList"></ul>
+          <p class="hint" id="drivesEmpty" hidden>The phone has not sent any drives yet.</p>
+        </div>
+      </section>
+
+      <section class="view" data-view="stats" hidden>
+        <div class="viewhead">
+          <h2>Statistics</h2>
+          <p>Progress across everything you are sweeping.</p>
+        </div>
+        <div class="seg" id="statTabs" role="group" aria-label="Statistics view">
+          <button type="button" data-stat="overview" aria-pressed="true">Overview</button>
+          <button type="button" data-stat="areas" aria-pressed="false">Areas</button>
+          <button type="button" data-stat="cities" aria-pressed="false">Cities</button>
+        </div>
+        <div id="statOverview">
+          <p class="eyebrow">Total progress</p>
+          <div class="card" id="covSummary">Loading…</div>
+          <div class="card" id="covTallies" hidden></div>
+          <div class="statgrid" id="covGrid" style="margin-top:10px"></div>
+        </div>
+        <div id="statAreas" hidden>
+          <p class="eyebrow">Progress by area</p>
+          <ul class="areas" id="covAreas"></ul>
+          <p class="hint" id="covAreasEmpty" hidden>The phone has not sent anything yet.</p>
+        </div>
+        <div id="statCities" hidden>
+          <p class="eyebrow">Cities and metro areas</p>
+          <ul class="areas" id="covCities"></ul>
+          <p class="hint" id="covCitiesEmpty" hidden>No cities or metro areas yet.</p>
+        </div>
+        <div>
+          <div class="row"><button id="btnRefreshCoverage" class="primary">Refresh</button></div>
+          <p class="hint">Sent from the phone under Settings → Area builder server. Turn on “Send after every drive” and this fills in on its own.</p>
+        </div>
+        <ul class="areas" id="covDrives" hidden></ul>
+        <div class="card" id="covDistance" hidden></div>
+      </section>
+
+      <section class="view" data-view="export" hidden>
+        <div class="viewhead">
+          <h2>Export</h2>
+          <p>Move areas between this server and the phone.</p>
+        </div>
+        <div>
+          <p class="eyebrow">File</p>
+          <div class="row">
+            <button id="btnExport" class="primary">Export GeoJSON</button>
+            <button id="btnImport">Import…</button>
+          </div>
+          <input type="file" id="fileInput" accept=".geojson,.json,application/geo+json,application/json" hidden>
+          <p class="hint">Import also accepts the app's own coverage export, so you can see the streets you have already driven while deciding where an area should stop.</p>
+        </div>
+      </section>
+
+      <section class="view" data-view="settings" hidden>
+        <div class="viewhead">
+          <h2>Settings</h2>
+          <p>This server, and how the phone reaches it.</p>
+        </div>
+        <div>
+          <p class="eyebrow">Server</p>
+          <div class="card"><dl class="kv" id="serverInfo"></dl></div>
+          <p class="hint">The phone sends here from Settings → Area builder server, using the token this server was started with.</p>
+        </div>
+      </section>
+
+    </aside>
   </div>
-
-  <div>
-    <p class="eyebrow">Areas</p>
-    <ul class="areas" id="areaList"></ul>
-    <p class="hint" id="emptyNote">Nothing drawn yet.</p>
-  </div>
-
-  <div>
-    <p class="eyebrow">File</p>
-    <div class="row">
-      <button id="btnExport" class="primary">Export GeoJSON</button>
-      <button id="btnImport">Import…</button>
-    </div>
-    <input type="file" id="fileInput" accept=".geojson,.json,application/geo+json,application/json" hidden>
-    <p class="hint">
-      Import also accepts the app's own coverage export, so you can see the streets you have
-      already driven while deciding where an area should stop.
-    </p>
-  </div>
-  </div>
-
-  <div id="coveragePanel" hidden>
-    <div>
-      <p class="eyebrow">Total progress</p>
-      <div class="card" id="covSummary">Loading…</div>
-      <div class="card" id="covTallies" hidden></div>
-      <div class="card" id="covDistance" hidden></div>
-    </div>
-
-    <div>
-      <p class="eyebrow">Areas</p>
-      <ul class="areas" id="covAreas"></ul>
-      <p class="hint" id="covAreasEmpty" hidden>The phone has not sent anything yet.</p>
-    </div>
-
-    <div>
-      <p class="eyebrow">Recent activity</p>
-      <ul class="areas" id="covDrives"></ul>
-    </div>
-
-    <div>
-      <div class="row">
-        <button id="btnRefreshCoverage" class="primary">Refresh</button>
-      </div>
-      <p class="hint">
-        Sent from the phone under Settings → Area builder server. Turn on “Send after every drive”
-        and this fills in on its own.
-      </p>
-    </div>
-  </div>
-</div>
-
-<div id="mapwrap">
-  <div id="map"></div>
-  <div id="status" hidden></div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+// ---- which view the side panel is showing ------------------------------------
+//
+// The map stays put; only the panel beside it changes, so switching never costs a
+// re-render of the thing you are looking at.
+
+(function () {
+  "use strict";
+
+  var current = "map";
+
+  function show(name) {
+    current = name;
+    Array.prototype.forEach.call(document.querySelectorAll("#side .view"), function (v) {
+      v.hidden = v.getAttribute("data-view") !== name;
+    });
+    Array.prototype.forEach.call(document.querySelectorAll(".railbtn"), function (b) {
+      var on = b.getAttribute("data-view") === name;
+      if (on) b.setAttribute("aria-current", "true");
+      else b.removeAttribute("aria-current");
+    });
+    window.dispatchEvent(new CustomEvent("view", { detail: name }));
+  }
+
+  document.addEventListener("click", function (ev) {
+    var b = ev.target.closest && ev.target.closest(".railbtn");
+    if (b) show(b.getAttribute("data-view"));
+  });
+
+  window.StreetSweepViews = { show: show, current: function () { return current; } };
+})();
+
+// ---- base maps ---------------------------------------------------------------
+//
+// OpenStreetMap has no aerial imagery, so there is no satellite here. These are the
+// three that exist: the standard rendering, and Carto's light and dark ones, which
+// are the same data drawn quietly enough to let the driven streets carry the colour.
+
+window.StreetSweepBases = {
+  standard: {
+    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: "&copy; OpenStreetMap contributors",
+    max: 19,
+  },
+  satellite: {
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics",
+    max: 19,
+  },
+  hybrid: {
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    // Place names and boundaries, drawn over the imagery so it can still be read.
+    overlay: "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics",
+    max: 19,
+  },
+};
+</script>
 <script>
 (function () {
   "use strict";
@@ -544,10 +676,7 @@
   var STORE_KEY = "streetsweep.areas.v1";
 
   var map = L.map("map", { zoomControl: true }).setView([30.3704, -95.6251], 14);
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: '&copy; OpenStreetMap contributors'
-  }).addTo(map);
+  // The base layer is added by setBase below, so it can be swapped.
 
   var contextLayer = L.layerGroup().addTo(map);   // driven streets from an app export
   var areaLayer = L.layerGroup().addTo(map);
@@ -682,6 +811,9 @@
       name: area.name,
       level: area.level,
       parentName: area.parent || null,
+      city: area.city || null,
+      notes: area.notes || null,
+      color: area.color || null,
       polygon: area.latlngs.map(function (p) { return [p.lat, p.lng]; })
     };
   }
@@ -743,7 +875,7 @@
     (list || []).forEach(function (a) {
       var pts = a.polygon.map(function (p) { return L.latLng(p[0], p[1]); });
       if (pts.length < 3) return;
-      var area = addArea(pts, a.name, a.level, a.parentName);
+      var area = addArea(pts, a.name, a.level, a.parentName, a);
       area.serverId = a.id;
     });
     renderList();
@@ -793,19 +925,32 @@
 
   // ---- area model -------------------------------------------------------
 
-  function addArea(latlngs, name, level, parent) {
+  function addArea(latlngs, name, level, parent, meta) {
+    meta = meta || {};
     var area = {
       id: nextId++,
       name: name || "Area " + nextId,
       level: LEVELS[level] ? level : "NEIGHBORHOOD",
       parent: parent || "",
+      city: meta.city || "",
+      notes: meta.notes || "",
+      color: meta.color || "",
+      createdAt: meta.createdAt || null,
       latlngs: latlngs
     };
+    var shade = area.color || LEVEL_COLOR[area.level];
     area.poly = L.polygon(latlngs, {
-      color: LEVEL_COLOR[area.level], weight: 2, opacity: 0.9,
-      fillColor: LEVEL_COLOR[area.level], fillOpacity: 0.12
+      color: shade, weight: 2, opacity: 0.9, fillColor: shade, fillOpacity: 0.12
     }).addTo(areaLayer);
-    area.poly.on("click", function (ev) { L.DomEvent.stop(ev); select(area.id); });
+    if (typeof onImagery !== "undefined" && onImagery) {
+      area.poly.setStyle({ color: "#ffffff", weight: 2.5, opacity: 0.95, fillOpacity: 0.10 });
+    }
+    area.poly.on("click", function (ev) {
+      L.DomEvent.stop(ev);
+      // Handles belong to the Areas view; elsewhere a click just reads the area.
+      if (window.StreetSweepViews.current() === "areas") select(area.id);
+      detailFor(area);
+    });
     areas.push(area);
     return area;
   }
@@ -897,7 +1042,10 @@
   function showEditor(area) {
     el("editor").hidden = false;
     el("fName").value = area.name;
+    el("fCity").value = area.city || "";
+    el("fNotes").value = area.notes || "";
     el("fLevel").value = area.level;
+    paintSwatches(area);
 
     var parentSelect = el("fParent");
     parentSelect.innerHTML = "<option value=''>Nothing</option>";
@@ -933,6 +1081,39 @@
     a.level = el("fLevel").value;
     refresh(a);
   });
+  el("fCity").addEventListener("input", function () {
+    var a = byId(selectedId); if (!a) return;
+    a.city = el("fCity").value; refreshCities(); persist(a);
+  });
+
+  el("fNotes").addEventListener("input", function () {
+    var a = byId(selectedId); if (!a) return;
+    a.notes = el("fNotes").value; persist(a);
+  });
+
+  var SWATCHES = ["#2f6fb5", "#1e8a28", "#d9a520", "#e2721f", "#a855c7", "#c2344b"];
+
+  function paintSwatches(area) {
+    var box = el("fColor");
+    box.innerHTML = "";
+    SWATCHES.forEach(function (hex) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.style.background = hex;
+      b.title = hex;
+      b.setAttribute("aria-label", "Colour " + hex);
+      b.setAttribute("aria-pressed", (area.color || LEVEL_COLOR[area.level]).toLowerCase() === hex ? "true" : "false");
+      b.addEventListener("click", function () {
+        area.color = hex;
+        area.poly.setStyle({ color: hex, fillColor: hex });
+        paintSwatches(area);
+        renderList();
+        persist(area);
+      });
+      box.appendChild(b);
+    });
+  }
+
   el("fParent").addEventListener("change", function () {
     var a = byId(selectedId); if (!a) return;
     a.parent = el("fParent").value; renderList(); persist(a);
@@ -1146,30 +1327,49 @@
     return "#8a8399";
   }
 
-  function setTab(name) {
-    var coverage = name === "coverage";
-    el("tabDraw").className = "tab" + (coverage ? "" : " active");
-    el("tabCoverage").className = "tab" + (coverage ? " active" : "");
-    el("drawPanel").hidden = coverage;
-    el("coveragePanel").hidden = !coverage;
+  // Which layers belong on the map depends on what the side panel is showing.
+  function applyView(name) {
+    if (drawing && name !== "areas") endDrawing();
+    var wantsCoverage = name === "stats";
+    var wantsDrives = name === "drives";
 
-    if (coverage) {
-      if (drawing) { endDrawing(); }
+    if (wantsCoverage) {
       clearHandles();
-      map.removeLayer(areaLayer);
-      map.removeLayer(editLayer);
+      if (map.hasLayer(areaLayer)) map.removeLayer(areaLayer);
+      if (map.hasLayer(editLayer)) map.removeLayer(editLayer);
       coverageLayer.addTo(map);
       if (!coverageLoaded) loadCoverage();
     } else {
-      map.removeLayer(coverageLayer);
+      if (map.hasLayer(coverageLayer)) map.removeLayer(coverageLayer);
       areaLayer.addTo(map);
       editLayer.addTo(map);
-      if (selectedId) select(selectedId);
+      if (name === "areas" && selectedId) select(selectedId);
+      if (name !== "areas") clearHandles();
+    }
+
+    if (wantsDrives) {
+      driveLayer.addTo(map);
+      if (!driveRows.length) loadDrives();
+    } else if (map.hasLayer(driveLayer)) {
+      map.removeLayer(driveLayer);
+      el("driveDetail").hidden = true;
     }
   }
 
-  el("tabDraw").addEventListener("click", function () { setTab("draw"); });
-  el("tabCoverage").addEventListener("click", function () { setTab("coverage"); });
+  window.addEventListener("view", function (ev) { applyView(ev.detail); });
+
+  el("statTabs").addEventListener("click", function (ev) {
+    var b = ev.target.closest("button[data-stat]");
+    if (!b) return;
+    var which = b.getAttribute("data-stat");
+    Array.prototype.forEach.call(el("statTabs").querySelectorAll("button"), function (x) {
+      x.setAttribute("aria-pressed", x === b ? "true" : "false");
+    });
+    el("statOverview").hidden = which !== "overview";
+    el("statAreas").hidden = which !== "areas";
+    el("statCities").hidden = which !== "cities";
+  });
+
   el("btnRefreshCoverage").addEventListener("click", function () { coverageLoaded = false; loadCoverage(); });
 
   function loadCoverage() {
@@ -1265,7 +1465,8 @@
 
     var empty = areas.length === 0 && drives.length === 0;
     el("covTallies").hidden = empty;
-    el("covDistance").hidden = empty;
+    reported = {};
+    areas.forEach(function (a) { reported[a.name] = a.stats; });
 
     el("covSummary").innerHTML = empty
       ? "Nothing sent from the phone yet."
@@ -1289,17 +1490,35 @@
           '<div><div class="n">' + going + '</div><div class="t">In progress</div></div></div>' +
       "</div>";
 
-    el("covDistance").innerHTML =
-      '<div class="stat"><div style="flex:1 1 auto">' +
-        '<div class="t">Distance driven</div>' +
-        '<div class="n">' + fmtDistance(driveMiles) + "</div>" +
-        '<div class="t" style="margin-top:4px">' + drives.length + " drives · " + fmtDuration(hours) +
-          " · " + fmtDistance(freshMiles) + " of it new" + "</div>" +
-      "</div></div>";
+    // The four figures under the tallies, as on the phone's Progress screen.
+    el("covGrid").innerHTML = empty ? "" :
+      statCard(areas.length, "Areas") +
+      statCard(cityCount(), "Cities") +
+      statCard(drives.length, "Drives") +
+      statCard(fmtDistance(driveMiles), "Total distance");
 
-    var list = el("covAreas");
+    fillAreaList(el("covAreas"), areas.filter(function (a) { return a.level !== "CITY" && a.level !== "METRO"; }));
+    fillAreaList(el("covCities"), areas.filter(function (a) { return a.level === "CITY" || a.level === "METRO"; }));
+    el("covAreasEmpty").hidden = el("covAreas").children.length > 0;
+    el("covCitiesEmpty").hidden = el("covCities").children.length > 0;
+  }
+
+  /** Distinct city names across the areas you have drawn. */
+  function cityCount() {
+    var seen = {};
+    window.__ssAreas().forEach(function (a) { if (a.city) seen[a.city] = true; });
+    return Object.keys(seen).length;
+  }
+
+  function statCard(value, label) {
+    return '<div class="card"><div class="n">' +
+      (typeof value === "number" ? value.toLocaleString() : value) +
+      '</div><div class="t">' + label + "</div></div>";
+  }
+
+  function fillAreaList(list, rows) {
     list.innerHTML = "";
-    areas.forEach(function (a) {
+    rows.forEach(function (a) {
       var percent = percentOf(a.stats);
       var remaining = Math.max(0, (a.stats.total || 0) - (a.stats.done || 0));
       var li = document.createElement("li");
@@ -1320,30 +1539,6 @@
         if (a.polygon && a.polygon.length >= 3) map.fitBounds(L.polygon(a.polygon).getBounds(), { padding: [40, 40] });
       });
       list.appendChild(li);
-    });
-    el("covAreasEmpty").hidden = areas.length > 0;
-
-    var driveList = el("covDrives");
-    driveList.innerHTML = "";
-    drives.slice(0, 10).forEach(function (d) {
-      var li = document.createElement("li");
-      li.className = "area";
-      var when = new Date(d.startedAt);
-      var fresh = (d.newMeters || 0) > 0;
-      li.innerHTML =
-        '<div class="act">' +
-          '<span class="mark" style="background:' + (fresh ? "var(--accent)" : "var(--line-strong)") + '">' +
-            (fresh ? "&#10003;" : "&middot;") + "</span>" +
-          '<div style="flex:1 1 auto;min-width:0">' +
-            '<div class="name">' + when.toLocaleDateString() + " " +
-              when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + "</div>" +
-            '<div class="meta">' + fmtDistance(d.distanceMeters || 0) + " · " +
-              fmtDuration(Math.max(0, (d.endedAt || d.startedAt) - d.startedAt)) +
-              (d.trigger ? " · " + escapeHtml(String(d.trigger).toLowerCase()) : "") + "</div>" +
-          "</div>" +
-          (fresh ? '<span class="pct">+' + fmtDistance(d.newMeters) + "</span>" : "") +
-        "</div>";
-      driveList.appendChild(li);
     });
   }
 
@@ -1371,8 +1566,267 @@
       .catch(function () { status("Lookup failed — check your connection", "bad"); });
   });
 
+  // ---- base map switching ----------------------------------------------------
+
+  var BASE_KEY = "streetsweep.basemap";
+  var baseLayer = null;
+  var overlayLayer = null;
+
+  function storedBase() {
+    try {
+      var v = localStorage.getItem(BASE_KEY);
+      if (window.StreetSweepBases[v]) return v;
+    } catch (e) { /* storage may be blocked */ }
+    return "standard";
+  }
+
+  function setBase(name) {
+    var spec = window.StreetSweepBases[name] || window.StreetSweepBases.standard;
+    if (baseLayer) map.removeLayer(baseLayer);
+    if (overlayLayer) { map.removeLayer(overlayLayer); overlayLayer = null; }
+    baseLayer = L.tileLayer(spec.url, { maxZoom: spec.max, attribution: spec.attribution });
+    baseLayer.addTo(map);
+    baseLayer.bringToBack();
+    if (spec.overlay) {
+      overlayLayer = L.tileLayer(spec.overlay, { maxZoom: spec.max, opacity: 0.9 });
+      overlayLayer.addTo(map);
+    }
+    onImagery = name !== "standard";
+    restyleAreas();
+    try { localStorage.setItem(BASE_KEY, name); } catch (e) { /* this page only */ }
+    Array.prototype.forEach.call(document.querySelectorAll("#basemap button"), function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-base") === name ? "true" : "false");
+    });
+  }
+
+  var onImagery = false;
+
+  /** Over photography a coloured outline disappears; a white one does not. */
+  function restyleAreas() {
+    areas.forEach(function (a) {
+      if (!a.poly) return;
+      var shade = a.color || LEVEL_COLOR[a.level];
+      a.poly.setStyle(onImagery
+        ? { color: "#ffffff", weight: 2.5, opacity: 0.95, fillColor: shade, fillOpacity: 0.10 }
+        : { color: shade, weight: 2, opacity: 0.9, fillColor: shade, fillOpacity: 0.12 });
+    });
+  }
+
+  el("basemap").addEventListener("click", function (ev) {
+    var b = ev.target.closest("button[data-base]");
+    if (b) setBase(b.getAttribute("data-base"));
+  });
+
+  // ---- the area detail beside the map ----------------------------------------
+
+  var reported = {};   // area name -> the stats the phone last sent
+
+  function detailFor(a) {
+    var stats = reported[a.name];
+    var box = el("areaDetail");
+    el("mapTitle").textContent = a.name;
+    el("mapSubtitle").textContent = [a.city, levelLabel(a.level)].filter(Boolean).join(" · ");
+    box.hidden = false;
+
+    var percent = stats ? percentOf(stats) : null;
+    var done = stats ? (stats.done || 0) : 0;
+    var total = stats ? (stats.total || 0) : 0;
+
+    box.innerHTML =
+      '<div class="card">' +
+        (percent === null
+          ? '<p class="hint" style="margin:0">The phone has not reported on this one yet.</p>'
+          : '<div style="display:flex;align-items:baseline;gap:8px">' +
+              '<span style="font-size:26px;font-weight:700;letter-spacing:-.02em">' + percent + "%</span>" +
+              '<span style="font-size:12px;color:var(--ink-soft)">Complete</span></div>' +
+            '<div class="bar" style="margin-top:9px"><span style="width:' + Math.min(100, percent) + '%"></span></div>' +
+            '<div class="figures" style="margin-top:14px">' +
+              figure(done, "Driven streets") +
+              figure(Math.max(0, total - done), "Still to drive") +
+              figure(total, "Total streets") +
+            "</div>") +
+      "</div>" +
+      '<div class="card">' +
+        '<dl class="kv">' +
+          kv("City", a.city || "—") +
+          kv("Level", levelLabel(a.level)) +
+          kv("Part of", a.parentName || "—") +
+          kv("Created", a.createdAt ? new Date(a.createdAt).toLocaleDateString() : "—") +
+          kv("Last drive", lastDriveIn(a.name)) +
+        "</dl>" +
+        (a.notes ? '<p class="hint">' + escapeHtml(a.notes) + "</p>" : "") +
+      "</div>" +
+      '<div class="row" style="margin-top:10px">' +
+        '<button id="btnEditArea" class="primary">Edit area</button>' +
+      "</div>";
+
+    el("btnEditArea").addEventListener("click", function () {
+      window.StreetSweepViews.show("areas");
+      select(a.id);
+    });
+  }
+
+  function figure(n, label) {
+    return '<div class="figure"><div class="n">' + Number(n).toLocaleString() + '</div><div class="t">' + label + "</div></div>";
+  }
+  function kv(k, v) { return "<dt>" + k + "</dt><dd>" + escapeHtml(String(v)) + "</dd>"; }
+  function levelLabel(level) {
+    return level === "CITY" ? "City" : level === "METRO" ? "Metro area" : "Neighborhood";
+  }
+
+  function clearDetail() {
+    el("areaDetail").hidden = true;
+    el("mapTitle").textContent = "Pick an area";
+    el("mapSubtitle").textContent =
+      "Click an outline on the map, or choose one under Areas, to see how far through it you are.";
+  }
+
+  // ---- drives ----------------------------------------------------------------
+
+  var driveLayer = L.layerGroup();
+  var driveRows = [];
+
+  function lastDriveIn(name) {
+    var hit = driveRows.filter(function (d) { return d.area === name; })[0];
+    return hit ? new Date(hit.startedAt).toLocaleDateString() : "—";
+  }
+
+  /** A drive's shape, drawn small enough to sit in a list row. */
+  function thumbnail(d) {
+    if (!d.bounds || !d.shape || !d.shape.length) return '<div class="thumb"></div>';
+    var b = d.bounds;
+    var w = Math.max(1e-6, b.east - b.west);
+    var h = Math.max(1e-6, b.north - b.south);
+    var paths = d.shape.map(function (line) {
+      return line.map(function (p, i) {
+        var x = ((p[1] - b.west) / w) * 46 + 1;
+        var y = (1 - (p[0] - b.south) / h) * 38 + 1;
+        return (i ? "L" : "M") + x.toFixed(1) + "," + y.toFixed(1);
+      }).join("");
+    }).join(" ");
+    return '<div class="thumb"><svg viewBox="0 0 48 40" preserveAspectRatio="xMidYMid meet">' +
+      '<path d="' + paths + '" fill="none" stroke="var(--accent)" stroke-width="1.4" ' +
+      'stroke-linecap="round" stroke-linejoin="round"/></svg></div>';
+  }
+
+  function renderDrives(rows) {
+    driveRows = rows;
+    var list = el("driveList");
+    list.innerHTML = "";
+    rows.forEach(function (d) {
+      var li = document.createElement("li");
+      li.className = "area drive";
+      var when = new Date(d.startedAt);
+      var fresh = (d.newMeters || 0) > 0;
+      li.innerHTML = thumbnail(d) +
+        '<div style="flex:1 1 auto;min-width:0">' +
+          '<div class="name">' + when.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
+            ", " + when.getFullYear() + "</div>" +
+          '<div class="meta">' + (d.area ? escapeHtml(d.area) : "outside your areas") + "</div>" +
+        "</div>" +
+        '<div style="text-align:right">' +
+          '<div class="name">' + fmtDistance(d.distanceMeters || 0) + "</div>" +
+          (fresh ? '<div class="badge">+' + fmtDistance(d.newMeters) + "</div>" : "") +
+        "</div>";
+      li.addEventListener("click", function () { showDrive(d); });
+      list.appendChild(li);
+    });
+    el("drivesEmpty").hidden = rows.length > 0;
+  }
+
+  function showDrive(d) {
+    driveLayer.clearLayers();
+    (d.shape || []).forEach(function (line) {
+      L.polyline(line, { color: "#3fbf49", weight: 4, opacity: 0.95 }).addTo(driveLayer);
+    });
+    if (!map.hasLayer(driveLayer)) driveLayer.addTo(map);
+    if (d.bounds) {
+      map.fitBounds([[d.bounds.south, d.bounds.west], [d.bounds.north, d.bounds.east]], { padding: [40, 40] });
+    }
+    var minutes = Math.max(0, (d.endedAt || d.startedAt) - d.startedAt);
+    var share = d.distanceMeters ? Math.round(((d.newMeters || 0) / d.distanceMeters) * 100) : 0;
+    var box = el("driveDetail");
+    box.hidden = false;
+    box.innerHTML =
+      '<p class="eyebrow">' + new Date(d.startedAt).toLocaleString() + "</p>" +
+      '<div class="card"><div class="figures">' +
+        figure2(fmtDistance(d.distanceMeters || 0), "Distance") +
+        figure2(fmtDuration(minutes), "Drive time") +
+        figure2(share + "%", "New streets") +
+      "</div>" +
+      '<p class="hint">' + (d.area ? escapeHtml(d.area) + " · " : "") + d.segments +
+        " street segments" + ((d.newMeters || 0) > 0 ? " · " + fmtDistance(d.newMeters) + " of it new" : "") +
+      "</p></div>";
+  }
+
+  function figure2(value, label) {
+    return '<div class="figure"><div class="n">' + value + '</div><div class="t">' + label + "</div></div>";
+  }
+
+  function loadDrives() {
+    if (!backend) return;
+    apiJson("/api/drives?limit=60&shape=full")
+      .then(function (data) { renderDrives(data.drives || []); })
+      .catch(function (e) { status("Could not read drives: " + e.message); });
+  }
+
+  // ---- cities ----------------------------------------------------------------
+
+  function refreshCities() {
+    var select = el("citySelect");
+    var seen = {};
+    areas.forEach(function (a) { if (a.city) seen[a.city] = true; });
+    var names = Object.keys(seen).sort();
+    var keep = select.value;
+    select.innerHTML = '<option value="">All cities</option>';
+    names.forEach(function (n) {
+      var o = document.createElement("option");
+      o.value = n; o.textContent = n;
+      select.appendChild(o);
+    });
+    select.value = keep;
+  }
+
+  el("citySelect").addEventListener("change", function () {
+    var city = el("citySelect").value;
+    if (!city) return;
+    var inCity = areas.filter(function (a) { return a.city === city && a.points.length >= 3; });
+    if (!inCity.length) return;
+    var bounds = L.latLngBounds([]);
+    inCity.forEach(function (a) { bounds.extend(L.polygon(a.points).getBounds()); });
+    map.fitBounds(bounds, { padding: [40, 40] });
+  });
+
+  // ---- first run --------------------------------------------------------
+
+  setBase(storedBase());
+  clearDetail();
+  window.__ssAreas = function () { return areas; };
+
   load();
   renderList();
+  refreshCities();
+
+  // The server tells the map how far along each area is, so the detail panel has
+  // something to show even before Statistics has been opened.
+  if (backend) {
+    apiJson("/api/coverage?edgeLimit=1")
+      .then(function (data) {
+        (data.areas || []).forEach(function (a) { reported[a.name] = a.stats; });
+      })
+      .catch(function () { /* locked or offline; the panel simply says so */ });
+    loadDrives();
+  }
+
+  // Keep the server card honest about where this is talking to.
+  (function () {
+    var info = el("serverInfo");
+    if (!info) return;
+    info.innerHTML =
+      kv("Address", location.origin) +
+      kv("Storage", backend ? "This server" : "This browser only") +
+      kv("Token", token ? "Unlocked" : "Not needed or not set");
+  })();
 })();
 </script>
 </body>

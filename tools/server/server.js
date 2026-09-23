@@ -28,6 +28,8 @@ const ASSETS = new Set(
     : []
 );
 const LEVELS = new Set(["NEIGHBORHOOD", "CITY", "METRO"]);
+// A segment stamped longer than this after its drive began is not from that drive.
+const DRIVE_EDGE_SLACK_MS = 12 * 60 * 60 * 1000;
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -54,6 +56,11 @@ async function ensureSchema() {
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    -- Added after the first release, so they go on separately rather than in the
+    -- CREATE above, which existing installations have already run.
+    ALTER TABLE areas ADD COLUMN IF NOT EXISTS city  TEXT;
+    ALTER TABLE areas ADD COLUMN IF NOT EXISTS notes TEXT;
+    ALTER TABLE areas ADD COLUMN IF NOT EXISTS color TEXT;
     CREATE INDEX IF NOT EXISTS areas_bbox ON areas (min_lat, min_lng, max_lat, max_lng);
 
     -- What the phone reports back. Kept apart from "areas" on purpose: that table is the
@@ -153,11 +160,18 @@ function cleanArea(body) {
   const lats = points.map((p) => p[0]);
   const lngs = points.map((p) => p[1]);
   const parent = body.parentName ? String(body.parentName).trim().slice(0, 120) : null;
+  const city = body.city ? String(body.city).trim().slice(0, 120) : null;
+  const notes = body.notes ? String(body.notes).trim().slice(0, 2000) : null;
+  // A colour is only ever chosen from the swatches, so anything else is not one.
+  const colour = /^#[0-9a-fA-F]{6}$/.test(String(body.color || "")) ? String(body.color) : null;
 
   return {
     name,
     level,
     parentName: parent || null,
+    city: city || null,
+    notes: notes || null,
+    color: colour,
     polygon: points,
     minLat: Math.min(...lats),
     minLng: Math.min(...lngs),
@@ -172,14 +186,18 @@ function rowToArea(row) {
     name: row.name,
     level: row.level,
     parentName: row.parent_name,
+    city: row.city || null,
+    notes: row.notes || null,
+    color: row.color || null,
     polygon: row.polygon,
+    createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
 // ----------------------------------------------------------------- store
 
-const COLUMNS = "id, name, level, parent_name, polygon, updated_at";
+const COLUMNS = "id, name, level, parent_name, city, notes, color, polygon, created_at, updated_at";
 
 // level is text, so an alphabetical sort would put NEIGHBORHOOD above CITY. Rank it instead,
 // largest place first, the way the phone lists them.
@@ -192,21 +210,23 @@ async function listAreas() {
 
 async function createArea(area) {
   const { rows } = await pool.query(
-    `INSERT INTO areas (name, level, parent_name, polygon, min_lat, min_lng, max_lat, max_lng)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING ${COLUMNS}`,
-    [area.name, area.level, area.parentName, JSON.stringify(area.polygon),
-     area.minLat, area.minLng, area.maxLat, area.maxLng],
+    `INSERT INTO areas (name, level, parent_name, city, notes, color,
+                        polygon, min_lat, min_lng, max_lat, max_lng)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING ${COLUMNS}`,
+    [area.name, area.level, area.parentName, area.city, area.notes, area.color,
+     JSON.stringify(area.polygon), area.minLat, area.minLng, area.maxLat, area.maxLng],
   );
   return rowToArea(rows[0]);
 }
 
 async function updateArea(id, area) {
   const { rows } = await pool.query(
-    `UPDATE areas SET name=$1, level=$2, parent_name=$3, polygon=$4,
-                      min_lat=$5, min_lng=$6, max_lat=$7, max_lng=$8, updated_at=now()
-     WHERE id=$9 RETURNING ${COLUMNS}`,
-    [area.name, area.level, area.parentName, JSON.stringify(area.polygon),
-     area.minLat, area.minLng, area.maxLat, area.maxLng, id],
+    `UPDATE areas SET name=$1, level=$2, parent_name=$3, city=$4, notes=$5, color=$6,
+                      polygon=$7, min_lat=$8, min_lng=$9, max_lat=$10, max_lng=$11,
+                      updated_at=now()
+     WHERE id=$12 RETURNING ${COLUMNS}`,
+    [area.name, area.level, area.parentName, area.city, area.notes, area.color,
+     JSON.stringify(area.polygon), area.minLat, area.minLng, area.maxLat, area.maxLng, id],
   );
   return rows.length ? rowToArea(rows[0]) : null;
 }
@@ -225,6 +245,9 @@ function toGeoJson(areas) {
       ring.push(ring[0]);
       const properties = { kind: "area", name: a.name, level: a.level };
       if (a.parentName) properties.parent = a.parentName;
+      if (a.city) properties.city = a.city;
+      if (a.notes) properties.notes = a.notes;
+      if (a.color) properties.color = a.color;
       return { type: "Feature", properties, geometry: { type: "Polygon", coordinates: [ring] } };
     }),
   };
@@ -402,6 +425,99 @@ async function applySync(body) {
 }
 
 /** Everything the coverage tab draws and counts, in one call. */
+/**
+ * Drives, each with the ground it actually covered.
+ *
+ * The phone does not tie a road segment to a drive, but it does stamp every segment with
+ * when it was driven, and a drive knows when it began and ended. That is enough to hand
+ * each drive its own shape, which is what the list thumbnails and the drive map draw.
+ */
+async function drives(limit, withShapes) {
+  const { rows } = await pool.query(
+    `SELECT started_at, ended_at, trigger, point_count, distance_m, new_segments, new_meters
+     FROM drives ORDER BY started_at DESC LIMIT $1`,
+    [Math.min(Math.max(1, limit || 50), 500)],
+  );
+  if (rows.length === 0) return [];
+
+  const oldest = Number(rows[rows.length - 1].started_at);
+  const { rows: edges } = await pool.query(
+    `SELECT driven_at, length_m, shape, min_lat, min_lng, max_lat, max_lng
+     FROM driven_edges WHERE driven_at >= $1 ORDER BY driven_at`,
+    [oldest],
+  );
+
+  // Areas are matched by whether the drive's middle falls inside one, which is cheap and
+  // right often enough to label a row with.
+  const { rows: areaRows } = await pool.query(`SELECT name, polygon, min_lat, min_lng, max_lat, max_lng FROM areas`);
+
+  // Each segment belongs to one drive: the most recent one that had already started when
+  // it was stamped. Matching runs after a drive ends, so a window around each drive would
+  // let neighbouring drives both claim the same ground.
+  const starts = rows.map((d) => Number(d.started_at)).sort((a, b) => a - b);
+  const owned = new Map(starts.map((t) => [t, []]));
+  for (const e of edges) {
+    const at = Number(e.driven_at);
+    let lo = 0;
+    let hi = starts.length - 1;
+    let found = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (starts[mid] <= at) { found = mid; lo = mid + 1; } else { hi = mid - 1; }
+    }
+    if (found < 0) continue;
+    if (at - starts[found] > DRIVE_EDGE_SLACK_MS) continue;
+    owned.get(starts[found]).push(e);
+  }
+
+  return rows.map((d) => {
+    const from = Number(d.started_at);
+    const mine = owned.get(from) || [];
+    const box = mine.length
+      ? {
+          south: Math.min(...mine.map((e) => e.min_lat)),
+          west: Math.min(...mine.map((e) => e.min_lng)),
+          north: Math.max(...mine.map((e) => e.max_lat)),
+          east: Math.max(...mine.map((e) => e.max_lng)),
+        }
+      : null;
+    const centre = box ? [(box.south + box.north) / 2, (box.west + box.east) / 2] : null;
+    const area = centre ? (areaRows.find((a) => contains(a, centre)) || {}).name || null : null;
+
+    const out = {
+      startedAt: from,
+      endedAt: d.ended_at ? Number(d.ended_at) : null,
+      trigger: d.trigger,
+      points: d.point_count,
+      distanceMeters: Number(d.distance_m) || 0,
+      newSegments: d.new_segments,
+      newMeters: Number(d.new_meters) || 0,
+      area,
+      bounds: box,
+      segments: mine.length,
+    };
+    if (withShapes) out.shape = mine.map((e) => e.shape);
+    else out.shape = mine.map((e) => [e.shape[0], e.shape[e.shape.length - 1]]);
+    return out;
+  });
+}
+
+/** Ray casting, the same test the phone uses. */
+function contains(area, point) {
+  const [lat, lng] = point;
+  if (lat < area.min_lat || lat > area.max_lat || lng < area.min_lng || lng > area.max_lng) return false;
+  const ring = area.polygon || [];
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [ai, aj] = [ring[i], ring[j]];
+    if ((ai[0] > lat) !== (aj[0] > lat) &&
+        lng < ((aj[1] - ai[1]) * (lat - ai[0])) / (aj[0] - ai[0]) + ai[1]) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 async function coverage(edgeLimit) {
   const cap = Math.max(1, Math.min(edgeLimit, EDGE_LIMIT));
   const [areas, edges, drives, pois, totals] = await Promise.all([
@@ -551,6 +667,12 @@ async function handle(req, res) {
 
   if (route === "/api/coverage" && req.method === "GET") {
     return sendJson(res, 200, await coverage(Number(url.searchParams.get("edgeLimit")) || EDGE_LIMIT));
+  }
+
+  if (route === "/api/drives" && req.method === "GET") {
+    const limit = Number(url.searchParams.get("limit")) || 50;
+    const full = url.searchParams.get("shape") === "full";
+    return sendJson(res, 200, { drives: await drives(limit, full) });
   }
 
   const match = route.match(/^\/api\/areas\/(\d+)$/);
