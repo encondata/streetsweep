@@ -67,6 +67,11 @@ val cleanICloudConflictCopies by tasks.registering(Delete::class) {
 }
 tasks.named("preBuild") { dependsOn(cleanICloudConflictCopies) }
 
+tasks.withType<Test>().configureEach {
+    // Test output is where the numbers from the real-area route check come out.
+    testLogging { showStandardStreams = true }
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)

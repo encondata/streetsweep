@@ -18,6 +18,14 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.NearMe
+import androidx.compose.material.icons.filled.NearMeDisabled
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Route
+import androidx.compose.material3.HorizontalDivider
+import com.example.streetsweep.data.RouteState
+import com.example.streetsweep.domain.GuidanceMode
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Navigation
@@ -93,6 +101,9 @@ fun HomeScreen(
     val drawMode by viewModel.drawMode.collectAsStateWithLifecycle()
     val selectedStreet by viewModel.selectedStreet.collectAsStateWithLifecycle()
     val nearest by viewModel.nearest.collectAsStateWithLifecycle()
+    val routeTarget by viewModel.routeTarget.collectAsStateWithLifecycle()
+    val route by viewModel.route.collectAsStateWithLifecycle()
+    val planning by viewModel.planning.collectAsStateWithLifecycle()
     val pendingExclude by viewModel.pendingExcludeCount.collectAsStateWithLifecycle()
     val lastPoiId by viewModel.lastPoiId.collectAsStateWithLifecycle()
     val selectedVertex by viewModel.selectedVertex.collectAsStateWithLifecycle()
@@ -187,7 +198,11 @@ fun HomeScreen(
             if (!drawing) {
                 nearest?.let { n ->
                     Spacer(Modifier.height(6.dp))
-                    GuidanceCard(n) { follow = false; mapController.animateTo(n.point, 16.5) }
+                    val headline = routeTarget?.let { t ->
+                        "On route · ${t.position} of ${t.total} · " +
+                            "${Geo.formatDistance(n.distanceMeters)} ${n.compass}"
+                    } ?: "Nearest undriven · ${Geo.formatDistance(n.distanceMeters)} ${n.compass}"
+                    GuidanceCard(n, headline) { follow = false; mapController.animateTo(n.point, 16.5) }
                 }
             }
         }
@@ -201,6 +216,20 @@ fun HomeScreen(
                     .align(Alignment.BottomEnd)
                     .padding(end = 16.dp, bottom = 160.dp),
             ) { Icon(Icons.Default.Flag, contentDescription = "Mark this spot") }
+        }
+
+        if (!drawing) {
+            GuidanceButton(
+                mode = settings.guidanceMode,
+                planning = planning,
+                route = route,
+                focusedAreaName = focused?.name,
+                onMode = viewModel::setGuidanceMode,
+                onReplan = viewModel::planRoute,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = 224.dp),
+            )
         }
 
         SmallFloatingActionButton(
@@ -388,7 +417,7 @@ private fun CreateAreaDialog(
 }
 
 @Composable
-private fun GuidanceCard(n: NearestStreet, onClick: () -> Unit) {
+private fun GuidanceCard(n: NearestStreet, headline: String, onClick: () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.94f)),
         modifier = Modifier.clickable(onClick = onClick),
@@ -404,7 +433,7 @@ private fun GuidanceCard(n: NearestStreet, onClick: () -> Unit) {
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    "Nearest undriven · ${Geo.formatDistance(n.distanceMeters)} ${n.compass}",
+                    headline,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
                 )
@@ -691,4 +720,131 @@ private fun TriggerChip(label: String, connected: Boolean?) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+/**
+ * The guidance control: a button that says what the map is currently pointing you towards,
+ * and a menu to change it. Sits with the marker button rather than in Settings, because it
+ * is something you change mid-drive.
+ */
+@Composable
+private fun GuidanceButton(
+    mode: GuidanceMode,
+    planning: Boolean,
+    route: RouteState.Planned?,
+    focusedAreaName: String?,
+    onMode: (GuidanceMode) -> Unit,
+    onReplan: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box(modifier) {
+        androidx.compose.material3.FloatingActionButton(
+            onClick = { open = true },
+            containerColor = if (mode == GuidanceMode.OFF) {
+                MaterialTheme.colorScheme.surfaceContainerHigh
+            } else {
+                MaterialTheme.colorScheme.primaryContainer
+            },
+            contentColor = if (mode == GuidanceMode.OFF) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.onPrimaryContainer
+            },
+        ) {
+            if (planning) {
+                CircularProgressIndicator(
+                    Modifier.size(22.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            } else {
+                Icon(
+                    when (mode) {
+                        GuidanceMode.OFF -> Icons.Default.NearMeDisabled
+                        GuidanceMode.NEAREST -> Icons.Default.NearMe
+                        GuidanceMode.ROUTE -> Icons.Default.Route
+                    },
+                    contentDescription = "Guidance",
+                )
+            }
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            Text(
+                "Guidance",
+                Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            GuidanceChoice("Off", "The map only records", Icons.Default.NearMeDisabled,
+                mode == GuidanceMode.OFF) { onMode(GuidanceMode.OFF); open = false }
+            GuidanceChoice("Nearest undriven", "Whichever street owing is closest", Icons.Default.NearMe,
+                mode == GuidanceMode.NEAREST) { onMode(GuidanceMode.NEAREST); open = false }
+            GuidanceChoice(
+                "Drive the whole area",
+                focusedAreaName?.let { "Every street in $it, least backtracking" }
+                    ?: "Pick an area on the map first",
+                Icons.Default.Route,
+                mode == GuidanceMode.ROUTE,
+                enabled = focusedAreaName != null,
+            ) { onMode(GuidanceMode.ROUTE); open = false }
+
+            if (mode == GuidanceMode.ROUTE) {
+                HorizontalDivider()
+                route?.let { planned ->
+                    Text(
+                        buildString {
+                            append("${planned.route.requiredCount} streets · ")
+                            append(Geo.formatDistance(planned.route.totalMeters))
+                            append('\n')
+                            append(Geo.formatDistance(planned.route.deadheadMeters))
+                            append(" of that is backtracking")
+                            if (planned.route.unreachable > 0) {
+                                append("\n${planned.route.unreachable} could not be reached")
+                            }
+                            if (planned.route.truncated) append("\nPlanned the nearest part only")
+                        },
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                DropdownMenuItem(
+                    text = { Text(if (route == null) "Work out a route" else "Work it out again") },
+                    leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                    enabled = !planning && focusedAreaName != null,
+                    onClick = { onReplan(); open = false },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GuidanceChoice(
+    title: String,
+    detail: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = {
+            Column {
+                Text(title, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        leadingIcon = { Icon(icon, contentDescription = null) },
+        trailingIcon = {
+            if (selected) Icon(Icons.Default.Check, contentDescription = "Selected")
+        },
+        enabled = enabled,
+        onClick = onClick,
+    )
 }

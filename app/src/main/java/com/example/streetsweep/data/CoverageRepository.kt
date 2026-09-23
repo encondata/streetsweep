@@ -21,9 +21,13 @@ import com.example.streetsweep.domain.ExclusionReason
 import com.example.streetsweep.domain.Geo
 import com.example.streetsweep.domain.GraphWay
 import com.example.streetsweep.domain.RoadGraph
+import com.example.streetsweep.domain.RoutePlan
+import com.example.streetsweep.domain.RoutePlanner
 import com.example.streetsweep.domain.LatLngPoint
 import com.example.streetsweep.domain.Polygon
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -94,6 +98,14 @@ data class NearestStreet(
 ) {
     val compass: String get() = Geo.compassPoint(bearingDegrees)
 }
+
+/** Where a planned route wants you next, and how far through it you are. */
+data class RouteTarget(
+    val street: NearestStreet,
+    /** 1-based, so it reads as "3 of 128". */
+    val position: Int,
+    val total: Int,
+)
 
 data class AreaWithStats(val area: CoverageArea, val stats: AreaStats) {
     val name get() = area.name
@@ -339,6 +351,54 @@ class CoverageRepository(private val db: AppDatabase) {
         return null
     }
 
+    /**
+     * An order to drive everything still owing in [areaId], starting from [from].
+     *
+     * Every street in the area goes into the graph, driven or not: a street you have
+     * already done is still a road you can use to reach one you have not. Only the ones
+     * still owing are required.
+     */
+    suspend fun planRoute(from: LatLngPoint, areaId: Long): RoutePlan = withContext(Dispatchers.Default) {
+        val rows = dao.getAreaStreets(areaId, PLAN_STREET_LIMIT).map { StreetStatus.fromRow(it) }
+        val ways = rows.filter { it.shape.size >= 2 }
+            .map { GraphWay(it.wayId, it.shape, it.lengthMeters) }
+        val required = rows.filter { it.shape.size >= 2 && !it.excluded && !it.isDone }
+            .map { it.wayId }
+            .toSet()
+        RoutePlanner.plan(ways, required, from)
+    }
+
+    /**
+     * The next street on [plan] that is still owing, and how far from [from] it is.
+     *
+     * Walks the plan rather than trusting a counter, so a street driven out of order --
+     * or one you happened to cover on a different trip -- is simply skipped.
+     */
+    suspend fun nextOnRoute(plan: RoutePlan, from: LatLngPoint): RouteTarget? {
+        val ordered = plan.legs.filter { it.required }.map { it.wayId }.distinct()
+        if (ordered.isEmpty()) return null
+        val byId = ordered.chunked(WAY_LOOKUP_CHUNK)
+            .flatMap { dao.coverageForWays(it) }
+            .associateBy { it.id }
+        for ((index, wayId) in ordered.withIndex()) {
+            val row = byId[wayId] ?: continue
+            val street = StreetStatus.fromRow(row)
+            if (street.excluded || street.isDone || street.shape.size < 2) continue
+            val closest = Geo.closestPointOnPolyline(from, street.shape) ?: continue
+            return RouteTarget(
+                street = NearestStreet(
+                    street = street,
+                    point = closest,
+                    distanceMeters = Geo.distanceToPolylineMeters(from, street.shape),
+                    bearingDegrees = Geo.bearingDegrees(from, closest),
+                ),
+                position = index + 1,
+                total = ordered.size,
+            )
+        }
+        return null
+    }
+
     suspend fun setProgress(id: Long, total: Int, done: Int, error: String? = null, loadedAt: Long? = null) =
         dao.setProgress(id, total, done, error, loadedAt)
 
@@ -410,6 +470,10 @@ class CoverageRepository(private val db: AppDatabase) {
         const val GATE_WAY_LIMIT = 6_000
         const val GATE_ON_ROAD_METERS = 60.0
         private const val CANDIDATE_LIMIT = 400
+        /** Plenty for a neighbourhood or a small city; a metro would be planned area by area. */
+        private const val PLAN_STREET_LIMIT = 6_000
+        /** SQLite caps how many values one IN clause can hold. */
+        private const val WAY_LOOKUP_CHUNK = 900
         private val SEARCH_RADII_METERS = listOf(1_200.0, 4_000.0, 12_000.0)
 
         /** Direction-independent identity for a segment: way id plus its two end points (≈1 m rounding). */

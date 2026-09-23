@@ -40,6 +40,7 @@ import com.example.streetsweep.data.TrackPolyline
 import com.example.streetsweep.domain.ExclusionReason
 import com.example.streetsweep.car.map.BranchPreview
 import com.example.streetsweep.domain.Geo
+import com.example.streetsweep.domain.GuidanceMode
 import com.example.streetsweep.domain.RoadGraph
 import com.example.streetsweep.domain.LatLngPoint
 import com.example.streetsweep.domain.TriggerSource
@@ -455,7 +456,12 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
         renderThread.quitSafely()
     }
 
-    /** Recomputes the nearest undriven street once the car has moved far enough to matter. */
+    /**
+     * Recomputes what the pill points at, once the car has moved far enough to matter.
+     *
+     * Follows whatever the phone was set to. A route planned on the phone before setting
+     * off is picked up here, because both read the same one from the container.
+     */
     private fun updateGuidance() {
         val p = position ?: return
         val last = guidanceFrom
@@ -463,8 +469,17 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
         if (guidanceJob?.isActive == true) return
         guidanceFrom = p
         guidanceJob = lifecycleScope.launch {
+            val mode = container.settings.current().guidanceMode
+            if (mode == GuidanceMode.OFF) {
+                nearest = null
+                requestRender()
+                return@launch
+            }
             val areaId = CoverageRepository.deepestContaining(areas, p)?.area?.id
-            nearest = container.coverageRepository.nearestUndriven(p, areaId)
+            val planned = container.route.plan.value.takeIf { mode == GuidanceMode.ROUTE }
+            nearest = planned
+                ?.let { container.coverageRepository.nextOnRoute(it.route, p)?.street }
+                ?: container.coverageRepository.nearestUndriven(p, areaId)
             requestRender()
         }
     }

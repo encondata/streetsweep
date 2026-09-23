@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.streetsweep.domain.GuidanceMode
 import com.example.streetsweep.domain.TrackingMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -32,6 +33,8 @@ data class TrackingSettings(
     /** Stop recording after this many idle minutes; 0 = never. */
     val autoStopIdleMinutes: Int = 0,
     val colourByRecency: Boolean = false,
+    /** What the map points you towards while you drive. */
+    val guidanceMode: GuidanceMode = GuidanceMode.NEAREST,
     val inVehicleTriggerEnabled: Boolean = false,
     /** Address of the area builder's server. Defaults to the hosted one. */
     val portalUrl: String? = DEFAULT_PORTAL_URL,
@@ -61,6 +64,7 @@ class SettingsRepository(context: Context) {
 
     private object Keys {
         val MODE = stringPreferencesKey("tracking_mode")
+        val GUIDANCE = stringPreferencesKey("guidance_mode")
         val BT_ADDRESS = stringPreferencesKey("bt_trigger_address")
         val BT_NAME = stringPreferencesKey("bt_trigger_name")
         val AA_ENABLED = booleanPreferencesKey("android_auto_trigger_enabled")
@@ -95,6 +99,8 @@ class SettingsRepository(context: Context) {
             lastBackupAt = p[Keys.LAST_BACKUP] ?: 0L,
             autoStopIdleMinutes = p[Keys.IDLE_STOP] ?: 0,
             colourByRecency = p[Keys.RECENCY] ?: false,
+            guidanceMode = p[Keys.GUIDANCE]?.let { g -> GuidanceMode.entries.firstOrNull { it.name == g } }
+                ?: GuidanceMode.NEAREST,
             inVehicleTriggerEnabled = p[Keys.IN_VEHICLE] ?: false,
             portalUrl = p[Keys.PORTAL_URL]?.takeIf { it.isNotBlank() } ?: TrackingSettings.DEFAULT_PORTAL_URL,
             portalToken = p[Keys.PORTAL_TOKEN]?.takeIf { it.isNotBlank() },
@@ -106,6 +112,8 @@ class SettingsRepository(context: Context) {
     suspend fun current(): TrackingSettings = settings.first()
 
     suspend fun setMode(mode: TrackingMode) = store.edit { it[Keys.MODE] = mode.name }
+
+    suspend fun setGuidanceMode(mode: GuidanceMode) = store.edit { it[Keys.GUIDANCE] = mode.name }
 
     suspend fun setBluetoothTrigger(address: String?, name: String?) = store.edit { p ->
         if (address == null) {

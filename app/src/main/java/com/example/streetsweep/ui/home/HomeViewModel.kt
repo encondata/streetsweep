@@ -10,6 +10,8 @@ import com.example.streetsweep.AppContainer
 import com.example.streetsweep.data.AreaWithStats
 import com.example.streetsweep.data.CoverageRepository
 import com.example.streetsweep.data.NearestStreet
+import com.example.streetsweep.data.RouteState
+import com.example.streetsweep.data.RouteTarget
 import com.example.streetsweep.data.StreetStatus
 import com.example.streetsweep.data.osm.ShapeText
 import com.example.streetsweep.data.osm.StreetDownloadWorker
@@ -19,6 +21,7 @@ import com.example.streetsweep.domain.Bounds
 import com.example.streetsweep.domain.ChunkGrid
 import com.example.streetsweep.domain.ExclusionReason
 import com.example.streetsweep.domain.Geo
+import com.example.streetsweep.domain.GuidanceMode
 import com.example.streetsweep.domain.LatLngPoint
 import com.example.streetsweep.domain.Polygon
 import com.example.streetsweep.ui.map.RedrawRequest
@@ -258,16 +261,97 @@ class HomeViewModel(private val container: AppContainer, private val context: Co
         viewModelScope.launch { lastKnownLocation()?.let { position.value = it } }
     }
 
-    /** Recomputed when you move ~10 m, when the area changes, or when coverage/exclusions change. */
+    /** The plan being followed, if any. Shared with the car screen through the container. */
+    val route: StateFlow<RouteState.Planned?> = container.route.plan
+
+    private val _planning = MutableStateFlow(false)
+    val planning: StateFlow<Boolean> = _planning
+
+    fun setGuidanceMode(mode: GuidanceMode) {
+        viewModelScope.launch {
+            container.settings.setGuidanceMode(mode)
+            if (mode != GuidanceMode.ROUTE) container.route.clear()
+            else if (container.route.plan.value == null) planRoute()
+        }
+    }
+
+    /**
+     * Works out an order to drive the focused area in. Wants an area, because "every street
+     * with the least backtracking" is only a sensible question inside a boundary.
+     */
+    fun planRoute() {
+        if (_planning.value) return
+        viewModelScope.launch {
+            val area = focusedArea.value
+            if (area == null) {
+                _message.value = "Pick an area first — a route needs a boundary to work within"
+                return@launch
+            }
+            val from = position.value ?: lastKnownLocation()
+            if (from == null) {
+                _message.value = "No position yet, so there is nowhere to start from"
+                return@launch
+            }
+            _planning.value = true
+            val plan = runCatching { container.coverageRepository.planRoute(from, area.area.id) }
+                .onFailure { _message.value = "Could not work out a route: ${it.message}" }
+                .getOrNull()
+            _planning.value = false
+            if (plan == null) return@launch
+            if (plan.isEmpty) {
+                container.route.clear()
+                _message.value = "Nothing left to drive in ${area.name}"
+                return@launch
+            }
+            container.route.set(area.area.id, area.name, plan)
+            _message.value = buildString {
+                append("${plan.requiredCount} streets, ")
+                append(Geo.formatDistance(plan.totalMeters))
+                append(" with ")
+                append(Geo.formatDistance(plan.deadheadMeters))
+                append(" of backtracking")
+                if (plan.unreachable > 0) append(" · ${plan.unreachable} out of reach")
+            }
+        }
+    }
+
+    /** Where the route wants you next, or null when not following one. */
+    val routeTarget: StateFlow<RouteTarget?> = combine(
+        position.map { p -> p?.let { LatLngPoint(round(it.latitude * 1e4) / 1e4, round(it.longitude * 1e4) / 1e4) } }
+            .distinctUntilChanged(),
+        route,
+        container.coverageRepository.observeDrivenEdgeCount(),
+    ) { pos, planned, _ -> pos to planned }
+        .debounce(400)
+        .mapLatest { (pos, planned) ->
+            if (pos == null || planned == null) null
+            else container.coverageRepository.nextOnRoute(planned.route, pos)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
+     * What the map points at: nothing, the closest street still owing, or the next street
+     * on the plan. All three end up in the same shape so the map and the card do not care
+     * which one they were given.
+     */
     val nearest: StateFlow<NearestStreet?> = combine(
         position.map { p -> p?.let { LatLngPoint(round(it.latitude * 1e4) / 1e4, round(it.longitude * 1e4) / 1e4) } }
             .distinctUntilChanged(),
         focusedArea.map { it?.area?.id }.distinctUntilChanged(),
         container.coverageRepository.observeDrivenEdgeCount(),
         container.coverageRepository.observeExclusionCount(),
-    ) { pos, areaId, _, _ -> pos to areaId }
+        settings.map { it.guidanceMode }.distinctUntilChanged(),
+    ) { pos, areaId, _, _, mode -> Triple(pos, areaId, mode) }
         .debounce(400)
-        .mapLatest { (pos, areaId) -> if (pos == null) null else container.coverageRepository.nearestUndriven(pos, areaId) }
+        .mapLatest { (pos, areaId, mode) ->
+            when {
+                pos == null || mode == GuidanceMode.OFF -> null
+                mode == GuidanceMode.NEAREST -> container.coverageRepository.nearestUndriven(pos, areaId)
+                else -> container.route.plan.value
+                    ?.let { container.coverageRepository.nextOnRoute(it.route, pos) }?.street
+                    ?: container.coverageRepository.nearestUndriven(pos, areaId)
+            }
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** Id of the marker just placed, so the snackbar's "Add note" knows what to edit. */

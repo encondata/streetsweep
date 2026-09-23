@@ -2,6 +2,7 @@ package com.example.streetsweep
 
 import android.content.Context
 import com.example.streetsweep.data.CoverageRepository
+import com.example.streetsweep.data.RouteState
 import com.example.streetsweep.data.TrackRepository
 import com.example.streetsweep.data.backup.BackupManager
 import com.example.streetsweep.data.db.AppDatabase
@@ -27,6 +28,9 @@ class AppContainer(context: Context) {
     val database: AppDatabase by lazy { AppDatabase.build(appContext) }
     val trackRepository: TrackRepository by lazy { TrackRepository(database) }
     val coverageRepository: CoverageRepository by lazy { CoverageRepository(database) }
+
+    /** The route being followed, shared by the phone screen and the car screen. */
+    val route: RouteState by lazy { RouteState() }
     val settings: SettingsRepository by lazy { SettingsRepository(appContext) }
     val valhalla: ValhallaClient by lazy { ValhallaClient { settings.current().valhallaUrl } }
     val overpass: OverpassClient by lazy { OverpassClient { settings.current().overpassUrl } }

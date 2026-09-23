@@ -54,6 +54,13 @@ object Geo {
     }
 
     /** Shortest distance from [p] to a polyline, or [Double.MAX_VALUE] for an empty one. */
+    /** How long a polyline is, end to end. */
+    fun pathLengthMeters(line: List<LatLngPoint>): Double {
+        var total = 0.0
+        for (i in 0 until line.size - 1) total += distanceMeters(line[i], line[i + 1])
+        return total
+    }
+
     fun distanceToPolylineMeters(p: LatLngPoint, line: List<LatLngPoint>): Double {
         if (line.isEmpty()) return Double.MAX_VALUE
         if (line.size == 1) return distanceMeters(p, line[0])

@@ -88,6 +88,32 @@ interface CoverageDao {
     )
     fun observeAreaStreets(areaId: Long, limit: Int): Flow<List<WayCoverageRow>>
 
+    /** The same rows, read once, for planning a route through an area. */
+    @Query(
+        """
+        SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape,
+               COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) AS drivenMeters,
+               EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id) AS excluded
+        FROM area_ways aw
+        JOIN osm_ways w ON w.id = aw.wayId
+        WHERE aw.areaId = :areaId
+        LIMIT :limit
+        """,
+    )
+    suspend fun getAreaStreets(areaId: Long, limit: Int): List<WayCoverageRow>
+
+    /** Coverage for a named set of streets, for walking down a planned route. */
+    @Query(
+        """
+        SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape,
+               COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) AS drivenMeters,
+               EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id) AS excluded
+        FROM osm_ways w
+        WHERE w.id IN (:wayIds)
+        """,
+    )
+    suspend fun coverageForWays(wayIds: List<Long>): List<WayCoverageRow>
+
     /** Not-yet-driven, not-excluded streets near a point, for "nearest undriven" guidance. */
     @Query(
         """
