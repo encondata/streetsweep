@@ -78,4 +78,15 @@ data class Poi(
     val note: String?,
     /** Drive that was being recorded at the time, if any (informational, no FK). */
     val sessionId: Long?,
+    /** What to call it. The note is for the detail; this is for the list. */
+    val name: String? = null,
+    /** A photo taken here, as a file in the app's own storage. */
+    val photoPath: String? = null,
+    /** Set once that photo has reached the server, so it is not sent twice. */
+    val photoSyncedAt: Long = 0,
+    /**
+     * When the name or note last changed, on either side. The server keeps whichever
+     * edit is newer, so this is what decides a disagreement.
+     */
+    val updatedAt: Long = 0,
 )

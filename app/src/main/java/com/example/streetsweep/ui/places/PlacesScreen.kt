@@ -41,29 +41,74 @@ import com.example.streetsweep.domain.Bounds
 import com.example.streetsweep.ui.common.Format
 import com.example.streetsweep.ui.common.containerViewModel
 import com.example.streetsweep.ui.map.MapFocus
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.BrokenImage
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import com.example.streetsweep.data.PlacePhotos
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-class PlacesViewModel(private val container: AppContainer) : ViewModel() {
+class PlacesViewModel(
+    private val container: AppContainer,
+    private val context: android.content.Context,
+) : ViewModel() {
     val pois: StateFlow<List<Poi>> = container.trackRepository.observePois()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    fun setNote(id: Long, note: String) = viewModelScope.launch { container.trackRepository.setPoiNote(id, note) }
-    fun delete(id: Long) = viewModelScope.launch { container.trackRepository.deletePoi(id) }
+    fun setDetails(id: Long, name: String, note: String) = viewModelScope.launch {
+        container.trackRepository.setPoiDetails(id, name, note)
+    }
+
+    fun delete(id: Long) = viewModelScope.launch {
+        PlacePhotos.delete(context, id)
+        container.trackRepository.deletePoi(id)
+    }
+
+    /** Where the camera should write, handed out just before it is asked to. */
+    fun photoTarget(id: Long): android.net.Uri {
+        val file = PlacePhotos.fileFor(context, id)
+        file.parentFile?.mkdirs()
+        return PlacePhotos.writableUri(context, file)
+    }
+
+    fun photoTaken(id: Long) = viewModelScope.launch {
+        val file = PlacePhotos.fileFor(context, id)
+        container.trackRepository.setPoiPhoto(id, if (file.exists() && file.length() > 0) file.path else null)
+    }
+
+    fun dropPhoto(id: Long) = viewModelScope.launch {
+        PlacePhotos.delete(context, id)
+        container.trackRepository.setPoiPhoto(id, null)
+    }
 }
 
 @Composable
 fun PlacesScreen(
     onBack: () -> Unit,
     onShowOnMap: () -> Unit,
-    viewModel: PlacesViewModel = containerViewModel { c, _ -> PlacesViewModel(c) },
+    viewModel: PlacesViewModel = containerViewModel { c, ctx -> PlacesViewModel(c, ctx) },
 ) {
     val pois by viewModel.pois.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<Poi?>(null) }
     var pendingDelete by remember { mutableStateOf<Poi?>(null) }
+    var awaitingPhotoFor by remember { mutableStateOf<Long?>(null) }
+
+    val takePhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
+        awaitingPhotoFor?.let { if (saved) viewModel.photoTaken(it) }
+        awaitingPhotoFor = null
+    }
 
     Scaffold(
         topBar = {
@@ -92,7 +137,8 @@ fun PlacesScreen(
                         MapFocus.request(Bounds(p.latitude - d, p.longitude - d, p.latitude + d, p.longitude + d))
                         onShowOnMap()
                     },
-                    headlineContent = { Text(p.note ?: "No note") },
+                    leadingContent = { PlaceThumb(p) },
+                    headlineContent = { Text(p.name ?: p.note ?: "Marked spot") },
                     supportingContent = {
                         Text(
                             Format.dateTime(p.timestamp) + " · " +
@@ -102,7 +148,11 @@ fun PlacesScreen(
                     },
                     trailingContent = {
                         androidx.compose.foundation.layout.Row {
-                            TextButton(onClick = { editing = p }) { Text("Note") }
+                            IconButton(onClick = {
+                                awaitingPhotoFor = p.id
+                                takePhoto.launch(viewModel.photoTarget(p.id))
+                            }) { Icon(Icons.Default.PhotoCamera, contentDescription = "Take a photo") }
+                            TextButton(onClick = { editing = p }) { Text("Edit") }
                             IconButton(onClick = { pendingDelete = p }) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
                         }
                     },
@@ -113,12 +163,37 @@ fun PlacesScreen(
     }
 
     editing?.let { p ->
+        var name by remember(p.id) { mutableStateOf(p.name.orEmpty()) }
         var note by remember(p.id) { mutableStateOf(p.note.orEmpty()) }
         AlertDialog(
             onDismissRequest = { editing = null },
-            title = { Text("Note") },
-            text = { OutlinedTextField(value = note, onValueChange = { note = it }, minLines = 2, modifier = Modifier.fillMaxWidth()) },
-            confirmButton = { TextButton(onClick = { viewModel.setNote(p.id, note); editing = null }) { Text("Save") } },
+            title = { Text("Marked spot") },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("Name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    androidx.compose.foundation.layout.Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = note,
+                        onValueChange = { note = it },
+                        label = { Text("Notes") },
+                        minLines = 2,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (p.photoPath != null) {
+                        androidx.compose.foundation.layout.Spacer(Modifier.height(10.dp))
+                        TextButton(onClick = { viewModel.dropPhoto(p.id); editing = null }) { Text("Remove the photo") }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.setDetails(p.id, name, note); editing = null }) { Text("Save") }
+            },
             dismissButton = { TextButton(onClick = { editing = null }) { Text("Cancel") } },
         )
     }
@@ -126,9 +201,49 @@ fun PlacesScreen(
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
             title = { Text("Delete this spot?") },
-            text = { Text(p.note ?: Format.dateTime(p.timestamp)) },
+            text = { Text(p.name ?: p.note ?: Format.dateTime(p.timestamp)) },
             confirmButton = { TextButton(onClick = { viewModel.delete(p.id); pendingDelete = null }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** The photo, if one was taken here, small enough to sit in a list row. */
+@Composable
+private fun PlaceThumb(p: Poi) {
+    val path = p.photoPath
+    if (path == null) {
+        Icon(
+            Icons.Default.Place,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(44.dp).padding(10.dp),
+        )
+        return
+    }
+    val bitmap = remember(path, p.updatedAt) {
+        runCatching {
+            android.graphics.BitmapFactory.decodeFile(
+                path,
+                android.graphics.BitmapFactory.Options().apply { inSampleSize = 8 },
+            )
+        }.getOrNull()
+    }
+    if (bitmap == null) {
+        Icon(
+            Icons.Default.BrokenImage,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(44.dp).padding(10.dp),
+        )
+    } else {
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = "Photo of this spot",
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(8.dp)),
         )
     }
 }

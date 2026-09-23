@@ -60,7 +60,22 @@ class TrackRepository(private val db: AppDatabase) {
     fun observePois(): Flow<List<Poi>> = pois.observeAll()
     fun observePoisInView(b: Bounds, limit: Int = 500): Flow<List<Poi>> = pois.observeInView(b.south, b.west, b.north, b.east, limit)
     suspend fun getPoi(id: Long): Poi? = pois.get(id)
-    suspend fun setPoiNote(id: Long, note: String?) = pois.setNote(id, note?.trim()?.takeIf { it.isNotEmpty() })
+    suspend fun setPoiNote(id: Long, note: String?) =
+        pois.setNote(id, note?.trim()?.takeIf { it.isNotEmpty() }, System.currentTimeMillis())
+
+    suspend fun setPoiDetails(id: Long, name: String?, note: String?) = pois.setDetails(
+        id,
+        name?.trim()?.takeIf { it.isNotEmpty() },
+        note?.trim()?.takeIf { it.isNotEmpty() },
+        System.currentTimeMillis(),
+    )
+
+    suspend fun setPoiPhoto(id: Long, path: String?) =
+        pois.setPhoto(id, path, System.currentTimeMillis())
+
+    suspend fun poisWithUnsentPhotos(): List<Poi> = pois.withUnsentPhotos()
+
+    suspend fun markPoiPhotoSent(id: Long) = pois.markPhotoSynced(id, System.currentTimeMillis())
     suspend fun deletePoi(id: Long) = pois.delete(id)
 
     suspend fun addCoverageStats(sessionId: Long, segments: Int, meters: Double) =

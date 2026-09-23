@@ -22,8 +22,20 @@ interface PoiDao {
     @Query("SELECT * FROM pois WHERE id = :id")
     suspend fun get(id: Long): Poi?
 
-    @Query("UPDATE pois SET note = :note WHERE id = :id")
-    suspend fun setNote(id: Long, note: String?)
+    @Query("UPDATE pois SET note = :note, updatedAt = :at WHERE id = :id")
+    suspend fun setNote(id: Long, note: String?, at: Long)
+
+    @Query("UPDATE pois SET name = :name, note = :note, updatedAt = :at WHERE id = :id")
+    suspend fun setDetails(id: Long, name: String?, note: String?, at: Long)
+
+    @Query("UPDATE pois SET photoPath = :path, photoSyncedAt = 0, updatedAt = :at WHERE id = :id")
+    suspend fun setPhoto(id: Long, path: String?, at: Long)
+
+    @Query("UPDATE pois SET photoSyncedAt = :at WHERE id = :id")
+    suspend fun markPhotoSynced(id: Long, at: Long)
+
+    @Query("SELECT * FROM pois WHERE photoPath IS NOT NULL AND photoSyncedAt = 0")
+    suspend fun withUnsentPhotos(): List<Poi>
 
     @Query("DELETE FROM pois WHERE id = :id")
     suspend fun delete(id: Long)

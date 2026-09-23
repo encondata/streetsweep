@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the folder the app writes marked-place photos into is shared, and only for as
+     long as the camera needs to write one. -->
+<paths>
+    <files-path name="place-photos" path="place-photos/" />
+</paths>

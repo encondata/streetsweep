@@ -4,6 +4,7 @@ import kotlinx.coroutines.test.runTest
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -15,7 +16,14 @@ import java.util.concurrent.CountDownLatch
 import kotlin.concurrent.thread
 
 /** One request seen by [FakePortal]. */
-private data class Seen(val method: String, val path: String, val auth: String?, val body: String)
+private data class Seen(
+    val method: String,
+    val path: String,
+    val auth: String?,
+    val body: String,
+    val contentType: String? = null,
+    val bytes: ByteArray = ByteArray(0),
+)
 
 /**
  * A throwaway HTTP server on a real socket. The Android unit-test classpath has no
@@ -39,11 +47,21 @@ private class FakePortal(private val expectedToken: String) {
         ready.await()
     }
 
+    private fun readFully(reader: java.io.Reader, into: CharArray) {
+        var read = 0
+        while (read < into.size) {
+            val n = reader.read(into, read, into.size - read)
+            if (n < 0) break
+            read += n
+        }
+    }
+
     private fun handle(client: java.net.Socket) {
-        val reader = BufferedReader(InputStreamReader(client.getInputStream()))
+        val reader = BufferedReader(InputStreamReader(client.getInputStream(), Charsets.ISO_8859_1))
         val request = reader.readLine() ?: return
         val (method, path) = request.split(" ").let { it[0] to it[1] }
         var auth: String? = null
+        var contentType: String? = null
         var length = 0
         while (true) {
             val line = reader.readLine().orEmpty()
@@ -52,29 +70,37 @@ private class FakePortal(private val expectedToken: String) {
             val value = line.substringAfter(':').trim()
             if (name == "authorization") auth = value
             if (name == "content-length") length = value.toInt()
+            if (name == "content-type") contentType = value
         }
-        val body = CharArray(length).also { if (length > 0) reader.read(it, 0, length) }.concatToString()
-        synchronized(seen) { seen += Seen(method, path, auth, body) }
+        // ISO-8859-1 maps each byte to one char, so binary survives the reader intact.
+        val raw = CharArray(length).also { if (length > 0) readFully(reader, it) }
+        val bytes = ByteArray(length) { raw[it].code.toByte() }
+        val body = String(bytes, Charsets.UTF_8)
+        synchronized(seen) { seen += Seen(method, path, auth, body, contentType, bytes) }
 
         val (code, text) = when {
             auth != "Bearer $expectedToken" -> 401 to """{"error":"A token is required","needsToken":true}"""
             path == "/api/health" -> 200 to """{"ok":true}"""
             path == "/api/sync" -> 200 to """{"ok":true}"""
+            path.endsWith("/photo") -> 200 to """{"ok":true}"""
+            path == "/api/pois" -> 200 to POIS
             else -> 404 to """{"error":"No such thing here"}"""
         }
-        val bytes = text.toByteArray()
+        val reply = text.toByteArray()
         client.getOutputStream().apply {
             write(
                 ("HTTP/1.1 $code X\r\nContent-Type: application/json\r\n" +
-                    "Content-Length: ${bytes.size}\r\nConnection: close\r\n\r\n").toByteArray()
+                    "Content-Length: ${reply.size}\r\nConnection: close\r\n\r\n").toByteArray()
             )
-            write(bytes)
+            write(reply)
             flush()
         }
     }
 
     fun close() = socket.close()
 }
+
+private const val POIS = """{"pois":[{"id":"1:2.0:3.0","lat":2.0,"lng":3.0,"name":"Edited on the web","note":"n","hasPhoto":false,"at":1,"updatedAt":99}]}"""
 
 class PortalClientTest {
 
@@ -120,6 +146,36 @@ class PortalClientTest {
         assertEquals("POST", call.method)
         assertEquals("/api/sync", call.path)
         assertTrue(JSONObject(call.body).getBoolean("resetEdges"))
+    }
+
+    @Test
+    fun `a photo is posted as its own bytes, under the place's key`() = runTest {
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte(), 0, 16, 7, 42, 0xFF.toByte(), 0xD9.toByte())
+        client().putPhoto("1790091275362:30.404337:-95.635470", jpeg, "image/jpeg")
+
+        val call = portal.seen.single()
+        assertEquals("POST", call.method)
+        // The key has colons in it, which have to survive as part of one path segment.
+        assertEquals("/api/pois/1790091275362%3A30.404337%3A-95.635470/photo", call.path)
+        assertEquals("image/jpeg", call.contentType)
+        assertEquals("Bearer right-token", call.auth)
+        assertArrayEquals("the photo should arrive byte for byte", jpeg, call.bytes)
+    }
+
+    @Test
+    fun `a rejected photo upload is reported rather than silently dropped`() = runTest {
+        val failure = runCatching {
+            client(token = "wrong-token").putPhoto("k", byteArrayOf(1, 2, 3), "image/jpeg")
+        }.exceptionOrNull()
+        assertTrue("expected a PortalException, got $failure", failure is PortalException)
+    }
+
+    @Test
+    fun `the places the server holds can be read back`() = runTest {
+        val body = client().getJson("/api/pois")
+        val rows = JSONObject(body).getJSONArray("pois")
+        assertEquals(1, rows.length())
+        assertEquals("Edited on the web", rows.getJSONObject(0).getString("name"))
     }
 
     @Test

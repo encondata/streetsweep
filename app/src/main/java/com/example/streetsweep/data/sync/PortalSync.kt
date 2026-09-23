@@ -35,6 +35,55 @@ class PortalSync(
         return coverage.importAreas(fresh).size
     }
 
+    /** The key the server gives a marked place, so the phone can address one. */
+    private fun poiKey(p: com.example.streetsweep.data.db.Poi): String =
+        "%d:%.6f:%.6f".format(java.util.Locale.US, p.timestamp, p.latitude, p.longitude)
+
+    /**
+     * Sends any photo the server has not had yet.
+     *
+     * Runs after the places themselves, because the server will not take a photo for a
+     * place it has never heard of.
+     */
+    suspend fun pushPhotos(): Int {
+        var sent = 0
+        for (p in tracks.poisWithUnsentPhotos()) {
+            val file = p.photoPath?.let { java.io.File(it) } ?: continue
+            if (!file.exists()) continue
+            runCatching {
+                client.putPhoto(poiKey(p), file.readBytes(), "image/jpeg")
+                tracks.markPoiPhotoSent(p.id)
+                sent++
+            }.onFailure { Log.w(TAG, "photo for place ${p.id} did not send: ${it.message}") }
+        }
+        return sent
+    }
+
+    /**
+     * Takes back any name or note edited on the portal.
+     *
+     * The server holds whichever edit is newer, so anything it reports as newer than what
+     * is here is an edit made on the web since the last sync.
+     */
+    suspend fun pullPlaceEdits(): Int {
+        val body = runCatching { client.getJson("/api/pois") }.getOrNull() ?: return 0
+        val rows = JSONObject(body).optJSONArray("pois") ?: return 0
+        val mine = tracks.getAllPois().associateBy { poiKey(it) }
+        var changed = 0
+        for (i in 0 until rows.length()) {
+            val row = rows.getJSONObject(i)
+            val local = mine[row.optString("id")] ?: continue
+            val theirs = row.optLong("updatedAt")
+            if (theirs <= maxOf(local.updatedAt, local.timestamp)) continue
+            val name = row.optString("name").takeIf { it.isNotBlank() && it != "null" }
+            val note = row.optString("note").takeIf { it.isNotBlank() && it != "null" }
+            if (name == local.name && note == local.note) continue
+            tracks.setPoiDetails(local.id, name, note)
+            changed++
+        }
+        return changed
+    }
+
     suspend fun push(full: Boolean = false): PushResult {
         val since = if (full) 0L else settings.current().lastPortalPushAt
         val startedAt = System.currentTimeMillis()
@@ -61,6 +110,13 @@ class PortalSync(
             sent += batch.size
             Log.d(TAG, "pushed $sent of ${edges.size} segments")
         }
+
+        // Photos go after the places, because the server will not take one for a place
+        // it has not heard of. Taking back edits made on the portal goes last, so a name
+        // typed there is not overwritten by the push that just went out.
+        val photos = runCatching { pushPhotos() }.getOrDefault(0)
+        val pulled = runCatching { pullPlaceEdits() }.getOrDefault(0)
+        if (photos > 0 || pulled > 0) Log.d(TAG, "sent $photos photos, took back $pulled edits")
 
         settings.setLastPortalPushAt(startedAt)
         return PushResult(areas.size, sent, drives.size, pois.size)
@@ -94,8 +150,11 @@ class PortalSync(
     private fun poiJson(p: com.example.streetsweep.data.db.Poi) = JSONObject()
         .put("lat", p.latitude)
         .put("lng", p.longitude)
+        .put("name", p.name ?: JSONObject.NULL)
         .put("note", p.note ?: JSONObject.NULL)
         .put("at", p.timestamp)
+        // The server keeps whichever side edited last, so it needs to know when.
+        .put("updatedAt", if (p.updatedAt > 0) p.updatedAt else p.timestamp)
 
     private fun edgeJson(e: com.example.streetsweep.data.db.DrivenEdge) = JSONObject()
         .put("key", e.key)

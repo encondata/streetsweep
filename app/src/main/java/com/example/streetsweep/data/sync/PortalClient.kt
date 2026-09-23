@@ -51,6 +51,24 @@ class PortalClient(
         }
     }
 
+    suspend fun getJson(path: String): String = get(path)
+
+    /** Sends a photo for a marked place. The server keys it by the place's own id. */
+    suspend fun putPhoto(poiKey: String, bytes: ByteArray, contentType: String): Unit =
+        withContext(Dispatchers.IO) {
+            val conn = open("/api/pois/" + java.net.URLEncoder.encode(poiKey, "UTF-8") + "/photo")
+            try {
+                conn.requestMethod = "POST"
+                conn.doOutput = true
+                conn.setFixedLengthStreamingMode(bytes.size)
+                conn.setRequestProperty("Content-Type", contentType)
+                conn.outputStream.use { it.write(bytes) }
+                readResponse(conn)
+            } finally {
+                conn.disconnect()
+            }
+        }
+
     private suspend fun get(path: String): String = withContext(Dispatchers.IO) {
         val conn = open(path)
         try {
