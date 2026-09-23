@@ -45,7 +45,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -232,13 +231,17 @@ fun HomeScreen(
             )
         }
 
-        SmallFloatingActionButton(
+        androidx.compose.material3.FloatingActionButton(
             onClick = {
+                // Neutral, so the guidance button above is the only green one and reads as
+                // the thing that is switched on.
                 follow = true
                 scope.launch {
                     (lastPoint ?: viewModel.lastKnownLocation())?.let { mapController.animateTo(it, 15.0) }
                 }
             },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 16.dp, bottom = 96.dp),
