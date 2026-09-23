@@ -872,6 +872,7 @@ window.StreetSweepBases = {
 
   function adoptFromServer(list) {
     clearAllAreas();
+    setTimeout(refreshCities, 0);
     (list || []).forEach(function (a) {
       var pts = a.polygon.map(function (p) { return L.latLng(p[0], p[1]); });
       if (pts.length < 3) return;
@@ -1805,7 +1806,6 @@ window.StreetSweepBases = {
 
   load();
   renderList();
-  refreshCities();
 
   // The server tells the map how far along each area is, so the detail panel has
   // something to show even before Statistics has been opened.
