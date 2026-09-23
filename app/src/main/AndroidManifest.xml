@@ -23,6 +23,9 @@
     <!-- Package visibility for the Android Auto connection state provider (androidx.car.app CarConnection). -->
     <queries>
         <provider android:authorities="androidx.car.app.connection" />
+        <!-- So the app can say whether Android Auto is there at all, which is the first
+             thing worth knowing when the car screen does not appear. -->
+        <package android:name="com.google.android.projection.gearhead" />
     </queries>
 
     <application

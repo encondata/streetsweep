@@ -36,6 +36,13 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.streetsweep.tracking.CarAppHealth
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -241,6 +248,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
                     )
                 },
             )
+            CarScreenHealth()
 
             ListItem(
                 leadingContent = { Icon(Icons.Default.DirectionsCar, contentDescription = null) },
@@ -557,5 +565,64 @@ private fun BluetoothDevicePicker(
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
+}
+
+/**
+ * What this phone can see about the car screen.
+ *
+ * A sideloaded car app is easy to lose: Android Auto only lists apps it has been told to
+ * trust, and its own updates reset that. From the car there is no way to tell a broken app
+ * from an unlisted one, so this says which it is.
+ */
+@Composable
+private fun CarScreenHealth() {
+    val context = LocalContext.current
+    var health by remember { mutableStateOf<CarAppHealth?>(null) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    // Read it again on the way back from Android Auto's settings, so a change there shows.
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) health = CarAppHealth.read(context)
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+
+    val h = health ?: return
+    ListItem(
+        leadingContent = {
+            Icon(
+                if (h.looksRight) Icons.Default.CheckCircle else Icons.Default.ErrorOutline,
+                contentDescription = null,
+                tint = if (h.looksRight) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+            )
+        },
+        headlineContent = { Text("Car screen") },
+        supportingContent = {
+            Text(
+                buildString {
+                    when {
+                        !h.androidAutoInstalled -> append("Android Auto is not installed on this phone.")
+                        !h.serviceDeclared || !h.serviceEnabled ->
+                            append("This phone cannot see StreetSweep's car screen. Reinstall the app.")
+                        else -> append("StreetSweep's car screen is installed and switched on.")
+                    }
+                    h.androidAutoVersion?.let { append(" Android Auto $it.") }
+                    if (h.looksRight) {
+                        append(
+                            " If it is still missing from the car, Android Auto has stopped trusting it: " +
+                                "turn on Developer settings \u2192 Unknown sources, then reconnect. " +
+                                "The car's app list is only rebuilt when a car connects.",
+                        )
+                    }
+                },
+            )
+        },
+        trailingContent = {
+            if (h.androidAutoInstalled) {
+                TextButton(onClick = { CarAppHealth.openAndroidAuto(context) }) { Text("Open") }
+            }
+        },
     )
 }
