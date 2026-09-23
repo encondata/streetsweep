@@ -5,5 +5,5 @@
   "description": "Static area-drawing page plus a small JSON API backed by Postgres",
   "main": "server.js",
   "scripts": { "start": "node server.js" },
-  "dependencies": { "pg": "8.13.1" }
+  "dependencies": { "pg": "8.13.1", "minio": "8.0.2" }
 }

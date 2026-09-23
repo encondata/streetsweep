@@ -8,6 +8,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { Pool } = require("pg");
+const Minio = require("minio");
 
 const PORT = Number(process.env.PORT || 80);
 // Set SYNC_TOKEN to require a shared secret on every /api call. Leave it empty only on a
@@ -28,6 +29,44 @@ const ASSETS = new Set(
     : []
 );
 const LEVELS = new Set(["NEIGHBORHOOD", "CITY", "METRO"]);
+
+// ---------------------------------------------------------------- photos
+//
+// Photos go to object storage rather than the database: they are large, read rarely,
+// and nothing joins against them. Only this service holds the credentials, and it
+// streams them out itself, so the bucket stays private and one token still guards
+// everything.
+
+const S3_BUCKET = process.env.S3_BUCKET || "streetsweep-photos";
+const PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const PHOTO_MAX_BYTES = 12 * 1024 * 1024;
+
+const photos = process.env.S3_ENDPOINT
+  ? new Minio.Client({
+      endPoint: process.env.S3_ENDPOINT,
+      port: Number(process.env.S3_PORT || 9000),
+      useSSL: String(process.env.S3_SSL || "") === "true",
+      accessKey: process.env.S3_KEY || "",
+      secretKey: process.env.S3_SECRET || "",
+    })
+  : null;
+
+async function readyPhotos() {
+  if (!photos) {
+    console.log("No S3_ENDPOINT set, so photos are turned off.");
+    return;
+  }
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      if (!(await photos.bucketExists(S3_BUCKET))) await photos.makeBucket(S3_BUCKET);
+      console.log(`Photos going to ${S3_BUCKET}.`);
+      return;
+    } catch (err) {
+      if (attempt === 29) { console.error("Photo storage never came up:", err.message); return; }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+}
 // A segment stamped longer than this after its drive began is not from that drive.
 const DRIVE_EDGE_SLACK_MS = 12 * 60 * 60 * 1000;
 
@@ -115,6 +154,12 @@ async function ensureSchema() {
       note TEXT,
       at   BIGINT NOT NULL
     );
+    -- A marked place can be named and photographed after the fact, from either the
+    -- phone or this page, so it needs somewhere to keep both and a way to tell which
+    -- side edited last.
+    ALTER TABLE pois ADD COLUMN IF NOT EXISTS name       TEXT;
+    ALTER TABLE pois ADD COLUMN IF NOT EXISTS photo_key  TEXT;
+    ALTER TABLE pois ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0;
   `);
 }
 
@@ -177,6 +222,34 @@ function cleanArea(body) {
     minLng: Math.min(...lngs),
     maxLat: Math.max(...lats),
     maxLng: Math.max(...lngs),
+  };
+}
+
+/** Reads a request body as bytes rather than JSON, for a photo upload. */
+function readBytes(req, limit) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on("data", (c) => {
+      size += c.length;
+      if (size > limit) { reject(new BadRequest("That photo is too large")); req.destroy(); return; }
+      chunks.push(c);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+function rowToPoi(r) {
+  return {
+    id: r.id,
+    lat: Number(r.lat),
+    lng: Number(r.lng),
+    name: r.name || null,
+    note: r.note || null,
+    hasPhoto: Boolean(r.photo_key),
+    at: Number(r.at),
+    updatedAt: Number(r.updated_at) || Number(r.at),
   };
 }
 
@@ -254,6 +327,10 @@ function toGeoJson(areas) {
 }
 
 function round(v) { return Math.round(v * 1e6) / 1e6; }
+
+function extensionFor(type) {
+  return type === "image/png" ? ".png" : type === "image/webp" ? ".webp" : ".jpg";
+}
 
 /** Accepts a GeoJSON document and stores every polygon in it. */
 async function importGeoJson(doc) {
@@ -399,19 +476,37 @@ async function applySync(body) {
     }
 
     if (Array.isArray(body.pois)) {
-      await client.query("DELETE FROM pois");
+      // The phone owns which places exist and where they are, so one it no longer
+      // has is one you deleted. It does not own the name and note: those can be
+      // written from this page too, so the newer edit wins rather than the last
+      // sender. Wiping the table and refilling it, as this used to, threw away
+      // anything written here between drives.
+      const keep = [];
       for (const p of body.pois) {
         const lat = Number(p.lat);
         const lng = Number(p.lng);
         const at = num(p.at, 0);
         if (!Number.isFinite(lat) || !Number.isFinite(lng) || !at) { result.skipped++; continue; }
+        const id = at + ":" + lat.toFixed(6) + ":" + lng.toFixed(6);
+        keep.push(id);
         await client.query(
-          `INSERT INTO pois (id, lat, lng, note, at) VALUES ($1,$2,$3,$4,$5)
-           ON CONFLICT (id) DO UPDATE SET lat=EXCLUDED.lat, lng=EXCLUDED.lng, note=EXCLUDED.note`,
-          [at + ":" + lat.toFixed(6) + ":" + lng.toFixed(6), lat, lng, p.note || null, at],
+          `INSERT INTO pois (id, lat, lng, note, name, photo_key, at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           ON CONFLICT (id) DO UPDATE SET
+             lat = EXCLUDED.lat,
+             lng = EXCLUDED.lng,
+             note = CASE WHEN EXCLUDED.updated_at >= pois.updated_at THEN EXCLUDED.note ELSE pois.note END,
+             name = CASE WHEN EXCLUDED.updated_at >= pois.updated_at THEN EXCLUDED.name ELSE pois.name END,
+             photo_key = COALESCE(EXCLUDED.photo_key, pois.photo_key),
+             updated_at = GREATEST(EXCLUDED.updated_at, pois.updated_at)`,
+          [id, lat, lng, p.note || null, p.name || null, p.photoKey || null, at, num(p.updatedAt, at)],
         );
         result.pois++;
       }
+      await client.query(
+        keep.length ? "DELETE FROM pois WHERE NOT (id = ANY($1))" : "DELETE FROM pois",
+        keep.length ? [keep] : [],
+      );
     }
 
     await client.query("COMMIT");
@@ -526,7 +621,7 @@ async function coverage(edgeLimit) {
                 FROM reported_areas ORDER BY ${LEVEL_RANK}, name`),
     pool.query("SELECT key, name, road_class, length_m, driven_at, shape FROM driven_edges ORDER BY driven_at DESC LIMIT $1", [cap]),
     pool.query("SELECT started_at, ended_at, trigger, point_count, distance_m, new_segments, new_meters FROM drives ORDER BY started_at DESC"),
-    pool.query("SELECT lat, lng, note, at FROM pois ORDER BY at DESC"),
+    pool.query("SELECT id, lat, lng, note, name, photo_key, at, updated_at FROM pois ORDER BY at DESC"),
     pool.query("SELECT COUNT(*)::int AS edges, COALESCE(SUM(length_m),0) AS meters FROM driven_edges"),
   ]);
 
@@ -552,7 +647,7 @@ async function coverage(edgeLimit) {
       trigger: r.trigger, pointCount: r.point_count, distanceMeters: Number(r.distance_m),
       newSegments: r.new_segments, newMeters: Number(r.new_meters),
     })),
-    pois: pois.rows.map((r) => ({ lat: Number(r.lat), lng: Number(r.lng), note: r.note, at: Number(r.at) })),
+    pois: pois.rows.map(rowToPoi),
     totals: {
       edges: totals.rows[0].edges,
       edgeMeters: Number(totals.rows[0].meters),
@@ -669,13 +764,71 @@ async function handle(req, res) {
     return sendJson(res, 200, await coverage(Number(url.searchParams.get("edgeLimit")) || EDGE_LIMIT));
   }
 
+  const poiMatch = route.match(/^\/api\/pois\/([^/]+)(\/photo)?$/);
+  if (poiMatch) {
+    const id = decodeURIComponent(poiMatch[1]);
+    const isPhoto = Boolean(poiMatch[2]);
+
+    if (!isPhoto && req.method === "PATCH") {
+      const body = await readBody(req);
+      const name = body.name != null ? String(body.name).trim().slice(0, 200) : null;
+      const note = body.note != null ? String(body.note).trim().slice(0, 4000) : null;
+      const { rows } = await pool.query(
+        `UPDATE pois SET name=$1, note=$2, updated_at=$3
+         WHERE id=$4 RETURNING id, lat, lng, note, name, photo_key, at, updated_at`,
+        [name || null, note || null, Date.now(), id],
+      );
+      if (!rows.length) return sendJson(res, 404, { error: "No marked place with that id" });
+      return sendJson(res, 200, { poi: rowToPoi(rows[0]) });
+    }
+
+    if (isPhoto && (req.method === "POST" || req.method === "PUT")) {
+      if (!photos) return sendJson(res, 503, { error: "Photo storage is not configured on this server" });
+      const type = String(req.headers["content-type"] || "").split(";")[0].trim();
+      if (!PHOTO_TYPES.has(type)) {
+        return sendJson(res, 400, { error: "Send a JPEG, PNG or WebP" });
+      }
+      const { rows } = await pool.query("SELECT id FROM pois WHERE id=$1", [id]);
+      if (!rows.length) return sendJson(res, 404, { error: "No marked place with that id" });
+
+      const bytes = await readBytes(req, PHOTO_MAX_BYTES);
+      if (!bytes.length) return sendJson(res, 400, { error: "That upload was empty" });
+      const key = "pois/" + crypto.createHash("sha1").update(id).digest("hex") + extensionFor(type);
+      await photos.putObject(S3_BUCKET, key, bytes, bytes.length, { "Content-Type": type });
+      await pool.query("UPDATE pois SET photo_key=$1, updated_at=$2 WHERE id=$3", [key, Date.now(), id]);
+      return sendJson(res, 200, { ok: true, bytes: bytes.length });
+    }
+
+    if (isPhoto && req.method === "GET") {
+      if (!photos) return sendJson(res, 503, { error: "Photo storage is not configured on this server" });
+      const { rows } = await pool.query("SELECT photo_key FROM pois WHERE id=$1", [id]);
+      if (!rows.length || !rows[0].photo_key) return sendJson(res, 404, { error: "No photo for that place" });
+      const key = rows[0].photo_key;
+      const stat = await photos.statObject(S3_BUCKET, key).catch(() => null);
+      if (!stat) return sendJson(res, 404, { error: "That photo is no longer in storage" });
+      const stream = await photos.getObject(S3_BUCKET, key);
+      res.writeHead(200, {
+        "Content-Type": (stat.metaData && stat.metaData["content-type"]) || "image/jpeg",
+        "Content-Length": stat.size,
+        "Cache-Control": "private, max-age=86400",
+      });
+      return stream.pipe(res);
+    }
+
+    if (isPhoto && req.method === "DELETE") {
+      const { rows } = await pool.query("SELECT photo_key FROM pois WHERE id=$1", [id]);
+      if (rows.length && rows[0].photo_key && photos) {
+        await photos.removeObject(S3_BUCKET, rows[0].photo_key).catch(() => {});
+      }
+      await pool.query("UPDATE pois SET photo_key=NULL, updated_at=$1 WHERE id=$2", [Date.now(), id]);
+      return sendJson(res, 200, { ok: true });
+    }
+  }
+
   if (route === "/api/pois" && req.method === "GET") {
-    const { rows } = await pool.query("SELECT id, lat, lng, note, at FROM pois ORDER BY at DESC");
-    return sendJson(res, 200, {
-      pois: rows.map((r) => ({
-        id: r.id, lat: Number(r.lat), lng: Number(r.lng), note: r.note, at: Number(r.at),
-      })),
-    });
+    const { rows } = await pool.query(
+      "SELECT id, lat, lng, note, name, photo_key, at, updated_at FROM pois ORDER BY at DESC");
+    return sendJson(res, 200, { pois: rows.map(rowToPoi) });
   }
 
   if (route === "/api/drives" && req.method === "GET") {
@@ -710,5 +863,6 @@ const server = http.createServer((req, res) => {
 
 waitForDatabase()
   .then(ensureSchema)
+  .then(readyPhotos)
   .then(() => server.listen(PORT, () => console.log(`area builder listening on ${PORT}`)))
   .catch((err) => { console.error("could not start", err); process.exit(1); });

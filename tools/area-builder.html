@@ -368,6 +368,10 @@
   .linkbtn:focus-visible { outline: 3px solid var(--accent-ring); outline-offset: 1px; }
   .linkbtn.primary { background: var(--grad-accent); border-color: transparent; color: var(--accent-ink); box-shadow: var(--shadow-accent); }
   .linkbtn[aria-disabled="true"] { opacity: .45; pointer-events: none; }
+  .poiphoto {
+    display: block; width: 100%; border-radius: var(--r);
+    border: 1px solid var(--line); background: var(--surface-2);
+  }
 
   .swatches { display: flex; gap: 8px; flex-wrap: wrap; }
   .swatches button {
@@ -1864,7 +1868,7 @@ window.StreetSweepBases = {
       var when = new Date(p.at);
       var known = cache[placeKey(p)];
       li.innerHTML =
-        '<div class="name">' + escapeHtml(p.note || "Marked spot") + "</div>" +
+        '<div class="name">' + escapeHtml(p.name || p.note || "Marked spot") + "</div>" +
         '<div class="meta">' + when.toLocaleDateString() + " " +
           when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + "</div>" +
         (known ? '<div class="meta">' + escapeHtml(known) + "</div>" : "");
@@ -1889,24 +1893,96 @@ window.StreetSweepBases = {
     }).addTo(poiLayer);
 
     var coords = p.lat.toFixed(6) + "," + p.lng.toFixed(6);
+    var path = "/api/pois/" + encodeURIComponent(p.id);
     var box = el("poiDetail");
     box.hidden = false;
     box.innerHTML =
       '<p class="eyebrow">' + new Date(p.at).toLocaleString() + "</p>" +
       '<div class="card">' +
-        '<div class="name" style="font-size:14px">' + escapeHtml(p.note || "Marked spot") + "</div>" +
-        '<p class="coords" style="margin:6px 0 0">' + coords + "</p>" +
+        '<div class="field"><label for="poiName">Name</label>' +
+          '<input type="text" id="poiName" placeholder="Brick ranch, blue door"></div>' +
+        '<div class="field"><label for="poiNote">Notes</label>' +
+          '<textarea id="poiNote" placeholder="For sale sign in the yard."></textarea></div>' +
+        '<div class="row"><button id="poiSave" class="primary">Save</button>' +
+          '<span class="hint" id="poiSaved" style="margin:0;align-self:center"></span></div>' +
+        '<p class="coords" style="margin:10px 0 0">' + coords + "</p>" +
         '<p class="hint" id="poiAddress">Looking up the address…</p>' +
-        '<div class="row" style="margin-top:12px">' +
-          '<a class="linkbtn primary" target="_blank" rel="noopener noreferrer" href="' +
-            "https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=" + coords + '">Street View</a>' +
-          '<a class="linkbtn" target="_blank" rel="noopener noreferrer" href="' +
-            "https://www.google.com/maps/search/?api=1&query=" + coords + '">Maps</a>' +
+      "</div>" +
+      '<div class="card">' +
+        '<p class="eyebrow">Photo</p>' +
+        '<div id="poiPhoto"></div>' +
+        '<div class="row" style="margin-top:10px">' +
+          '<button id="poiPick">' + (p.hasPhoto ? "Replace photo" : "Add a photo") + "</button>" +
+          (p.hasPhoto ? '<button id="poiDrop" class="danger">Remove</button>' : "") +
         "</div>" +
-        '<div class="row" style="margin-top:8px">' +
-          '<a class="linkbtn" id="poiZillow" aria-disabled="true" href="#">Zillow</a>' +
-        "</div>" +
+        '<input type="file" id="poiFile" accept="image/jpeg,image/png,image/webp" hidden>' +
+      "</div>" +
+      '<div class="row" style="margin-top:12px">' +
+        '<a class="linkbtn primary" target="_blank" rel="noopener noreferrer" href="' +
+          "https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=" + coords + '">Street View</a>' +
+        '<a class="linkbtn" target="_blank" rel="noopener noreferrer" href="' +
+          "https://www.google.com/maps/search/?api=1&query=" + coords + '">Maps</a>' +
+      "</div>" +
+      '<div class="row" style="margin-top:8px">' +
+        '<a class="linkbtn" id="poiZillow" aria-disabled="true" href="#">Zillow</a>' +
       "</div>";
+
+    el("poiName").value = p.name || "";
+    el("poiNote").value = p.note || "";
+    paintPhoto(p);
+
+    el("poiSave").addEventListener("click", function () {
+      var name = el("poiName").value.trim();
+      var note = el("poiNote").value.trim();
+      el("poiSave").disabled = true;
+      apiJson(path, "PATCH", { name: name, note: note })
+        .then(function (data) {
+          el("poiSave").disabled = false;
+          el("poiSaved").textContent = "Saved";
+          setTimeout(function () { el("poiSaved").textContent = ""; }, 2000);
+          Object.assign(p, data.poi);
+          renderPois(poiRows);
+        })
+        .catch(function (e) {
+          el("poiSave").disabled = false;
+          el("poiSaved").innerHTML = "<span class='bad'>" + escapeHtml(e.message) + "</span>";
+        });
+    });
+
+    el("poiPick").addEventListener("click", function () { el("poiFile").click(); });
+    el("poiFile").addEventListener("change", function () {
+      var file = el("poiFile").files && el("poiFile").files[0];
+      if (!file) return;
+      el("poiPick").disabled = true;
+      el("poiPick").textContent = "Uploading…";
+      fetch(path + "/photo", {
+        method: "POST",
+        headers: token ? { "Content-Type": file.type, "Authorization": "Bearer " + token }
+                       : { "Content-Type": file.type },
+        body: file,
+      })
+        .then(function (r) { if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || r.status); }); })
+        .then(function () {
+          p.hasPhoto = true;
+          showPoi(p);
+          renderPois(poiRows);
+        })
+        .catch(function (e) {
+          el("poiPick").disabled = false;
+          el("poiPick").textContent = "Add a photo";
+          status("Photo would not upload: " + e.message, "bad");
+        });
+    });
+
+    var drop = el("poiDrop");
+    if (drop) {
+      drop.addEventListener("click", function () {
+        apiJson(path + "/photo", "DELETE").then(function () {
+          p.hasPhoto = false;
+          showPoi(p);
+        });
+      });
+    }
 
     lookupAddress(p).then(function (address) {
       var line = el("poiAddress");
@@ -1927,6 +2003,32 @@ window.StreetSweepBases = {
       }
       renderPois(poiRows);
     });
+  }
+
+  /** The photo is behind the same token as everything else, so it is fetched rather
+      than linked, and shown from a blob. */
+  function paintPhoto(p) {
+    var box = el("poiPhoto");
+    if (!box) return;
+    if (!p.hasPhoto) {
+      box.innerHTML = '<p class="hint" style="margin:0">Nothing attached yet.</p>';
+      return;
+    }
+    box.innerHTML = '<p class="hint" style="margin:0">Loading…</p>';
+    fetch("/api/pois/" + encodeURIComponent(p.id) + "/photo",
+          token ? { headers: { Authorization: "Bearer " + token } } : {})
+      .then(function (r) { if (!r.ok) throw new Error("gone"); return r.blob(); })
+      .then(function (blob) {
+        var url = URL.createObjectURL(blob);
+        box.innerHTML = "";
+        var img = new Image();
+        img.className = "poiphoto";
+        img.alt = p.name || "Photo of the marked place";
+        img.src = url;
+        img.addEventListener("load", function () { URL.revokeObjectURL(url); });
+        box.appendChild(img);
+      })
+      .catch(function () { box.innerHTML = '<p class="hint" style="margin:0">That photo could not be loaded.</p>'; });
   }
 
   function loadPois() {

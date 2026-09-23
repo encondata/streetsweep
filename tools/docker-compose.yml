@@ -15,6 +15,27 @@ services:
       retries: 20
     restart: unless-stopped
 
+  # Photos attached to marked places. Kept beside the database rather than in it:
+  # a photo is large, rarely read, and nothing else needs to join against it.
+  minio:
+    # Quay is MinIO's own registry; the Docker Hub mirror refuses anonymous pulls.
+    image: quay.io/minio/minio:latest
+    container_name: streetsweep-photos
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_KEY:-streetsweep}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET:-streetsweep-photos}
+    volumes:
+      - photo-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # Only the web service talks to it, so it is not published. Add a ports entry
+    # if you want the MinIO console from the host.
+    restart: unless-stopped
+
   web:
     build: .
     image: streetsweep/area-builder
@@ -22,6 +43,11 @@ services:
     environment:
       DATABASE_URL: postgres://streetsweep:streetsweep@db:5432/streetsweep
       SYNC_TOKEN: ${SYNC_TOKEN:-}
+      S3_ENDPOINT: minio
+      S3_PORT: "9000"
+      S3_KEY: ${S3_KEY:-streetsweep}
+      S3_SECRET: ${S3_SECRET:-streetsweep-photos}
+      S3_BUCKET: ${S3_BUCKET:-streetsweep-photos}
     # Plain HTTP for a reverse proxy in front to forward to. Set BIND_ADDRESS to
     # 127.0.0.1 in .env when that proxy runs on this same host.
     ports:
@@ -29,7 +55,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      minio:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
   areas-data:
+  photo-data:
