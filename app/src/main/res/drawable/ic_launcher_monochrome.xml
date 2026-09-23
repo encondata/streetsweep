@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The themed icon is flattened to a single colour by the system, so the photographic
+     mark cannot be used here. This is the same idea reduced to two shapes: the pin, and
+     the tick that says the streets inside it are done. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M54,86 C54,86 31,62 31,45 A23,23 0 1,1 77,45 C77,62 54,86 54,86 Z
+                          M54,45 m-13.5,0 a13.5,13.5 0 1,0 27,0 a13.5,13.5 0 1,0 -27,0 Z" />
+    <path
+        android:pathData="M48,45.5 L52,49.8 L61,38.6"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="4.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

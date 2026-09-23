@@ -13,7 +13,20 @@ const PORT = Number(process.env.PORT || 80);
 // Set SYNC_TOKEN to require a shared secret on every /api call. Leave it empty only on a
 // network you trust completely: the coverage data is a map of where you live and work.
 const SYNC_TOKEN = (process.env.SYNC_TOKEN || "").trim();
-const PAGE = path.join(__dirname, "public", "index.html");
+const PUBLIC = path.join(__dirname, "public");
+const PAGE = path.join(PUBLIC, "index.html");
+// Everything the browser may fetch by name. An allow list rather than a path join,
+// so a crafted route can never walk out of the folder.
+const ASSET_TYPES = {
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".webmanifest": "application/manifest+json",
+};
+const ASSETS = new Set(
+  fs.existsSync(PUBLIC)
+    ? fs.readdirSync(PUBLIC).filter((f) => f !== "index.html" && ASSET_TYPES[path.extname(f)])
+    : []
+);
 const LEVELS = new Set(["NEIGHBORHOOD", "CITY", "METRO"]);
 
 const pool = new Pool({
@@ -482,6 +495,15 @@ async function handle(req, res) {
   if (route.startsWith("/api/") && route !== "/api/config" && !authorised(req)) {
     res.writeHead(401, { "Content-Type": "application/json", "WWW-Authenticate": "Bearer" });
     return res.end(JSON.stringify({ error: "A token is required", needsToken: true }));
+  }
+
+  if (route.length > 1 && ASSETS.has(route.slice(1))) {
+    const file = route.slice(1);
+    res.writeHead(200, {
+      "Content-Type": ASSET_TYPES[path.extname(file)],
+      "Cache-Control": "public, max-age=86400",
+    });
+    return res.end(fs.readFileSync(path.join(PUBLIC, file)));
   }
 
   if (route === "/" || route === "/index.html") {
