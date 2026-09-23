@@ -294,6 +294,39 @@
   }
   .tab:hover { border-color: transparent; color: var(--ink); box-shadow: none; transform: none; }
   .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  /* The same ring the app draws: a number says how much is done, the ring also shows
+     how much is left, which is what decides whether you finish an area today. */
+  .ringrow { display: flex; align-items: center; gap: 18px; }
+  .ring { flex: 0 0 auto; display: block; overflow: visible; }
+  .ring circle { fill: none; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; }
+  .ring .track { stroke: var(--surface-2); }
+  .ring .fill { stroke: var(--accent); transition: stroke-dashoffset .75s cubic-bezier(.4,0,.2,1); }
+  .ring text { fill: var(--ink); font-family: var(--ui); font-weight: 700; text-anchor: middle; dominant-baseline: central; }
+  .legend { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+  .legend .line { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .legend .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+  .legend .lbl { color: var(--ink-soft); flex: 1 1 auto; }
+  .legend .val { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tallies { display: flex; gap: 14px; }
+  .tally { flex: 1 1 0; display: flex; align-items: center; gap: 11px; }
+  .tally .pip { width: 4px; height: 34px; border-radius: 2px; flex: 0 0 auto; }
+  .tally .n { font-size: 22px; font-weight: 700; line-height: 1.15; }
+  .tally .t { font-size: 11px; color: var(--ink-soft); }
+  .stat { display: flex; align-items: center; gap: 12px; }
+  .stat .n { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+  .stat .t { font-size: 11px; color: var(--ink-soft); }
+  .act { display: flex; align-items: center; gap: 11px; }
+  .act .mark {
+    width: 22px; height: 22px; border-radius: 50%; flex: 0 0 auto;
+    display: grid; place-items: center; font-size: 12px; font-weight: 700; color: #fff;
+  }
+  .act .pct { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 13px; white-space: nowrap; }
+  .remaining {
+    margin-top: 9px; padding: 7px 10px; border-radius: 8px;
+    background: var(--surface-2); border: 1px solid var(--line);
+    font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 8px;
+  }
+  .remaining .chev { margin-left: auto; color: var(--ink-soft); }
   .bar {
     height: 8px; border-radius: 99px; background: var(--surface-2);
     overflow: hidden; margin-top: 6px;
@@ -455,14 +488,16 @@
   </div>
 
   <div id="coveragePanel" hidden>
-    <p class="eyebrow">Overall</p>
+    <p class="eyebrow">Total progress</p>
     <div class="card" id="covSummary">Loading…</div>
+    <div class="card" id="covTallies" style="margin-top:10px" hidden></div>
+    <div class="card" id="covDistance" style="margin-top:10px" hidden></div>
 
     <p class="eyebrow" style="margin-top:16px">Areas</p>
     <ul class="areas" id="covAreas"></ul>
     <p class="hint" id="covAreasEmpty" hidden>The phone has not sent anything yet.</p>
 
-    <p class="eyebrow" style="margin-top:16px">Recent drives</p>
+    <p class="eyebrow" style="margin-top:16px">Recent activity</p>
     <ul class="areas" id="covDrives"></ul>
 
     <div class="row" style="margin-top:14px">
@@ -1171,6 +1206,29 @@
     return Math.round((stats.metersDriven / stats.metersTotal) * 100);
   }
 
+  /** A donut, drawn the way the app draws it: the arc starts at the top and runs clockwise. */
+  function ring(percent, size, stroke) {
+    size = size || 96;
+    stroke = stroke || 10;
+    var pct = Math.max(0, Math.min(100, percent || 0));
+    var r = (size - stroke) / 2;
+    var circumference = 2 * Math.PI * r;
+    var offset = circumference * (1 - pct / 100);
+    var mid = size / 2;
+    return '<svg class="ring" width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size +
+      '" role="img" aria-label="' + pct + ' percent"><circle class="track" cx="' + mid + '" cy="' + mid +
+      '" r="' + r + '" stroke-width="' + stroke + '"/><circle class="fill" cx="' + mid + '" cy="' + mid +
+      '" r="' + r + '" stroke-width="' + stroke + '" stroke-dasharray="' + circumference.toFixed(1) +
+      '" stroke-dashoffset="' + offset.toFixed(1) + '"/><text x="' + mid + '" y="' + mid +
+      '" style="font-size:' + Math.round(size * 0.23) + 'px">' + pct + '%</text></svg>';
+  }
+
+  function legendLine(label, value, colour) {
+    return '<div class="line">' +
+      (colour ? '<span class="dot" style="background:' + colour + '"></span>' : '<span class="dot" style="background:transparent"></span>') +
+      '<span class="lbl">' + label + '</span><span class="val">' + value + '</span></div>';
+  }
+
   function renderCoverage(data) {
     var areas = data.areas || [];
     var drives = data.drives || [];
@@ -1184,33 +1242,65 @@
     var driveMiles = drives.reduce(function (n, d) { return n + (d.distanceMeters || 0); }, 0);
     var freshMiles = drives.reduce(function (n, d) { return n + (d.newMeters || 0); }, 0);
     var hours = drives.reduce(function (n, d) { return n + Math.max(0, (d.endedAt || d.startedAt) - d.startedAt); }, 0);
+    var done = areas.filter(function (a) { return (a.stats.total || 0) > 0 && percentOf(a.stats) >= 100; }).length;
+    var going = areas.filter(function (a) {
+      var p = percentOf(a.stats);
+      return p > 0 && p < 100;
+    }).length;
 
-    el("covSummary").innerHTML = areas.length === 0 && drives.length === 0
+    var empty = areas.length === 0 && drives.length === 0;
+    el("covTallies").hidden = empty;
+    el("covDistance").hidden = empty;
+
+    el("covSummary").innerHTML = empty
       ? "Nothing sent from the phone yet."
-      : "<div class='big'>" + overall + "%</div>" +
-        "<div class='bar'><span style='width:" + Math.min(100, overall) + "%'></span></div>" +
-        "<p class='coords' style='margin:8px 0 0'>" +
-          streetsDone + " of " + streetsTotal + " streets · " +
+      : '<div class="ringrow">' + ring(overall, 104, 11) +
+          '<div class="legend">' +
+            legendLine("Driven streets", streetsDone.toLocaleString(), "var(--accent)") +
+            legendLine("Still to drive", Math.max(0, streetsTotal - streetsDone).toLocaleString(), "var(--line-strong)") +
+            legendLine("Total streets", streetsTotal.toLocaleString(), null) +
+          "</div></div>" +
+        '<p class="coords" style="margin:12px 0 0">' +
           fmtDistance(drivenMeters) + " of " + fmtDistance(totalMeters) + "<br>" +
-          drives.length + " drives · " + fmtDistance(driveMiles) + " · " + fmtDuration(hours) + " driving<br>" +
-          fmtDistance(freshMiles) + " of streets covered for the first time<br>" +
           (totals.edges || 0) + " segments stored" +
           (totals.edgesShown < totals.edges ? " (" + totals.edgesShown + " drawn)" : "") +
         "</p>";
+
+    el("covTallies").innerHTML =
+      '<div class="tallies">' +
+        '<div class="tally"><span class="pip" style="background:var(--accent)"></span>' +
+          '<div><div class="n">' + done + '</div><div class="t">Completed</div></div></div>' +
+        '<div class="tally"><span class="pip" style="background:var(--amber)"></span>' +
+          '<div><div class="n">' + going + '</div><div class="t">In progress</div></div></div>' +
+      "</div>";
+
+    el("covDistance").innerHTML =
+      '<div class="stat"><div style="flex:1 1 auto">' +
+        '<div class="t">Distance driven</div>' +
+        '<div class="n">' + fmtDistance(driveMiles) + "</div>" +
+        '<div class="t" style="margin-top:4px">' + drives.length + " drives · " + fmtDuration(hours) +
+          " · " + fmtDistance(freshMiles) + " of it new" + "</div>" +
+      "</div></div>";
 
     var list = el("covAreas");
     list.innerHTML = "";
     areas.forEach(function (a) {
       var percent = percentOf(a.stats);
+      var remaining = Math.max(0, (a.stats.total || 0) - (a.stats.done || 0));
       var li = document.createElement("li");
       li.className = "area";
       li.innerHTML =
-        "<div class='name'><span class='swatch' style='background:" + completionColor(percent) + "'></span>" +
-          escapeHtml(a.name) + " · " + percent + "%</div>" +
-        "<div class='bar'><span style='width:" + Math.min(100, percent) + "%'></span></div>" +
-        "<div class='meta'>" + (a.stats.done || 0) + " of " + (a.stats.total || 0) + " streets · " +
-          fmtDistance(a.stats.metersDriven || 0) + " of " + fmtDistance(a.stats.metersTotal || 0) +
-          ((a.stats.excluded || 0) ? " · " + a.stats.excluded + " excluded" : "") + "</div>";
+        '<div class="ringrow" style="gap:14px">' + ring(percent, 52, 6) +
+          '<div class="legend" style="gap:2px">' +
+            '<div class="name">' + escapeHtml(a.name) + "</div>" +
+            '<div class="meta">' + (a.stats.done || 0) + " of " + (a.stats.total || 0) + " streets" +
+              ((a.stats.excluded || 0) ? " · " + a.stats.excluded + " excluded" : "") + "</div>" +
+            '<div class="meta">' + fmtDistance(a.stats.metersDriven || 0) + " of " +
+              fmtDistance(a.stats.metersTotal || 0) + "</div>" +
+          "</div></div>" +
+        '<div class="remaining">' +
+          (remaining === 0 ? "Every street driven" : remaining + " street" + (remaining === 1 ? "" : "s") + " remaining") +
+          '<span class="chev">&rsaquo;</span></div>';
       li.addEventListener("click", function () {
         if (a.polygon && a.polygon.length >= 3) map.fitBounds(L.polygon(a.polygon).getBounds(), { padding: [40, 40] });
       });
@@ -1224,13 +1314,20 @@
       var li = document.createElement("li");
       li.className = "area";
       var when = new Date(d.startedAt);
+      var fresh = (d.newMeters || 0) > 0;
       li.innerHTML =
-        "<div class='name'>" + when.toLocaleDateString() + " " +
-          when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + "</div>" +
-        "<div class='meta'>" + fmtDistance(d.distanceMeters || 0) + " · " +
-          fmtDuration(Math.max(0, (d.endedAt || d.startedAt) - d.startedAt)) +
-          ((d.newMeters || 0) > 0 ? " · +" + fmtDistance(d.newMeters) + " new" : "") +
-          (d.trigger ? " · " + escapeHtml(String(d.trigger).toLowerCase()) : "") + "</div>";
+        '<div class="act">' +
+          '<span class="mark" style="background:' + (fresh ? "var(--accent)" : "var(--line-strong)") + '">' +
+            (fresh ? "&#10003;" : "&middot;") + "</span>" +
+          '<div style="flex:1 1 auto;min-width:0">' +
+            '<div class="name">' + when.toLocaleDateString() + " " +
+              when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + "</div>" +
+            '<div class="meta">' + fmtDistance(d.distanceMeters || 0) + " · " +
+              fmtDuration(Math.max(0, (d.endedAt || d.startedAt) - d.startedAt)) +
+              (d.trigger ? " · " + escapeHtml(String(d.trigger).toLowerCase()) : "") + "</div>" +
+          "</div>" +
+          (fresh ? '<span class="pct">+' + fmtDistance(d.newMeters) + "</span>" : "") +
+        "</div>";
       driveList.appendChild(li);
     });
   }
