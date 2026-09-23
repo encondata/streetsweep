@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches the Compose scheme's background, so the launch window is already the
+         right colour instead of flashing white before the first frame. -->
+    <color name="brand_window">#F4F7FB</color>
+</resources>

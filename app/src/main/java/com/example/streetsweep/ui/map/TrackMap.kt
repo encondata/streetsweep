@@ -193,43 +193,43 @@ object OsmConfig {
 class LayersOverlay : Overlay() {
     var layers = MapLayers()
 
-    private val undriven = stroke(0xFFB4C2BC.toInt(), 7f)
-    private val excluded = stroke(0xFFCFD8D4.toInt(), 5f).apply { pathEffect = DashPathEffect(floatArrayOf(8f, 12f), 0f) }
-    private val selectedHalo = stroke(0xFF45607A.toInt(), 20f).apply { alpha = 110 }
+    private val undriven = stroke(0xFFA7B3C0.toInt(), 7f)
+    private val excluded = stroke(0xFFC8D1DA.toInt(), 5f).apply { pathEffect = DashPathEffect(floatArrayOf(8f, 12f), 0f) }
+    private val selectedHalo = stroke(0xFF10314F.toInt(), 20f).apply { alpha = 110 }
     private val targetStroke = stroke(0xFFE76F51.toInt(), 12f)
     private val targetHalo = stroke(0xFFE76F51.toInt(), 22f).apply { alpha = 70 }
     private val targetArrow = stroke(0xFFE76F51.toInt(), 6f).apply { pathEffect = DashPathEffect(floatArrayOf(20f, 14f), 0f) }
     private val partial = stroke(0xFFE9C46A.toInt(), 8f)
-    private val done = stroke(0xFF0B6B57.toInt(), 8f)
-    private val edge = stroke(0xFF0B6B57.toInt(), 9f)
+    private val done = stroke(0xFF1E8A28.toInt(), 8f)
+    private val edge = stroke(0xFF1E8A28.toInt(), 9f)
     // Fresh to stale: teal, sage, dusty blue, grey-violet.
     private val agePaints = listOf(
-        stroke(0xFF0B6B57.toInt(), 9f),
-        stroke(0xFF4C9A80.toInt(), 9f),
-        stroke(0xFF6E8FA8.toInt(), 9f),
-        stroke(0xFF8A8399.toInt(), 9f),
+        stroke(0xFF1E8A28.toInt(), 9f),
+        stroke(0xFF4FB04A.toInt(), 9f),
+        stroke(0xFF83A98E.toInt(), 9f),
+        stroke(0xFF9AA7B4.toInt(), 9f),
     )
     private val edgeHalo = stroke(0x80FFFFFF.toInt(), 15f)
-    private val unmatched = stroke(0xFF8A9A94.toInt(), 4f)
+    private val unmatched = stroke(0xFF8E9AA6.toInt(), 4f)
     private val raw = stroke(0xFF616161.toInt(), 4f).apply { pathEffect = DashPathEffect(floatArrayOf(16f, 10f), 0f) }
     private val active = stroke(0xFFF2B84B.toInt(), 12f)
-    private val areaStroke = stroke(0xFF45607A.toInt(), 3f).apply { pathEffect = DashPathEffect(floatArrayOf(14f, 10f), 0f) }
-    private val areaFocused = stroke(0xFF0B6B57.toInt(), 5f)
+    private val areaStroke = stroke(0xFF10314F.toInt(), 3f).apply { pathEffect = DashPathEffect(floatArrayOf(14f, 10f), 0f) }
+    private val areaFocused = stroke(0xFF1E8A28.toInt(), 5f)
     private val areaLabel = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1C1B1F.toInt(); textSize = 30f; isFakeBoldText = true }
     private val areaLabelBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xE6FFFFFF.toInt() }
-    private val areaFill = Paint().apply { color = 0x140B6B57 }
+    private val areaFill = Paint().apply { color = 0x141E8A28 }
     private val draftStroke = stroke(0xFFB3261E.toInt(), 5f)
     private val draftFill = Paint().apply { color = 0x22B3261E }
     private val draftVertex = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFB3261E.toInt() }
     private val draftVertexRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt(); style = Paint.Style.STROKE; strokeWidth = 3f }
-    private val draftSelected = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF0B6B57.toInt() }
+    private val draftSelected = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1E8A28.toInt() }
     private val draftMid = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt() }
     private val draftMidRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFB3261E.toInt(); style = Paint.Style.STROKE; strokeWidth = 3f }
     private val poiFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFB3261E.toInt() }
     private val poiRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt(); style = Paint.Style.STROKE; strokeWidth = 3f }
     private val poiLabel = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1C1B1F.toInt(); textSize = 26f }
     private val poiLabelBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xE6FFFFFF.toInt() }
-    private val dotFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF0B6B57.toInt() }
+    private val dotFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1E8A28.toInt() }
     private val dotRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt(); style = Paint.Style.STROKE; strokeWidth = 4f }
     private val path = Path()
     private val pt = Point()

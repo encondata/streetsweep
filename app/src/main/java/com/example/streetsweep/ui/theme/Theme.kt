@@ -11,41 +11,56 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
-    primary = TealPrimaryDark,
-    onPrimary = OnTealPrimaryDark,
-    primaryContainer = TealPrimaryContainerDark,
-    onPrimaryContainer = OnTealPrimaryContainerDark,
-    secondary = AmberSecondaryDark,
-    onSecondary = OnAmberSecondaryDark,
-    secondaryContainer = AmberSecondaryContainerDark,
-    onSecondaryContainer = OnAmberSecondaryContainerDark,
-    tertiary = SlateTertiaryDark,
-    onTertiary = OnSlateTertiaryDark,
-    tertiaryContainer = SlateTertiaryContainerDark,
-    onTertiaryContainer = OnSlateTertiaryContainerDark,
+    primary = BrandGreenDark,
+    onPrimary = OnBrandGreenDark,
+    primaryContainer = BrandGreenContainerDark,
+    onPrimaryContainer = OnBrandGreenContainerDark,
+    secondary = BrandNavyDark,
+    onSecondary = OnBrandNavyDark,
+    secondaryContainer = BrandNavyContainerDark,
+    onSecondaryContainer = OnBrandNavyContainerDark,
+    tertiary = BrandAmberDark,
+    onTertiary = OnBrandAmberDark,
+    tertiaryContainer = BrandAmberContainerDark,
+    onTertiaryContainer = OnBrandAmberContainerDark,
+    background = DarkBackground,
+    onBackground = OnDarkBackground,
+    surface = DarkSurface,
+    onSurface = OnDarkBackground,
+    surfaceVariant = DarkSurfaceVariant,
+    onSurfaceVariant = OnDarkSurfaceVariant,
+    outline = DarkOutline,
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = TealPrimary,
-    onPrimary = OnTealPrimary,
-    primaryContainer = TealPrimaryContainer,
-    onPrimaryContainer = OnTealPrimaryContainer,
-    secondary = AmberSecondary,
-    onSecondary = OnAmberSecondary,
-    secondaryContainer = AmberSecondaryContainer,
-    onSecondaryContainer = OnAmberSecondaryContainer,
-    tertiary = SlateTertiary,
-    onTertiary = OnSlateTertiary,
-    tertiaryContainer = SlateTertiaryContainer,
-    onTertiaryContainer = OnSlateTertiaryContainer,
+    primary = BrandGreen,
+    onPrimary = OnBrandGreen,
+    primaryContainer = BrandGreenContainer,
+    onPrimaryContainer = OnBrandGreenContainer,
+    secondary = BrandNavy,
+    onSecondary = OnBrandNavy,
+    secondaryContainer = BrandNavyContainer,
+    onSecondaryContainer = OnBrandNavyContainer,
+    tertiary = BrandAmber,
+    onTertiary = OnBrandAmber,
+    tertiaryContainer = BrandAmberContainer,
+    onTertiaryContainer = OnBrandAmberContainer,
+    background = LightBackground,
+    onBackground = OnLightBackground,
+    surface = LightSurface,
+    onSurface = OnLightBackground,
+    surfaceVariant = LightSurfaceVariant,
+    onSurfaceVariant = OnLightSurfaceVariant,
+    outline = LightOutline,
 )
 
 @Composable
 fun StreetSweepTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic (wallpaper-based) color is available on Android 12+.
-    // Set to false to always use the branded palette above.
-    dynamicColor: Boolean = true,
+    // Wallpaper-derived colour is available on Android 12+, but it throws the brand away:
+    // the app would come out lilac on one phone and pink on the next, and the map's
+    // green-means-driven reading would no longer match the rest of the screen.
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val colorScheme = when {

@@ -47,20 +47,20 @@ class CoverageRenderer(private val tiles: OsmTiles) {
         val following: Boolean,
     )
 
-    private val background = Paint().apply { color = 0xFFEEF3F1.toInt() }
-    private val tilePlaceholder = Paint().apply { color = 0xFFE3EBE7.toInt() }
+    private val background = Paint().apply { color = 0xFFEDF2F7.toInt() }
+    private val tilePlaceholder = Paint().apply { color = 0xFFE0E8F0.toInt() }
     private val tilePaint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
         val m = ColorMatrix().apply { setSaturation(0.25f) }
         m.postConcat(ColorMatrix(floatArrayOf(0.85f, 0f, 0f, 0f, 38f, 0f, 0.85f, 0f, 0f, 40f, 0f, 0f, 0.85f, 0f, 38f, 0f, 0f, 0f, 1f, 0f)))
         colorFilter = ColorMatrixColorFilter(m)
     }
     private val undrivenPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFFB4C2BC.toInt(); style = Paint.Style.STROKE; strokeWidth = 7f
+        color = 0xFFA7B3C0.toInt(); style = Paint.Style.STROKE; strokeWidth = 7f
         strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
     }
     private val partialPaint = Paint(undrivenPaint).apply { color = 0xFFE9C46A.toInt(); strokeWidth = 8f }
     private val excludedPaint = Paint(undrivenPaint).apply {
-        color = 0xFFCFD8D4.toInt(); strokeWidth = 5f
+        color = 0xFFC8D1DA.toInt(); strokeWidth = 5f
         pathEffect = android.graphics.DashPathEffect(floatArrayOf(10f, 14f), 0f)
     }
     private val pendingGatePaint = Paint(undrivenPaint).apply { color = 0xFFB3261E.toInt(); strokeWidth = 14f }
@@ -75,20 +75,20 @@ class CoverageRenderer(private val tiles: OsmTiles) {
         color = 0xFFE76F51.toInt(); strokeWidth = 7f
         pathEffect = android.graphics.DashPathEffect(floatArrayOf(24f, 16f), 0f)
     }
-    private val donePaint = Paint(undrivenPaint).apply { color = 0xFF0B6B57.toInt(); strokeWidth = 8f }
+    private val donePaint = Paint(undrivenPaint).apply { color = 0xFF1E8A28.toInt(); strokeWidth = 8f }
     private val areaPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF45607A.toInt(); style = Paint.Style.STROKE; strokeWidth = 3f
+        color = 0xFF10314F.toInt(); style = Paint.Style.STROKE; strokeWidth = 3f
         pathEffect = android.graphics.DashPathEffect(floatArrayOf(16f, 12f), 0f)
     }
-    private val areaFocusedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF0B6B57.toInt(); style = Paint.Style.STROKE; strokeWidth = 5f }
+    private val areaFocusedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1E8A28.toInt(); style = Paint.Style.STROKE; strokeWidth = 5f }
     private val coveragePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF0B6B57.toInt(); style = Paint.Style.STROKE; strokeWidth = 9f
+        color = 0xFF1E8A28.toInt(); style = Paint.Style.STROKE; strokeWidth = 9f
         strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
     }
     private val coverageHalo = Paint(coveragePaint).apply { color = 0x66FFFFFF; strokeWidth = 15f }
-    private val rawPaint = Paint(coveragePaint).apply { color = 0xFF7A8C86.toInt(); strokeWidth = 4f }
+    private val rawPaint = Paint(coveragePaint).apply { color = 0xFF8090A0.toInt(); strokeWidth = 4f }
     private val activePaint = Paint(coveragePaint).apply { color = 0xFFF2B84B.toInt(); strokeWidth = 11f }
-    private val carFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF0B6B57.toInt() }
+    private val carFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF10314F.toInt() }
     private val poiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFB3261E.toInt(); strokeWidth = 4f }
     private val carRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; style = Paint.Style.STROKE; strokeWidth = 4f }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1C1B1F.toInt(); textSize = 34f }
