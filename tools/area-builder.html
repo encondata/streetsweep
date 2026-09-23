@@ -355,6 +355,20 @@
   .thumb svg { display: block; width: 100%; height: 100%; }
   .badge { font-size: 11px; font-weight: 700; color: var(--accent); white-space: nowrap; font-variant-numeric: tabular-nums; }
 
+  .linkbtn {
+    flex: 1 1 auto; text-align: center; text-decoration: none;
+    font-family: var(--ui); font-size: 13px; font-weight: 600;
+    border-radius: var(--r); border: 1px solid var(--line-strong);
+    background: var(--surface); color: var(--ink);
+    padding: 9px 12px; box-shadow: var(--shadow-1);
+    transition: border-color .15s, box-shadow .15s, transform .08s;
+  }
+  .linkbtn:hover { border-color: var(--accent); box-shadow: var(--shadow-2); }
+  .linkbtn:active { transform: translateY(1px); }
+  .linkbtn:focus-visible { outline: 3px solid var(--accent-ring); outline-offset: 1px; }
+  .linkbtn.primary { background: var(--grad-accent); border-color: transparent; color: var(--accent-ink); box-shadow: var(--shadow-accent); }
+  .linkbtn[aria-disabled="true"] { opacity: .45; pointer-events: none; }
+
   .swatches { display: flex; gap: 8px; flex-wrap: wrap; }
   .swatches button {
     width: 26px; height: 26px; border-radius: 50%; padding: 0; box-shadow: none;
@@ -401,6 +415,9 @@
   </button>
   <button class="railbtn" data-view="drives">
     <svg viewBox="0 0 24 24"><path d="M5 16.5h14M6.5 16.5v2M17.5 16.5v2"/><path d="M6 16.5 7.6 10a2 2 0 0 1 1.9-1.4h5a2 2 0 0 1 1.9 1.4L18 16.5"/><path d="M8.5 13.2h7"/></svg>Drives
+  </button>
+  <button class="railbtn" data-view="pois">
+    <svg viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Z"/><circle cx="12" cy="10" r="2.6"/></svg>Places
   </button>
   <button class="railbtn" data-view="stats">
     <svg viewBox="0 0 24 24"><path d="M5 19V11M12 19V5M19 19v-6"/></svg>Stats
@@ -535,6 +552,19 @@
           <p class="eyebrow">History</p>
           <ul class="areas" id="driveList"></ul>
           <p class="hint" id="drivesEmpty" hidden>The phone has not sent any drives yet.</p>
+        </div>
+      </section>
+
+      <section class="view" data-view="pois" hidden>
+        <div class="viewhead">
+          <h2>Places</h2>
+          <p>Spots you marked from the phone. Pick one to see where it is and what is there.</p>
+        </div>
+        <div id="poiDetail" hidden></div>
+        <div>
+          <p class="eyebrow">Marked</p>
+          <ul class="areas" id="poiList"></ul>
+          <p class="hint" id="poisEmpty" hidden>Nothing marked yet. Use the flag button on the phone's map.</p>
         </div>
       </section>
 
@@ -1355,6 +1385,14 @@ window.StreetSweepBases = {
       map.removeLayer(driveLayer);
       el("driveDetail").hidden = true;
     }
+
+    if (name === "pois") {
+      poiLayer.addTo(map);
+      if (!poiRows.length) loadPois();
+    } else if (map.hasLayer(poiLayer)) {
+      map.removeLayer(poiLayer);
+      el("poiDetail").hidden = true;
+    }
   }
 
   window.addEventListener("view", function (ev) { applyView(ev.detail); });
@@ -1771,6 +1809,133 @@ window.StreetSweepBases = {
       .catch(function (e) { status("Could not read drives: " + e.message); });
   }
 
+  // ---- marked places ---------------------------------------------------------
+
+  var poiLayer = L.layerGroup();
+  var poiRows = [];
+  var poiMarker = null;
+  var ADDRESS_KEY = "streetsweep.addresses";
+
+  /** Addresses are looked up one at a time and kept, because Nominatim asks to be
+      used gently and the answer for a fixed point does not change. */
+  function addressCache() {
+    try { return JSON.parse(localStorage.getItem(ADDRESS_KEY) || "{}"); } catch (e) { return {}; }
+  }
+  function rememberAddress(key, value) {
+    try {
+      var all = addressCache();
+      all[key] = value;
+      localStorage.setItem(ADDRESS_KEY, JSON.stringify(all));
+    } catch (e) { /* this page only */ }
+  }
+  function placeKey(p) { return p.lat.toFixed(5) + "," + p.lng.toFixed(5); }
+
+  function lookupAddress(p) {
+    var key = placeKey(p);
+    var known = addressCache()[key];
+    if (known) return Promise.resolve(known);
+    return fetch("https://nominatim.openstreetmap.org/reverse?format=json&zoom=18&addressdetails=1" +
+        "&lat=" + encodeURIComponent(p.lat) + "&lon=" + encodeURIComponent(p.lng),
+        { headers: { "Accept": "application/json" } })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var a = data && data.address ? data.address : {};
+        var line = [
+          [a.house_number, a.road].filter(Boolean).join(" "),
+          a.city || a.town || a.village || a.hamlet || a.suburb,
+          a.state,
+          a.postcode,
+        ].filter(Boolean).join(", ");
+        var out = line || (data && data.display_name) || "";
+        if (out) rememberAddress(key, out);
+        return out;
+      })
+      .catch(function () { return ""; });
+  }
+
+  function renderPois(rows) {
+    poiRows = rows;
+    var cache = addressCache();
+    var list = el("poiList");
+    list.innerHTML = "";
+    rows.forEach(function (p) {
+      var li = document.createElement("li");
+      li.className = "area";
+      var when = new Date(p.at);
+      var known = cache[placeKey(p)];
+      li.innerHTML =
+        '<div class="name">' + escapeHtml(p.note || "Marked spot") + "</div>" +
+        '<div class="meta">' + when.toLocaleDateString() + " " +
+          when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + "</div>" +
+        (known ? '<div class="meta">' + escapeHtml(known) + "</div>" : "");
+      li.addEventListener("click", function () { showPoi(p); });
+      list.appendChild(li);
+    });
+    el("poisEmpty").hidden = rows.length > 0;
+
+    poiLayer.clearLayers();
+    rows.forEach(function (p) {
+      L.circleMarker([p.lat, p.lng], {
+        radius: 6, color: "#ffffff", weight: 2, fillColor: "#b3261e", fillOpacity: 0.95,
+      }).addTo(poiLayer).on("click", function () { showPoi(p); });
+    });
+  }
+
+  function showPoi(p) {
+    map.setView([p.lat, p.lng], 18);
+    if (poiMarker) poiLayer.removeLayer(poiMarker);
+    poiMarker = L.circleMarker([p.lat, p.lng], {
+      radius: 10, color: "#ffffff", weight: 3, fillColor: "#b3261e", fillOpacity: 0.9,
+    }).addTo(poiLayer);
+
+    var coords = p.lat.toFixed(6) + "," + p.lng.toFixed(6);
+    var box = el("poiDetail");
+    box.hidden = false;
+    box.innerHTML =
+      '<p class="eyebrow">' + new Date(p.at).toLocaleString() + "</p>" +
+      '<div class="card">' +
+        '<div class="name" style="font-size:14px">' + escapeHtml(p.note || "Marked spot") + "</div>" +
+        '<p class="coords" style="margin:6px 0 0">' + coords + "</p>" +
+        '<p class="hint" id="poiAddress">Looking up the address…</p>' +
+        '<div class="row" style="margin-top:12px">' +
+          '<a class="linkbtn primary" target="_blank" rel="noopener noreferrer" href="' +
+            "https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=" + coords + '">Street View</a>' +
+          '<a class="linkbtn" target="_blank" rel="noopener noreferrer" href="' +
+            "https://www.google.com/maps/search/?api=1&query=" + coords + '">Maps</a>' +
+        "</div>" +
+        '<div class="row" style="margin-top:8px">' +
+          '<a class="linkbtn" id="poiZillow" aria-disabled="true" href="#">Zillow</a>' +
+        "</div>" +
+      "</div>";
+
+    lookupAddress(p).then(function (address) {
+      var line = el("poiAddress");
+      var zillow = el("poiZillow");
+      if (!line) return;
+      if (!address) {
+        line.textContent = "No address found for this spot.";
+        if (zillow) zillow.textContent = "Zillow needs an address";
+        return;
+      }
+      line.textContent = address;
+      if (zillow) {
+        zillow.removeAttribute("aria-disabled");
+        zillow.target = "_blank";
+        zillow.rel = "noopener noreferrer";
+        zillow.href = "https://www.zillow.com/homes/" + encodeURIComponent(address) + "_rb/";
+        zillow.textContent = "Look up on Zillow";
+      }
+      renderPois(poiRows);
+    });
+  }
+
+  function loadPois() {
+    if (!backend) return;
+    apiJson("/api/pois")
+      .then(function (data) { renderPois(data.pois || []); })
+      .catch(function (e) { status("Could not read marked places: " + e.message); });
+  }
+
   // ---- cities ----------------------------------------------------------------
 
   function refreshCities() {
@@ -1816,6 +1981,7 @@ window.StreetSweepBases = {
       })
       .catch(function () { /* locked or offline; the panel simply says so */ });
     loadDrives();
+    loadPois();
   }
 
   // Keep the server card honest about where this is talking to.

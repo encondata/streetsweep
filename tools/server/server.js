@@ -669,6 +669,15 @@ async function handle(req, res) {
     return sendJson(res, 200, await coverage(Number(url.searchParams.get("edgeLimit")) || EDGE_LIMIT));
   }
 
+  if (route === "/api/pois" && req.method === "GET") {
+    const { rows } = await pool.query("SELECT id, lat, lng, note, at FROM pois ORDER BY at DESC");
+    return sendJson(res, 200, {
+      pois: rows.map((r) => ({
+        id: r.id, lat: Number(r.lat), lng: Number(r.lng), note: r.note, at: Number(r.at),
+      })),
+    });
+  }
+
   if (route === "/api/drives" && req.method === "GET") {
     const limit = Number(url.searchParams.get("limit")) || 50;
     const full = url.searchParams.get("shape") === "full";
