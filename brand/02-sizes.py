@@ -66,18 +66,27 @@ print("android launcher foreground:", ", ".join(DENSITIES))
 # No screen in the app shows a wordmark, so none is packaged; the web header uses it.
 
 # ------------------------------------------------------------------ splash screen
-# The system splash draws its icon on a 288dp canvas and only the middle 192dp is
-# guaranteed to survive the mask, so the pin is kept well inside that. The words go
-# in the branding slot at the foot of the screen, which is 200dp wide at most.
+# The system splash draws its icon on a 288dp canvas and guarantees the middle 192dp,
+# so the pin fills 184 of that: any smaller and it reads as a stamp in a lot of empty
+# screen. The words sit in the branding slot at the foot.
+SPLASH_CANVAS_DP = 288
+SPLASH_PIN_DP = 184
+SPLASH_WORD_DP = 230
+
 SPLASH_DP = {"mdpi": 288, "hdpi": 432, "xhdpi": 576, "xxhdpi": 864, "xxxhdpi": 1152}
 for name, px in SPLASH_DP.items():
-    save(fit(mark, px, 150.0 / 288.0), APP, "drawable-" + name, "splash_icon.png")
+    save(fit(mark, px, float(SPLASH_PIN_DP) / SPLASH_CANVAS_DP), APP, "drawable-" + name, "splash_icon.png")
+
+# The name only. The strapline cannot work here: at any width the branding slot allows
+# it lands about five density-independent pixels tall, which is a smudge rather than
+# words -- it would need the wordmark to be 322dp wide to reach even eight.
 for name, scale in (("mdpi", 1), ("hdpi", 1.5), ("xhdpi", 2), ("xxhdpi", 3), ("xxxhdpi", 4)):
-    w = int(round(200 * scale))
-    h = max(1, int(round(word_full.height * w / word_full.width)))
-    save(word_full.resize((w, h), Image.LANCZOS), APP, "drawable-" + name, "splash_wordmark.png")
-    save(wordL_full.resize((w, h), Image.LANCZOS), APP, "drawable-night-" + name, "splash_wordmark.png")
-print("splash icon and wordmark: five densities, light and dark")
+    w = int(round(SPLASH_WORD_DP * scale))
+    h = max(1, int(round(word.height * w / word.width)))
+    save(word.resize((w, h), Image.LANCZOS), APP, "drawable-" + name, "splash_wordmark.png")
+    save(wordL.resize((w, h), Image.LANCZOS), APP, "drawable-night-" + name, "splash_wordmark.png")
+print("splash: pin %ddp of %ddp, name %ddp wide (%.0fdp tall)"
+      % (SPLASH_PIN_DP, SPLASH_CANVAS_DP, SPLASH_WORD_DP, SPLASH_WORD_DP * word.height / word.width))
 
 # ------------------------------------------------------------------- web icons
 WHITE = (255, 255, 255, 255)
