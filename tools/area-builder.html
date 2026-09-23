@@ -12,6 +12,65 @@
 <meta name="theme-color" content="#1d3557">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script>
+// Runs before the first paint, so the page never flashes the wrong theme. The palette
+// is keyed on data-theme alone, and "system" is resolved here rather than in CSS, which
+// keeps one copy of the dark variables instead of two.
+(function () {
+  var KEY = "streetsweep.theme";
+  var root = document.documentElement;
+  var media = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+
+  function choice() {
+    var v = null;
+    try { v = localStorage.getItem(KEY); } catch (e) { /* storage may be blocked */ }
+    return v === "light" || v === "dark" ? v : "system";
+  }
+
+  function apply() {
+    var want = choice();
+    var dark = want === "dark" || (want === "system" && !!(media && media.matches));
+    root.setAttribute("data-theme", dark ? "dark" : "light");
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", dark ? "#071320" : "#ffffff");
+    var group = document.querySelector(".theme-switch");
+    if (group) {
+      var buttons = group.querySelectorAll("button[data-theme-set]");
+      for (var i = 0; i < buttons.length; i++) {
+        buttons[i].setAttribute("aria-pressed", buttons[i].getAttribute("data-theme-set") === want ? "true" : "false");
+      }
+    }
+  }
+
+  window.StreetSweepTheme = {
+    apply: apply,
+    set: function (value) {
+      try {
+        if (value === "system") localStorage.removeItem(KEY);
+        else localStorage.setItem(KEY, value);
+      } catch (e) { /* then the choice lasts for this page only */ }
+      apply();
+    }
+  };
+
+  try { apply(); } catch (e) { root.setAttribute("data-theme", "light"); }
+
+  // Follow the system only while the reader has not chosen for themselves.
+  if (media && media.addEventListener) {
+    media.addEventListener("change", function () { if (choice() === "system") apply(); });
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    var group = document.querySelector(".theme-switch");
+    if (!group) return;
+    group.addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest("button[data-theme-set]") : null;
+      if (b) window.StreetSweepTheme.set(b.getAttribute("data-theme-set"));
+    });
+    apply();
+  });
+})();
+</script>
 <style>
   :root {
     color-scheme: light;
@@ -56,31 +115,29 @@
     --ui: "Archivo", "Helvetica Neue", Arial, sans-serif;
     --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
   }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      color-scheme: dark;
-      --ground: #050f1a;
-      --surface: #0c1b2a;
-      --surface-2: #122435;
-      --ink: #e4ecf4;
-      --ink-soft: #93a5b6;
-      --line: #1d3145;
-      --line-strong: #2b4059;
-      --accent: #5ed45f;
-      --accent-ink: #04250a;
-      --accent-soft: #11331a;
-      --accent-ring: rgba(94,212,95,.32);
-      --teal: var(--accent);
-      --teal-soft: var(--accent-soft);
-      --amber: #e0ab5c;
-      --slate: #9dbde0;
-      --danger: #e2796f;
-      --grad-accent: linear-gradient(135deg, #43c44c 0%, #1a7a26 100%);
-      --grad-panel: linear-gradient(180deg, #0e2132 0%, #091624 100%);
-      --shadow-1: 0 1px 2px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.30);
-      --shadow-2: 0 10px 26px rgba(0,0,0,.50);
-      --shadow-accent: 0 3px 12px rgba(30,138,40,.45);
-    }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --ground: #050f1a;
+    --surface: #0c1b2a;
+    --surface-2: #122435;
+    --ink: #e4ecf4;
+    --ink-soft: #93a5b6;
+    --line: #1d3145;
+    --line-strong: #2b4059;
+    --accent: #5ed45f;
+    --accent-ink: #04250a;
+    --accent-soft: #11331a;
+    --accent-ring: rgba(94,212,95,.32);
+    --teal: var(--accent);
+    --teal-soft: var(--accent-soft);
+    --amber: #e0ab5c;
+    --slate: #9dbde0;
+    --danger: #e2796f;
+    --grad-accent: linear-gradient(135deg, #43c44c 0%, #1a7a26 100%);
+    --grad-panel: linear-gradient(180deg, #0e2132 0%, #091624 100%);
+    --shadow-1: 0 1px 2px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.30);
+    --shadow-2: 0 10px 26px rgba(0,0,0,.50);
+    --shadow-accent: 0 3px 12px rgba(30,138,40,.45);
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
@@ -129,11 +186,27 @@
     filter: drop-shadow(0 2px 5px rgba(2,20,42,.22));
   }
   .brand img.word { height: 28px; width: auto; }
-  .brand .on-dark { display: none; }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) .brand .on-light { display: none; }
-    :root:not([data-theme="light"]) .brand .on-dark { display: block; }
+  .theme-switch {
+    margin-left: auto; display: flex; gap: 2px; flex: 0 0 auto;
+    padding: 2px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--surface-2);
   }
+  .theme-switch button {
+    width: 26px; height: 26px; padding: 0; border: none; border-radius: 999px;
+    background: none; box-shadow: none; color: var(--ink-soft);
+    display: grid; place-items: center; cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  .theme-switch button:hover {
+    background: var(--surface); color: var(--ink); box-shadow: none; transform: none;
+  }
+  .theme-switch button[aria-pressed="true"] {
+    background: var(--grad-accent); color: var(--accent-ink); box-shadow: var(--shadow-accent);
+  }
+  .theme-switch svg { width: 15px; height: 15px; display: block; }
+  .brand .on-dark { display: none; }
+  :root[data-theme="dark"] .brand .on-light { display: none; }
+  :root[data-theme="dark"] .brand .on-dark { display: block; }
   header p { margin: 4px 0 0; font-size: 12px; color: var(--ink-soft); line-height: 1.5; }
   .eyebrow {
     font-size: 10px; text-transform: uppercase; letter-spacing: 0.10em;
@@ -237,11 +310,9 @@
     background: linear-gradient(135deg, var(--navy-800), var(--green-600));
     -webkit-background-clip: text; background-clip: text; color: transparent;
   }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) .big {
-      background: linear-gradient(135deg, #bcd6f0, var(--accent));
-      -webkit-background-clip: text; background-clip: text; color: transparent;
-    }
+  :root[data-theme="dark"] .big {
+    background: linear-gradient(135deg, #bcd6f0, var(--accent));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
   }
   #map { height: 100%; width: 100%; }
   #status {
@@ -290,6 +361,11 @@
            alt="StreetSweep" height="26">
       <img class="word on-dark" src="/wordmark-light.png"
            srcset="/wordmark-light.png 1x, /wordmark-light@2x.png 2x" alt="StreetSweep" height="26">
+      <div class="theme-switch" role="group" aria-label="Colour theme">
+        <button type="button" data-theme-set="system" title="Match the system" aria-label="Match the system" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8.4"/><path d="M12 3.6a8.4 8.4 0 0 1 0 16.8Z" fill="currentColor" stroke="none"/></svg></button>
+        <button type="button" data-theme-set="light" title="Light" aria-label="Light" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.2v2.4M12 19.4v2.4M2.2 12h2.4M19.4 12h2.4M5 5l1.7 1.7M17.3 17.3 19 19M19 5l-1.7 1.7M6.7 17.3 5 19"/></svg></button>
+        <button type="button" data-theme-set="dark" title="Dark" aria-label="Dark" aria-pressed="false"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.8 8.8 0 1 0 11.1 11.1Z"/></svg></button>
+      </div>
     </div>
     <h1>Area Builder</h1>
     <p>Outline the places you want to sweep, then export a GeoJSON file and import it on the phone.</p>
