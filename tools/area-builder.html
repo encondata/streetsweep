@@ -208,9 +208,16 @@
   :root[data-theme="dark"] .brand .on-light { display: none; }
   :root[data-theme="dark"] .brand .on-dark { display: block; }
   header p { margin: 4px 0 0; font-size: 12px; color: var(--ink-soft); line-height: 1.5; }
+  #drawPanel, #coveragePanel {
+    display: flex; flex-direction: column; gap: 20px;
+  }
+  /* An id selector outranks the browser's own [hidden] rule, so without this the
+     inactive tab's panel keeps rendering and the tabs stop working. */
+  #drawPanel[hidden], #coveragePanel[hidden] { display: none; }
+  #coveragePanel .card + .card { margin-top: -10px; }
   .eyebrow {
     font-size: 10px; text-transform: uppercase; letter-spacing: 0.10em;
-    color: var(--ink-soft); font-weight: 700; margin: 0 0 6px;
+    color: var(--ink-soft); font-weight: 700; margin: 0 0 9px;
     display: flex; align-items: center; gap: 8px;
   }
   .eyebrow::after {
@@ -279,7 +286,7 @@
   }
   .warn { color: var(--amber); }
   .bad { color: var(--danger); }
-  .hint { font-size: 11px; color: var(--ink-soft); line-height: 1.55; }
+  .hint { font-size: 11px; color: var(--ink-soft); line-height: 1.55; margin: 9px 0 0; }
   .coords { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); }
   .tabs {
     display: flex; gap: 4px; border-bottom: 1px solid var(--line);
@@ -434,7 +441,7 @@
       <button id="btnFinish" disabled>Finish</button>
       <button id="btnCancel" disabled>Cancel</button>
     </div>
-    <p class="hint" id="drawHint" style="margin-top:8px">
+    <p class="hint" id="drawHint">
       Click the map to drop corners. Drag a corner to move it, click the small dot between two
       corners to add one there, and right-click a corner to remove it.
     </p>
@@ -480,7 +487,7 @@
       <button id="btnImport">Import…</button>
     </div>
     <input type="file" id="fileInput" accept=".geojson,.json,application/geo+json,application/json" hidden>
-    <p class="hint" style="margin-top:8px">
+    <p class="hint">
       Import also accepts the app's own coverage export, so you can see the streets you have
       already driven while deciding where an area should stop.
     </p>
@@ -488,25 +495,33 @@
   </div>
 
   <div id="coveragePanel" hidden>
-    <p class="eyebrow">Total progress</p>
-    <div class="card" id="covSummary">Loading…</div>
-    <div class="card" id="covTallies" style="margin-top:10px" hidden></div>
-    <div class="card" id="covDistance" style="margin-top:10px" hidden></div>
-
-    <p class="eyebrow" style="margin-top:16px">Areas</p>
-    <ul class="areas" id="covAreas"></ul>
-    <p class="hint" id="covAreasEmpty" hidden>The phone has not sent anything yet.</p>
-
-    <p class="eyebrow" style="margin-top:16px">Recent activity</p>
-    <ul class="areas" id="covDrives"></ul>
-
-    <div class="row" style="margin-top:14px">
-      <button id="btnRefreshCoverage" class="primary">Refresh</button>
+    <div>
+      <p class="eyebrow">Total progress</p>
+      <div class="card" id="covSummary">Loading…</div>
+      <div class="card" id="covTallies" hidden></div>
+      <div class="card" id="covDistance" hidden></div>
     </div>
-    <p class="hint" style="margin-top:8px">
-      Sent from the phone under Settings → Area builder server. Turn on “Send after every drive”
-      and this fills in on its own.
-    </p>
+
+    <div>
+      <p class="eyebrow">Areas</p>
+      <ul class="areas" id="covAreas"></ul>
+      <p class="hint" id="covAreasEmpty" hidden>The phone has not sent anything yet.</p>
+    </div>
+
+    <div>
+      <p class="eyebrow">Recent activity</p>
+      <ul class="areas" id="covDrives"></ul>
+    </div>
+
+    <div>
+      <div class="row">
+        <button id="btnRefreshCoverage" class="primary">Refresh</button>
+      </div>
+      <p class="hint">
+        Sent from the phone under Settings → Area builder server. Turn on “Send after every drive”
+        and this fills in on its own.
+      </p>
+    </div>
   </div>
 </div>
 
