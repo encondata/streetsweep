@@ -1499,7 +1499,10 @@ window.StreetSweepBases = {
     var overall = totalMeters ? Math.round((drivenMeters / totalMeters) * 100) : 0;
     var driveMiles = drives.reduce(function (n, d) { return n + (d.distanceMeters || 0); }, 0);
     var freshMiles = drives.reduce(function (n, d) { return n + (d.newMeters || 0); }, 0);
-    var hours = drives.reduce(function (n, d) { return n + Math.max(0, (d.endedAt || d.startedAt) - d.startedAt); }, 0);
+    // Time paused is not time driving, so it comes out the same way the phone takes it out.
+    var hours = drives.reduce(function (n, d) {
+      return n + Math.max(0, (d.endedAt || d.startedAt) - d.startedAt - (d.pausedMs || 0));
+    }, 0);
     var done = areas.filter(function (a) { return (a.stats.total || 0) > 0 && percentOf(a.stats) >= 100; }).length;
     var going = areas.filter(function (a) {
       var p = percentOf(a.stats);
@@ -1786,7 +1789,7 @@ window.StreetSweepBases = {
     if (d.bounds) {
       map.fitBounds([[d.bounds.south, d.bounds.west], [d.bounds.north, d.bounds.east]], { padding: [40, 40] });
     }
-    var minutes = Math.max(0, (d.endedAt || d.startedAt) - d.startedAt);
+    var minutes = Math.max(0, (d.endedAt || d.startedAt) - d.startedAt - (d.pausedMs || 0));
     var share = d.distanceMeters ? Math.round(((d.newMeters || 0) / d.distanceMeters) * 100) : 0;
     var box = el("driveDetail");
     box.hidden = false;
@@ -1799,6 +1802,7 @@ window.StreetSweepBases = {
       "</div>" +
       '<p class="hint">' + (d.area ? escapeHtml(d.area) + " · " : "") + d.segments +
         " street segments" + ((d.newMeters || 0) > 0 ? " · " + fmtDistance(d.newMeters) + " of it new" : "") +
+        ((d.pausedMs || 0) > 60000 ? " · paused for " + fmtDuration(d.pausedMs) : "") +
       "</p></div>";
   }
 

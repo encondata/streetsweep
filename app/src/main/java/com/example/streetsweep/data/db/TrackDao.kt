@@ -39,13 +39,16 @@ interface TrackDao {
     @Query("DELETE FROM sessions WHERE id = :id")
     suspend fun deleteSession(id: Long)
 
+    @Query("UPDATE sessions SET pausedMs = pausedMs + :millis WHERE id = :id")
+    suspend fun addPausedMs(id: Long, millis: Long)
+
     @Query("UPDATE sessions SET newSegments = newSegments + :segments, newMeters = newMeters + :meters WHERE id = :id")
     suspend fun addCoverageStats(id: Long, segments: Int, meters: Double)
 
     @Query(
         """
         SELECT COUNT(*) AS drives, SUM(distanceMeters) AS meters,
-               SUM(COALESCE(endedAt, startedAt) - startedAt) AS durationMs,
+               SUM(MAX(COALESCE(endedAt, startedAt) - startedAt - pausedMs, 0)) AS durationMs,
                SUM(newMeters) AS newMeters, SUM(newSegments) AS newSegments
         FROM sessions
         """,

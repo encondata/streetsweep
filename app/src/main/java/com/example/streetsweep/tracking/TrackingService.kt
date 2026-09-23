@@ -71,6 +71,8 @@ class TrackingService : LifecycleService() {
         val trigger = TriggerSource.fromName(intent?.getStringExtra(EXTRA_TRIGGER))
         when (intent?.action) {
             ACTION_START -> handleStart(trigger)
+            ACTION_PAUSE -> pause()
+            ACTION_RESUME -> resume()
             ACTION_STOP -> lifecycleScope.launch { finishAndStop() }
             ACTION_TRIGGER_DISCONNECTED -> handleTriggerDisconnected()
             else -> handleRestart()
@@ -83,8 +85,10 @@ class TrackingService : LifecycleService() {
     private fun handleStart(trigger: TriggerSource) {
         if (TrackingStateHolder.isRecording || starting) {
             // Trigger (re)connected while already recording: cancel any pending auto-stop.
+            // If the drive was paused, this is the driver getting back in, so pick it up
+            // again rather than leaving it sitting there.
             cancelPendingStop()
-            updateNotification()
+            if (TrackingStateHolder.isPaused) resume() else updateNotification()
             return
         }
         if (!Permissions.hasLocation(this)) {
@@ -107,6 +111,64 @@ class TrackingService : LifecycleService() {
             startIdleWatchdog()
             updateNotification()
             Log.i(TAG, "Session ${s.id} started via $trigger")
+        }
+    }
+
+    /**
+     * Stops recording without ending the drive.
+     *
+     * Location updates stop, which is the point: a shop stop should cost nothing and add
+     * nothing. The drive stays open, so what follows is the same drive rather than a
+     * second one in the list.
+     */
+    private fun pause() {
+        val current = TrackingStateHolder.status.value as? TrackingStatus.Recording ?: return
+        if (current.isPaused) return
+        stopLocationUpdates()
+        stopIntervalWatcher()
+        cancelPendingStop()
+        TrackingStateHolder.updateRecording { it.copy(pausedAt = System.currentTimeMillis(), stopScheduledAt = null) }
+        startPauseGuard()
+        updateNotification()
+        Log.i(TAG, "Session ${current.sessionId} paused")
+    }
+
+    /** Picks the same drive back up, and books the time spent standing still. */
+    private fun resume() {
+        val current = TrackingStateHolder.status.value as? TrackingStatus.Recording ?: return
+        val pausedAt = current.pausedAt ?: return
+        val stoodStill = (System.currentTimeMillis() - pausedAt).coerceAtLeast(0)
+        pauseGuard?.cancel()
+        pauseGuard = null
+        TrackingStateHolder.updateRecording { it.copy(pausedAt = null) }
+        lifecycleScope.launch {
+            container.trackRepository.addPausedMs(current.sessionId, stoodStill)
+            // The watchdog measures time since the last stored point, and nothing was
+            // stored while paused, so it has to start counting again from now.
+            lastStoredAt = System.currentTimeMillis()
+            startLocationUpdates()
+            updateNotification()
+            Log.i(TAG, "Session ${current.sessionId} resumed after ${stoodStill / 1000}s")
+        }
+    }
+
+    /** A pause nobody comes back from should not hold a drive open all day. */
+    private fun startPauseGuard() {
+        pauseGuard?.cancel()
+        pauseGuard = lifecycleScope.launch {
+            delay(PAUSE_LIMIT_MS)
+            if (!TrackingStateHolder.isPaused) return@launch
+            val current = TrackingStateHolder.status.value as? TrackingStatus.Recording ?: return@launch
+            container.trackRepository.addPausedMs(
+                current.sessionId,
+                (System.currentTimeMillis() - (current.pausedAt ?: 0L)).coerceAtLeast(0),
+            )
+            Notifications.showAlert(
+                this@TrackingService,
+                "Recording stopped",
+                "The drive was paused for ${PAUSE_LIMIT_MS / 3_600_000} hours, so StreetSweep ended it.",
+            )
+            finishAndStop()
         }
     }
 
@@ -147,6 +209,16 @@ class TrackingService : LifecycleService() {
     }
 
     private suspend fun finishAndStop() {
+        // Stopping straight from a pause still owes that stretch to the drive.
+        (TrackingStateHolder.status.value as? TrackingStatus.Recording)?.pausedAt?.let { at ->
+            container.trackRepository.addPausedMs(
+                (TrackingStateHolder.status.value as TrackingStatus.Recording).sessionId,
+                (System.currentTimeMillis() - at).coerceAtLeast(0),
+            )
+        }
+        pauseGuard?.cancel()
+        pauseGuard = null
+
         cancelPendingStop()
         idleWatchdog?.cancel()
         idleWatchdog = null
@@ -198,6 +270,10 @@ class TrackingService : LifecycleService() {
     // ---- automatic stop with grace period ---------------------------------------------------
 
     private fun handleTriggerDisconnected() {
+        if (TrackingStateHolder.isPaused) {
+            Log.i(TAG, "Trigger disconnected while paused; leaving the drive open")
+            return
+        }
         val current = TrackingStateHolder.status.value as? TrackingStatus.Recording ?: return
         if (!current.trigger.isAutomatic) return
         schedulePendingStop()
@@ -268,6 +344,7 @@ class TrackingService : LifecycleService() {
 
     private var intervalWatcher: Job? = null
     private var idleWatchdog: Job? = null
+    private var pauseGuard: Job? = null
     private var lastStoredAt: Long = 0L
     private var areaPromptShown = false
 
@@ -283,6 +360,8 @@ class TrackingService : LifecycleService() {
                 delay(60_000)
                 val minutes = container.settings.current().autoStopIdleMinutes
                 if (minutes <= 0) continue
+                // Standing still is the whole point of a pause, so it is not idling.
+                if (TrackingStateHolder.isPaused) continue
                 val idleFor = System.currentTimeMillis() - lastStoredAt
                 if (idleFor >= minutes * 60_000L) {
                     Log.i(TAG, "Stopping after $minutes idle minutes")
@@ -455,11 +534,16 @@ class TrackingService : LifecycleService() {
         private const val TAG = "TrackingService"
         const val ACTION_START = "com.example.streetsweep.action.START"
         const val ACTION_STOP = "com.example.streetsweep.action.STOP"
+        const val ACTION_PAUSE = "com.example.streetsweep.action.PAUSE"
+        const val ACTION_RESUME = "com.example.streetsweep.action.RESUME"
         const val ACTION_TRIGGER_DISCONNECTED = "com.example.streetsweep.action.TRIGGER_DISCONNECTED"
         const val EXTRA_TRIGGER = "trigger"
 
         /** How long an automatic session keeps recording after its trigger disconnects. */
         const val STOP_GRACE_MS = 90_000L
+
+        /** Long enough for any errand; short of leaving a drive open overnight. */
+        const val PAUSE_LIMIT_MS = 4 * 60 * 60 * 1000L
 
         /** Match the newest points to roads every N stored points while driving. */
         const val SNAP_EVERY_POINTS = 20
@@ -482,6 +566,14 @@ class TrackingService : LifecycleService() {
         } catch (e: IllegalStateException) {
             Log.w(TAG, "Foreground service start refused: ${e.message}")
             false
+        }
+
+        fun pause(context: Context) {
+            context.startService(Intent(context, TrackingService::class.java).setAction(ACTION_PAUSE))
+        }
+
+        fun resume(context: Context) {
+            context.startService(Intent(context, TrackingService::class.java).setAction(ACTION_RESUME))
         }
 
         fun stop(context: Context) {

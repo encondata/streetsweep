@@ -150,11 +150,13 @@ fun SessionsScreen(
 }
 
 private fun summaryLine(s: TrackSession): String {
-    val end = s.endedAt ?: System.currentTimeMillis()
     val snapped = if (s.snappedRawCount >= s.pointCount && s.pointCount >= 2) " · matched" else ""
     val fresh = if (s.newSegments > 0) " · +${Geo.formatDistance(s.newMeters)} new" else ""
-    return "${Geo.formatDistance(s.distanceMeters)} · ${s.pointCount} points · ${Format.duration(end - s.startedAt)} · " +
-        TriggerSource.fromName(s.trigger).label + snapped + fresh
+    // Time paused is not time driving, so it does not appear here.
+    val held = if (s.pausedMs > 60_000) " · ${Format.duration(s.pausedMs)} paused" else ""
+    return "${Geo.formatDistance(s.distanceMeters)} · ${s.pointCount} points · " +
+        "${Format.duration(s.drivingMs())} · " +
+        TriggerSource.fromName(s.trigger).label + snapped + fresh + held
 }
 
 @Composable

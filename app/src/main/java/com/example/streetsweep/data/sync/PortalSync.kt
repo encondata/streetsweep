@@ -141,6 +141,8 @@ class PortalSync(
     private fun driveJson(s: com.example.streetsweep.data.db.TrackSession) = JSONObject()
         .put("startedAt", s.startedAt)
         .put("endedAt", s.endedAt ?: JSONObject.NULL)
+        // Standing still at the shops is not driving, so the portal should not count it.
+        .put("pausedMs", s.pausedMs)
         .put("trigger", s.trigger)
         .put("pointCount", s.pointCount)
         .put("distanceMeters", s.distanceMeters)

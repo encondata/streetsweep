@@ -19,8 +19,17 @@ data class TrackSession(
     /** Road segments this drive was the first to cover, and their length. */
     val newSegments: Int = 0,
     val newMeters: Double = 0.0,
+    /**
+     * Time spent paused, so a stop at the shops does not count as driving. Accrued when
+     * the drive is resumed or finished, never while it is still standing still.
+     */
+    val pausedMs: Long = 0,
 ) {
     val isOpen: Boolean get() = endedAt == null
+
+    /** Wall-clock length of the drive with any pauses taken out. */
+    fun drivingMs(now: Long = System.currentTimeMillis()): Long =
+        ((endedAt ?: now) - startedAt - pausedMs).coerceAtLeast(0)
 }
 
 @Entity(

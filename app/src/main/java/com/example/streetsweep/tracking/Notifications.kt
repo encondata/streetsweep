@@ -58,8 +58,13 @@ object Notifications {
             text = "Waiting for GPS"
         } else {
             val started = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(status.startedAt))
-            title = "Recording drive · ${Geo.formatDistance(status.distanceMeters)}"
+            title = if (status.isPaused) {
+                "Paused · ${Geo.formatDistance(status.distanceMeters)}"
+            } else {
+                "Recording drive · ${Geo.formatDistance(status.distanceMeters)}"
+            }
             text = buildString {
+                if (status.isPaused) append("Not recording. ")
                 append("${status.pointCount} points since $started")
                 if (status.trigger.isAutomatic) append(" · via ${status.trigger.label}")
                 status.stopScheduledAt?.let { at ->
@@ -74,6 +79,14 @@ object Notifications {
             Intent(context, TrackingService::class.java).setAction(TrackingService.ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val paused = (status as? TrackingStatus.Recording)?.isPaused == true
+        val holdIntent = PendingIntent.getService(
+            context,
+            2,
+            Intent(context, TrackingService::class.java)
+                .setAction(if (paused) TrackingService.ACTION_RESUME else TrackingService.ACTION_PAUSE),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         return NotificationCompat.Builder(context, CHANNEL_TRACKING)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentTitle(title)
@@ -83,6 +96,7 @@ object Notifications {
             .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setContentIntent(openAppIntent(context))
+            .addAction(0, if (paused) "Resume" else "Pause", holdIntent)
             .addAction(0, "Stop", stopIntent)
             .build()
     }

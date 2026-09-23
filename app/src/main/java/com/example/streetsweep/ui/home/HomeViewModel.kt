@@ -411,6 +411,8 @@ class HomeViewModel(private val container: AppContainer, private val context: Co
     }
 
     fun startManual() = TrackingService.start(context, TriggerSource.MANUAL)
+    fun pauseTracking() = TrackingService.pause(context)
+    fun resumeTracking() = TrackingService.resume(context)
     fun stopTracking() = TrackingService.stop(context)
 
     /** How many download cells the drafted outline would need; drives the size warning in the dialog. */

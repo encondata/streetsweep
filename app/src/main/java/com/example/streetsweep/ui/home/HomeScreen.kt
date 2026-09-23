@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
@@ -276,13 +277,37 @@ fun HomeScreen(
                 !hasLocation -> Button(onClick = { locationLauncher.launch(Permissions.LOCATION) }) {
                     Text("Allow precise location to record")
                 }
-                status is TrackingStatus.Recording -> Button(
-                    onClick = viewModel::stopTracking,
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                ) {
-                    Icon(Icons.Default.Stop, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Stop recording")
+                status is TrackingStatus.Recording -> {
+                    val paused = (status as TrackingStatus.Recording).isPaused
+                    // Pause keeps the drive open, so a stop at the shops does not become a
+                    // second drive in the list.
+                    Button(
+                        onClick = if (paused) viewModel::resumeTracking else viewModel::pauseTracking,
+                        colors = if (paused) {
+                            ButtonDefaults.buttonColors()
+                        } else {
+                            ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                            )
+                        },
+                    ) {
+                        Icon(
+                            if (paused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                            contentDescription = null,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (paused) "Resume" else "Pause")
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Button(
+                        onClick = viewModel::stopTracking,
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    ) {
+                        Icon(Icons.Default.Stop, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Stop")
+                    }
                 }
                 else -> Button(onClick = viewModel::startManual) {
                     Icon(Icons.Default.PlayArrow, contentDescription = null)
@@ -627,11 +652,26 @@ private fun StatusCard(
                 }
                 is TrackingStatus.Recording -> {
                     Text(
-                        "Recording · ${Geo.formatDistance(status.distanceMeters)}",
+                        if (status.isPaused) {
+                            "Paused · ${Geo.formatDistance(status.distanceMeters)}"
+                        } else {
+                            "Recording · ${Geo.formatDistance(status.distanceMeters)}"
+                        },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = if (status.isPaused) {
+                            MaterialTheme.colorScheme.tertiary
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        },
                     )
+                    if (status.isPaused) {
+                        Text(
+                            "The drive is still open. Resume and it carries on as one drive.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     Text(
                         "${status.pointCount} points since ${Format.time(status.startedAt)} · " +
                             "${status.skippedTooClose} fixes skipped (< ${PointFilter.MIN_SPACING_FEET.toInt()} ft)" +

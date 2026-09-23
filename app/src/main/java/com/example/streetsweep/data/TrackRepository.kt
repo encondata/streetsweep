@@ -86,6 +86,11 @@ class TrackRepository(private val db: AppDatabase) {
     suspend fun getPoints(sessionId: Long): List<TrackPoint> = dao.getPoints(sessionId)
     suspend fun getAllSessions(): List<TrackSession> = dao.getAllSessions()
     suspend fun getUnmatchedSessions(): List<TrackSession> = dao.getUnmatchedSessions()
+    /** Adds a stretch of standing still to a drive, so it is not counted as driving. */
+    suspend fun addPausedMs(sessionId: Long, millis: Long) {
+        if (millis > 0) dao.addPausedMs(sessionId, millis)
+    }
+
     suspend fun getAllPois(): List<Poi> = pois.getAll()
     fun observeWeeklyDriving(): Flow<List<WeeklyDrivingRow>> = dao.observeWeeklyDriving()
 

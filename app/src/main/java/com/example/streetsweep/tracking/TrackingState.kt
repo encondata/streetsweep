@@ -22,7 +22,14 @@ sealed interface TrackingStatus {
         val lastPoint: LatLngPoint? = null,
         /** Non-null while an automatic trigger has disconnected and the grace timer is running. */
         val stopScheduledAt: Long? = null,
-    ) : TrackingStatus
+        /**
+         * When the drive was paused, or null while it is running. The session stays open:
+         * pausing is for nipping into a shop without turning one drive into two.
+         */
+        val pausedAt: Long? = null,
+    ) : TrackingStatus {
+        val isPaused: Boolean get() = pausedAt != null
+    }
 }
 
 /**
@@ -34,6 +41,8 @@ object TrackingStateHolder {
     val status: StateFlow<TrackingStatus> = _status.asStateFlow()
 
     val isRecording: Boolean get() = _status.value is TrackingStatus.Recording
+
+    val isPaused: Boolean get() = (_status.value as? TrackingStatus.Recording)?.isPaused == true
 
     fun set(status: TrackingStatus) {
         _status.value = status

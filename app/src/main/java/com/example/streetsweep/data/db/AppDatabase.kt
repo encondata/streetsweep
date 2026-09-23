@@ -13,7 +13,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CoverageArea::class, AreaWay::class, OsmWay::class, StreetChunk::class, DrivenEdge::class,
         Poi::class, StreetExclusion::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -56,8 +56,16 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v8: a drive can be paused, and the time spent paused is not driving time. */
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `sessions` ADD COLUMN `pausedMs` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         /** Hand-written migrations, oldest first. Add one for each version bump. */
-        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+        val MIGRATIONS: Array<Migration> =
+            arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
 
         fun build(context: Context): AppDatabase =
             // The phone now holds real drives and areas. Every schema change from version 4 on

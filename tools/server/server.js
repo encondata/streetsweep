@@ -146,6 +146,8 @@ async function ensureSchema() {
       new_segments INTEGER NOT NULL DEFAULT 0,
       new_meters   DOUBLE PRECISION NOT NULL DEFAULT 0
     );
+    -- A drive can be paused, and the time it stood still is not time driving.
+    ALTER TABLE drives ADD COLUMN IF NOT EXISTS paused_ms BIGINT NOT NULL DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS pois (
       id   TEXT PRIMARY KEY,
@@ -463,13 +465,15 @@ async function applySync(body) {
         const startedAt = num(d.startedAt, 0);
         if (!startedAt) { result.skipped++; continue; }
         await client.query(
-          `INSERT INTO drives (started_at, ended_at, trigger, point_count, distance_m, new_segments, new_meters)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)
+          `INSERT INTO drives (started_at, ended_at, trigger, point_count, distance_m,
+                               new_segments, new_meters, paused_ms)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
            ON CONFLICT (started_at) DO UPDATE SET
              ended_at=EXCLUDED.ended_at, trigger=EXCLUDED.trigger, point_count=EXCLUDED.point_count,
-             distance_m=EXCLUDED.distance_m, new_segments=EXCLUDED.new_segments, new_meters=EXCLUDED.new_meters`,
+             distance_m=EXCLUDED.distance_m, new_segments=EXCLUDED.new_segments,
+             new_meters=EXCLUDED.new_meters, paused_ms=EXCLUDED.paused_ms`,
           [startedAt, num(d.endedAt, null), d.trigger || null, num(d.pointCount, 0),
-           num(d.distanceMeters, 0), num(d.newSegments, 0), num(d.newMeters, 0)],
+           num(d.distanceMeters, 0), num(d.newSegments, 0), num(d.newMeters, 0), num(d.pausedMs, 0)],
         );
         result.drives++;
       }
@@ -529,7 +533,7 @@ async function applySync(body) {
  */
 async function drives(limit, withShapes) {
   const { rows } = await pool.query(
-    `SELECT started_at, ended_at, trigger, point_count, distance_m, new_segments, new_meters
+    `SELECT started_at, ended_at, trigger, point_count, distance_m, new_segments, new_meters, paused_ms
      FROM drives ORDER BY started_at DESC LIMIT $1`,
     [Math.min(Math.max(1, limit || 50), 500)],
   );
@@ -587,6 +591,7 @@ async function drives(limit, withShapes) {
       distanceMeters: Number(d.distance_m) || 0,
       newSegments: d.new_segments,
       newMeters: Number(d.new_meters) || 0,
+      pausedMs: Number(d.paused_ms) || 0,
       area,
       bounds: box,
       segments: mine.length,
@@ -620,7 +625,7 @@ async function coverage(edgeLimit) {
                        streets_partial, streets_excluded, meters_total, meters_driven, reported_at
                 FROM reported_areas ORDER BY ${LEVEL_RANK}, name`),
     pool.query("SELECT key, name, road_class, length_m, driven_at, shape FROM driven_edges ORDER BY driven_at DESC LIMIT $1", [cap]),
-    pool.query("SELECT started_at, ended_at, trigger, point_count, distance_m, new_segments, new_meters FROM drives ORDER BY started_at DESC"),
+    pool.query("SELECT started_at, ended_at, trigger, point_count, distance_m, new_segments, new_meters, paused_ms FROM drives ORDER BY started_at DESC"),
     pool.query("SELECT id, lat, lng, note, name, photo_key, at, updated_at FROM pois ORDER BY at DESC"),
     pool.query("SELECT COUNT(*)::int AS edges, COALESCE(SUM(length_m),0) AS meters FROM driven_edges"),
   ]);
@@ -646,6 +651,7 @@ async function coverage(edgeLimit) {
       startedAt: Number(r.started_at), endedAt: r.ended_at === null ? null : Number(r.ended_at),
       trigger: r.trigger, pointCount: r.point_count, distanceMeters: Number(r.distance_m),
       newSegments: r.new_segments, newMeters: Number(r.new_meters),
+      pausedMs: Number(r.paused_ms) || 0,
     })),
     pois: pois.rows.map(rowToPoi),
     totals: {
