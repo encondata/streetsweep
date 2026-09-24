@@ -210,6 +210,36 @@
   .seg button[aria-pressed="true"] { background: var(--grad-accent); color: var(--accent-ink); box-shadow: var(--shadow-accent); }
   #citySelect { width: auto; min-width: 140px; flex: 0 0 auto; }
 
+  /* Your account, at the far right of the header. */
+  #meMenu { position: relative; flex: 0 0 auto; }
+  #meBtn { padding: 3px; border-radius: 999px; box-shadow: none; line-height: 0; }
+  #meBtn:hover { border-color: var(--accent); }
+  .avatar {
+    display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%;
+    background: var(--grad-accent); color: var(--accent-ink);
+    font-size: 12px; font-weight: 700; letter-spacing: .02em; line-height: 1;
+  }
+  .avatar.big { width: 42px; height: 42px; font-size: 15px; }
+  #mePanel {
+    position: absolute; z-index: 900; top: calc(100% + 8px); right: 0; width: 272px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+    box-shadow: var(--shadow-2); padding: 14px;
+  }
+  #mePanel .mehead { display: flex; align-items: center; gap: 11px; margin-bottom: 12px; }
+  #mePanel .who { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  #mePanel .who strong { font-size: 13.5px; }
+  #mePanel .who span {
+    font-size: 11.5px; color: var(--ink-soft);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #mePanel .who .role { text-transform: capitalize; color: var(--accent); font-weight: 700; }
+  #mePanel .meacts { display: flex; flex-direction: column; gap: 7px; }
+  #mePanel .meacts button { width: 100%; text-align: left; font-size: 12.5px; padding: 9px 11px; }
+  #mePanel .meacts button.danger { color: var(--danger); }
+  #mePanel .meacts button.danger:hover { border-color: var(--danger); }
+  #pwForm { margin-top: 11px; display: flex; flex-direction: column; gap: 8px; }
+  #pwForm[hidden] { display: none; }
+
   /* Which outlines are drawn. Anchored to its button so it opens under it. */
   #showMenu { position: relative; flex: 0 0 auto; }
   #showBtn { display: flex; align-items: center; gap: 7px; padding: 8px 12px; }
@@ -560,6 +590,35 @@
       <button type="button" data-base="standard" aria-pressed="true">Map</button>
       <button type="button" data-base="satellite" aria-pressed="false">Satellite</button>
       <button type="button" data-base="hybrid" aria-pressed="false">Hybrid</button>
+    </div>
+    <div id="meMenu">
+      <button type="button" id="meBtn" aria-expanded="false" aria-haspopup="dialog"
+              title="Your account">
+        <span class="avatar" id="meAvatar" aria-hidden="true">·</span>
+      </button>
+      <div id="mePanel" hidden role="dialog" aria-label="Your account">
+        <div class="mehead">
+          <span class="avatar big" id="meAvatarBig" aria-hidden="true">·</span>
+          <div class="who">
+            <strong id="meName">Signed in</strong>
+            <span id="meEmail"></span>
+            <span class="role" id="meRole"></span>
+          </div>
+        </div>
+        <div class="meacts">
+          <button type="button" id="mePassword">Change password</button>
+          <button type="button" id="meSignOut" class="danger">Sign out</button>
+        </div>
+        <form id="pwForm" hidden>
+          <input type="password" id="pwCurrent" placeholder="Current password" autocomplete="current-password">
+          <input type="password" id="pwNext" placeholder="New password, 10 characters or more" autocomplete="new-password">
+          <div class="row">
+            <button type="submit" class="primary" style="flex:1 1 auto">Change it</button>
+            <button type="button" id="pwCancel" style="flex:0 0 auto">Cancel</button>
+          </div>
+        </form>
+        <p class="hint" id="meMsg" hidden></p>
+      </div>
     </div>
     <div class="theme-switch" role="group" aria-label="Colour theme">
       <button type="button" data-theme-set="system" title="Match the system" aria-label="Match the system" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8.4"/><path d="M12 3.6a8.4 8.4 0 0 1 0 16.8Z" fill="currentColor" stroke="none"/></svg></button>
@@ -1079,6 +1138,9 @@ window.StreetSweepBases = {
     fetch("/api/config")
       .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error("no api")); })
       .then(function (cfg) {
+        // needsToken was the old shared-secret question. A server with accounts says
+        // needsAuth instead, and whether this browser is signed in only shows up when
+        // something is actually asked for — so ask, and deal with a 401 below.
         if (cfg.needsToken && !token) {
           setMode(true);
           showTokenBox("This server needs an access token before it will show anything.");
@@ -1088,6 +1150,7 @@ window.StreetSweepBases = {
           setMode(true);
           locked = false;
           el("tokenBox").hidden = true;
+          if (cfg.needsAuth) loadMe();
           adoptFromServer(res.areas);
           if (areas.length) zoomTo(areas[areas.length - 1]);
           // Only now is the token known to be good, so only now is anything behind it
@@ -1098,9 +1161,10 @@ window.StreetSweepBases = {
       })
       .catch(function (e) {
         if (e && e.status === 401) {
+          // Nobody is signed in. There is a page for that now, and it is a better
+          // answer than a token box the server no longer asks for.
           forgetToken();
-          setMode(true);
-          showTokenBox("That token was not accepted. Try again.");
+          location.href = "/login?next=" + encodeURIComponent(location.pathname);
           return;
         }
         loadLocalAreas();
@@ -1665,6 +1729,106 @@ window.StreetSweepBases = {
       el("showBtn").setAttribute("aria-expanded", "false");
       el("showBtn").focus();
     }
+  });
+
+  // ---- your account -------------------------------------------------------
+
+  var me = null;
+
+  /** Initials, from a name if there is one and the address if there is not. */
+  function initialsFor(user) {
+    var name = String(user.name || "").trim();
+    if (name) {
+      var parts = name.split(/\s+/);
+      return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+    }
+    return String(user.email || "?").slice(0, 2).toUpperCase();
+  }
+
+  function paintMe(user) {
+    me = user;
+    var letters = initialsFor(user);
+    el("meAvatar").textContent = letters;
+    el("meAvatarBig").textContent = letters;
+    el("meName").textContent = user.name || user.email;
+    el("meEmail").textContent = user.email;
+    el("meEmail").title = user.email;
+    el("meRole").textContent = user.role;
+    el("meBtn").title = (user.name || user.email) + " — your account";
+  }
+
+  /**
+   * Who is signed in. A 401 means nobody is, and the page is no use in that state,
+   * so it goes to the sign-in screen rather than sitting there failing every call.
+   */
+  function loadMe() {
+    apiJson("/api/auth/me")
+      .then(function (res) { if (res && res.user) paintMe(res.user); })
+      .catch(function (err) {
+        if (String(err && err.message).indexOf("401") >= 0 || (err && err.status === 401)) {
+          location.href = "/login?next=" + encodeURIComponent(location.pathname);
+        }
+      });
+  }
+
+  function meSay(text, bad) {
+    var p = el("meMsg");
+    p.hidden = !text;
+    p.textContent = text || "";
+    p.style.color = bad ? "var(--danger)" : "var(--ink-soft)";
+  }
+
+  function closeMe() {
+    el("mePanel").hidden = true;
+    el("meBtn").setAttribute("aria-expanded", "false");
+    el("pwForm").hidden = true;
+    meSay("");
+  }
+
+  el("meBtn").addEventListener("click", function (ev) {
+    ev.stopPropagation();
+    var panel = el("mePanel");
+    if (!panel.hidden) return closeMe();
+    panel.hidden = false;
+    el("meBtn").setAttribute("aria-expanded", "true");
+  });
+  el("mePanel").addEventListener("click", function (ev) { ev.stopPropagation(); });
+  document.addEventListener("click", function () { if (!el("mePanel").hidden) closeMe(); });
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape" && !el("mePanel").hidden) { closeMe(); el("meBtn").focus(); }
+  });
+
+  el("meSignOut").addEventListener("click", function () {
+    el("meSignOut").disabled = true;
+    // The shared token from before accounts existed still authenticates, so ending the
+    // session alone would leave this browser signed in as the first admin the moment it
+    // went back to the map. Signing out has to forget that too, or it is not signing out.
+    forgetToken();
+    apiJson("/api/auth/logout", "POST", {})
+      .catch(function () { /* going to the sign-in page either way */ })
+      .then(function () { location.href = "/login"; });
+  });
+
+  el("mePassword").addEventListener("click", function () {
+    el("pwForm").hidden = !el("pwForm").hidden;
+    meSay("");
+    if (!el("pwForm").hidden) el("pwCurrent").focus();
+  });
+  el("pwCancel").addEventListener("click", function () {
+    el("pwForm").hidden = true; el("pwCurrent").value = ""; el("pwNext").value = ""; meSay("");
+  });
+  el("pwForm").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var current = el("pwCurrent").value, next = el("pwNext").value;
+    if (next.length < 10) return meSay("Use at least 10 characters.", true);
+    meSay("Changing…");
+    apiJson("/api/auth/password", "POST", { current: current, password: next })
+      .then(function () {
+        el("pwCurrent").value = ""; el("pwNext").value = "";
+        el("pwForm").hidden = true;
+        meSay("Password changed.");
+      })
+      .catch(function (err) { meSay(err && err.message ? err.message : "That did not work.", true); });
   });
 
   function escapeHtml(s) {
