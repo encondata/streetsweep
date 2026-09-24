@@ -285,6 +285,8 @@
   }
   .board li:first-child .rank { background: var(--grad-accent); color: var(--accent-ink); }
   .board .main { flex: 1 1 auto; min-width: 0; }
+  .board .main.open { cursor: pointer; border-radius: 7px; }
+  .board .main.open:hover b { color: var(--accent); text-decoration: underline; }
   .board .main b { display: block; font-size: 13px; font-weight: 700; }
   .board .main span {
     display: block; font-size: 11px; color: var(--ink-soft);
@@ -466,6 +468,52 @@
   :root[data-view="board"] .eyebrow { margin: 26px 0 11px; }
   #dashCols > div > .eyebrow:first-child,
   #peopleCols > div > .eyebrow:first-child { margin-top: 6px; }
+
+  /* ---- one person ---------------------------------------------------------- */
+  .backlink {
+    border: none; background: none; box-shadow: none; padding: 4px 0; margin-bottom: 10px;
+    font-size: 12.5px; font-weight: 600; color: var(--accent);
+  }
+  .backlink:hover { box-shadow: none; text-decoration: underline; }
+  .personhead {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding-bottom: 6px;
+  }
+  .personhead .avatar.big { width: 56px; height: 56px; font-size: 19px; }
+  .personhead .who { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; }
+  .personhead .who strong { font-size: 19px; letter-spacing: -.02em; }
+  .personhead .who span {
+    font-size: 12px; color: var(--ink-soft);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .board li .bar { display: block; height: 6px; border-radius: 999px;
+    background: var(--surface-2); margin-top: 6px; overflow: hidden; }
+  .board li .bar i { display: block; height: 100%; background: var(--grad-accent); }
+
+  /* ---- the dashboard's own map ------------------------------------------- */
+  #dashMapCard { padding: 0; overflow: hidden; margin-top: 16px; }
+  #dashMap { height: 380px; background: var(--ground); }
+  .chips {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    padding: 12px 14px; border-bottom: 1px solid var(--line);
+  }
+  .chips .grow { flex: 1 1 auto; }
+  .chips button {
+    padding: 6px 13px; font-size: 12px; font-weight: 600; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-soft);
+    box-shadow: none;
+  }
+  .chips button:hover { color: var(--ink); border-color: var(--line-strong); box-shadow: none; }
+  .chips button[aria-pressed="true"] {
+    background: var(--grad-accent); color: var(--accent-ink); border-color: transparent;
+    box-shadow: var(--shadow-accent);
+  }
+  .maplegend {
+    display: flex; gap: 16px; flex-wrap: wrap;
+    padding: 10px 14px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-soft);
+  }
+  .maplegend span { display: flex; align-items: center; gap: 7px; font-weight: 600; }
+  .maplegend i { width: 12px; height: 4px; border-radius: 2px; }
 
   /* ---- the figures across the top ---------------------------------------- */
   .kpis {
@@ -1062,6 +1110,23 @@
 
         <div class="kpis" id="kpiRow"></div>
 
+        <div class="card" id="dashMapCard">
+          <div class="chips" id="dashChips">
+            <button type="button" data-filter="all" aria-pressed="true">All areas</button>
+            <button type="button" data-filter="done" aria-pressed="false">Completed</button>
+            <button type="button" data-filter="going" aria-pressed="false">In progress</button>
+            <button type="button" data-filter="none" aria-pressed="false">Not started</button>
+            <span class="grow"></span>
+            <span class="hint" id="dashMapCount"></span>
+          </div>
+          <div id="dashMap"></div>
+          <div class="maplegend">
+            <span><i style="background:#1e8a28"></i>Completed</span>
+            <span><i style="background:#45bd23"></i>In progress</span>
+            <span><i style="background:#7a828e"></i>Not started</span>
+          </div>
+        </div>
+
         <div id="dashCols">
           <div>
             <p class="eyebrow">Overall completion</p>
@@ -1111,6 +1176,30 @@
       </section>
 
       <section class="view" data-view="people" hidden>
+        <div id="userDetail" hidden>
+          <button type="button" id="userBack" class="backlink">&larr; Back to users</button>
+          <div class="personhead">
+            <span class="avatar big" id="udAvatar" aria-hidden="true">·</span>
+            <div class="who">
+              <strong id="udName">—</strong>
+              <span id="udEmail"></span>
+              <span id="udJoined" class="muted"></span>
+            </div>
+            <span class="tag" id="udRole"></span>
+            <span class="tag" id="udActive"></span>
+          </div>
+          <div class="grid3" id="udStats" style="margin-top:14px"></div>
+
+          <p class="eyebrow">Completion by area</p>
+          <ul class="board plain" id="udAreas"></ul>
+          <p class="hint" id="udAreasEmpty" hidden>This person has not reported an area yet.</p>
+
+          <p class="eyebrow">Recent drives</p>
+          <ul class="board plain" id="udDrives"></ul>
+          <p class="hint" id="udDrivesEmpty" hidden>No drive has been recorded for them.</p>
+        </div>
+
+        <div id="peopleMain">
         <div class="viewhead">
           <h2>Users</h2>
           <p>Who can sign in, what they may do, the vehicles they drive and the phones they carry.</p>
@@ -1144,6 +1233,7 @@
             <ul id="devList" class="board plain"></ul>
             <p class="hint" id="devEmpty" hidden>No phone has signed in yet.</p>
           </div>
+        </div>
         </div>
         <p class="hint" id="peopleMsg" hidden></p>
       </section>
@@ -2389,6 +2479,76 @@ window.StreetSweepBases = {
       "<text class='mid' x='66' y='74' text-anchor='middle' fill='var(--ink)'>" + pct + "%</text></svg>";
   }
 
+  // ---- the dashboard's map ------------------------------------------------
+  //
+  // Its own Leaflet instance rather than the main one: that map is hidden while this
+  // page is open, and a hidden map cannot be sized, so borrowing it would mean a grey
+  // rectangle until something forced a resize.
+  var dashMap = null, dashLayer = null, dashFilter = "all", dashProgress = {};
+
+  function areaState(name) {
+    var p = dashProgress[name];
+    if (!p || !p.total) return "none";
+    if (p.done >= p.total) return "done";
+    return p.done > 0 ? "going" : "none";
+  }
+
+  var STATE_COLOUR = { done: "#1e8a28", going: "#45bd23", none: "#7a828e" };
+
+  function drawDashMap() {
+    if (!dashMap) {
+      dashMap = L.map("dashMap", { zoomControl: true, attributionControl: false });
+      L.tileLayer(window.StreetSweepBases.standard.url, { maxZoom: 19 }).addTo(dashMap);
+      dashLayer = L.layerGroup().addTo(dashMap);
+      dashMap.setView([30.3704, -95.6251], 11);
+    }
+    dashLayer.clearLayers();
+    var shown = 0, bounds = null;
+    areas.forEach(function (a) {
+      var state = areaState(a.name);
+      if (dashFilter !== "all" && dashFilter !== state) return;
+      var colour = STATE_COLOUR[state];
+      var poly = L.polygon(a.latlngs, {
+        color: colour, weight: 2, opacity: 0.95,
+        fillColor: colour, fillOpacity: state === "none" ? 0.06 : 0.16,
+      }).addTo(dashLayer);
+      var p = dashProgress[a.name];
+      poly.bindTooltip(
+        "<b>" + escapeHtml(a.name) + "</b><br>" +
+        (p && p.total
+          ? Math.round((p.done / p.total) * 100) + "% · " + p.done.toLocaleString() +
+            " of " + p.total.toLocaleString() + " streets"
+          : "nothing reported yet"),
+        { direction: "top" });
+      shown++;
+      bounds = bounds ? bounds.extend(poly.getBounds()) : poly.getBounds();
+    });
+    el("dashMapCount").textContent = shown + (shown === 1 ? " area" : " areas");
+    // Leaflet cannot measure a box that was display:none when it was made.
+    setTimeout(function () {
+      dashMap.invalidateSize();
+      if (bounds) dashMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 14 });
+    }, 60);
+  }
+
+  el("dashChips").addEventListener("click", function (ev) {
+    var b = ev.target.closest && ev.target.closest("button[data-filter]");
+    if (!b) return;
+    dashFilter = b.getAttribute("data-filter");
+    Array.prototype.forEach.call(el("dashChips").querySelectorAll("button"), function (x) {
+      x.setAttribute("aria-pressed", String(x === b));
+    });
+    drawDashMap();
+  });
+
+  function loadDashMap() {
+    return apiJson("/api/admin/area-progress").then(function (d) {
+      dashProgress = {};
+      d.areas.forEach(function (a) { dashProgress[a.name] = a; });
+      drawDashMap();
+    });
+  }
+
   function loadDashboard() {
     var to = Date.now();
     var from = to - dashDays * 86400000;
@@ -2510,11 +2670,66 @@ window.StreetSweepBases = {
     });
   }
 
+  // ---- one person -----------------------------------------------------------
+
+  function showUserList() {
+    el("userDetail").hidden = true;
+    el("peopleMain").hidden = false;
+  }
+
+  function openUser(id) {
+    adminSay("");
+    apiJson("/api/admin/users/" + id + "/summary").then(function (d) {
+      var u = d.user, t = d.totals;
+      el("peopleMain").hidden = true;
+      el("userDetail").hidden = false;
+      paintAvatar(el("udAvatar"), u);
+      el("udName").textContent = u.name;
+      el("udEmail").textContent = u.email;
+      el("udJoined").textContent = "Joined " + new Date(d.joinedAt).toLocaleDateString();
+      el("udRole").textContent = u.role;
+      el("udRole").className = "tag " + u.role;
+      el("udActive").textContent = u.active ? "Active" : "Switched off";
+      el("udActive").className = "tag";
+
+      el("udStats").innerHTML =
+        cell(t.streets.toLocaleString(), "Streets swept") +
+        cell(fmtDistance(t.streetMeters), "Swept") +
+        cell(fmtDistance(t.meters), "Driven") +
+        cell(t.drives.toLocaleString(), "Drives") +
+        cell(t.areas.toLocaleString(), "Areas reported") +
+        cell(d.rank ? "#" + d.rank : "—", "Rank by streets");
+
+      el("udAreasEmpty").hidden = d.areas.length > 0;
+      el("udAreas").innerHTML = d.areas.map(function (a) {
+        var pct = a.total ? Math.round((a.done / a.total) * 100) : 0;
+        return "<li><span class='main'><b>" + escapeHtml(a.name) + "</b><span>" +
+          a.done.toLocaleString() + " / " + a.total.toLocaleString() + " streets</span>" +
+          "<span class='bar'><i style='width:" + pct + "%'></i></span></span>" +
+          "<span class='fig'><b>" + pct + "%</b></span></li>";
+      }).join("");
+
+      el("udDrivesEmpty").hidden = d.drives.length > 0;
+      el("udDrives").innerHTML = d.drives.map(function (dr) {
+        var mins = dr.endedAt
+          ? Math.max(0, Math.round((dr.endedAt - dr.startedAt - dr.pausedMs) / 60000)) : null;
+        return "<li><span class='main'><b>" +
+          new Date(dr.startedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) +
+          "</b><span>" + (dr.newStreets || 0) + " new streets" +
+          (mins != null ? " · " + fmtDuration(mins * 60000) : "") +
+          (dr.vehicle ? " · " + escapeHtml(dr.vehicle) : "") + "</span></span>" +
+          "<span class='fig'><b>" + fmtDistance(dr.meters) + "</b><span>driven</span></span></li>";
+      }).join("");
+    }).catch(function (err) { adminSay(err.message || "Could not open that person.", true); });
+  }
+
+  el("userBack").addEventListener("click", showUserList);
+
   function loadUsers() {
     return apiJson("/api/users").then(function (d) {
       el("userList").innerHTML = d.users.map(function (u) {
         return "<li data-user='" + u.id + "'" + (u.active ? "" : " class='off'") + ">" +
-          "<span class='main'><b>" + escapeHtml(u.name) +
+          "<span class='main open' role='button' tabindex='0'><b>" + escapeHtml(u.name) +
             " <span class='tag " + u.role + "'>" + u.role + "</span></b>" +
             "<span>" + escapeHtml(u.email) +
             (u.devices ? " · " + u.devices + (u.devices === 1 ? " phone" : " phones") : "") +
@@ -2558,11 +2773,12 @@ window.StreetSweepBases = {
 
   function loadAdmin() {
     adminSay("");
-    return Promise.all([loadDashboard(), loadServer()])
+    return Promise.all([loadDashboard(), loadServer(), loadDashMap()])
       .catch(function (err) { adminSay(err && err.message ? err.message : "Could not load.", true); });
   }
 
   function loadPeople() {
+    showUserList();
     return Promise.all([loadUsers(), loadVehicles(), loadDevices()])
       .catch(function (err) { adminSay(err && err.message ? err.message : "Could not load.", true); });
   }
@@ -2619,6 +2835,10 @@ window.StreetSweepBases = {
   });
 
   el("userList").addEventListener("click", function (ev) {
+    var open = ev.target.closest && ev.target.closest(".main.open");
+    if (open) {
+      return openUser(open.closest("li").getAttribute("data-user"));
+    }
     var btn = ev.target.closest && ev.target.closest("button[data-act]");
     if (!btn) return;
     var li = btn.closest("li"), id = li.getAttribute("data-user");

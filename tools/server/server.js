@@ -812,6 +812,7 @@ function rightFor(route, method) {
   if (route === "/api/auth/avatar") return "read";          // your own picture
   if (/^\/api\/users\/\d+\/avatar$/.test(route)) return "read";
   if (route.startsWith("/api/admin/")) return "admin";
+  if (route.startsWith("/api/admin/")) return "admin";
   if (route.startsWith("/api/users") || route.startsWith("/api/vehicles") ||
       route.startsWith("/api/devices")) return "admin";
   if (route.startsWith("/api/areas") && method !== "GET") return "areas";
@@ -1388,6 +1389,78 @@ async function handle(req, res) {
           meters: Number(r.distance_m), newStreets: r.new_segments,
         })),
       ].sort((x, y) => y.at - x.at).slice(0, 8),
+    });
+  }
+
+  /**
+   * How far through each area everyone is, by name. No polygons: the page already holds
+   * those, and a county's outline is thousands of points nobody needs sent twice.
+   */
+  if (route === "/api/admin/area-progress" && req.method === "GET") {
+    const { rows } = await pool.query(
+      `SELECT name, max(streets_done)::int AS done, max(streets_total)::int AS total,
+              max(reported_at) AS reported_at
+         FROM reported_areas GROUP BY name`);
+    return sendJson(res, 200, {
+      areas: rows.map((r) => ({
+        name: r.name, done: r.done, total: r.total,
+        reportedAt: r.reported_at ? new Date(r.reported_at).getTime() : 0,
+      })),
+    });
+  }
+
+  /** Everything the user page shows about one person. */
+  const summaryMatch = route.match(/^\/api\/admin\/users\/(\d+)\/summary$/);
+  if (summaryMatch && req.method === "GET") {
+    const id = Number(summaryMatch[1]);
+    const { rows: who_ } = await pool.query("SELECT * FROM users WHERE id=$1", [id]);
+    if (!who_[0]) return sendJson(res, 404, { error: "No such person" });
+
+    const [totals, areasRows, drivesRows, rankRow] = await Promise.all([
+      pool.query(
+        `SELECT
+           (SELECT count(*)::int FROM drives WHERE user_id=$1) AS drives,
+           (SELECT COALESCE(sum(distance_m),0) FROM drives WHERE user_id=$1) AS meters,
+           (SELECT COALESCE(sum(GREATEST(COALESCE(ended_at,started_at)-started_at-paused_ms,0)),0)
+              FROM drives WHERE user_id=$1) AS moving_ms,
+           (SELECT max(started_at) FROM drives WHERE user_id=$1) AS last_drive,
+           (SELECT count(*)::int FROM driven_edges WHERE user_id=$1) AS streets,
+           (SELECT COALESCE(sum(length_m),0) FROM driven_edges WHERE user_id=$1) AS street_meters,
+           (SELECT count(*)::int FROM reported_areas WHERE user_id=$1) AS areas`, [id]),
+      pool.query(
+        `SELECT name, streets_done::int AS done, streets_total::int AS total
+           FROM reported_areas WHERE user_id=$1 AND streets_total > 0
+          ORDER BY (streets_done::float / streets_total) DESC`, [id]),
+      pool.query(
+        `SELECT d.started_at, d.ended_at, d.distance_m, d.new_segments, d.new_meters,
+                d.paused_ms, v.name AS vehicle
+           FROM drives d LEFT JOIN vehicles v ON v.id = d.vehicle_id
+          WHERE d.user_id=$1 ORDER BY d.started_at DESC LIMIT 10`, [id]),
+      // Rank by streets swept, the same order the leaderboard uses.
+      pool.query(
+        `SELECT position FROM (
+            SELECT user_id, row_number() OVER (ORDER BY count(*) DESC) AS position
+              FROM driven_edges WHERE user_id IS NOT NULL GROUP BY user_id) r
+          WHERE user_id=$1`, [id]),
+    ]);
+
+    const t = totals.rows[0];
+    return sendJson(res, 200, {
+      user: identity.publicUser(who_[0]),
+      joinedAt: new Date(who_[0].created_at).getTime(),
+      totals: {
+        drives: t.drives, meters: Number(t.meters), movingMs: Number(t.moving_ms),
+        lastDriveAt: Number(t.last_drive) || 0,
+        streets: t.streets, streetMeters: Number(t.street_meters), areas: t.areas,
+      },
+      rank: rankRow.rows[0] ? Number(rankRow.rows[0].position) : null,
+      areas: areasRows.rows.map((r) => ({ name: r.name, done: r.done, total: r.total })),
+      drives: drivesRows.rows.map((r) => ({
+        startedAt: Number(r.started_at), endedAt: Number(r.ended_at) || null,
+        meters: Number(r.distance_m), newStreets: r.new_segments,
+        newMeters: Number(r.new_meters), pausedMs: Number(r.paused_ms),
+        vehicle: r.vehicle || null,
+      })),
     });
   }
 
