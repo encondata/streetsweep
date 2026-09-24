@@ -92,9 +92,31 @@ async function remove(key) {
   await fsp.rm(full, { force: true });
 }
 
+/**
+ * How much room the photos take. Walks the directory rather than keeping a running
+ * total: this is asked for once on an admin page, and a counter that can drift is
+ * worse than a walk that cannot.
+ */
+async function usage() {
+  if (!usable) return { on: false, dir: DIR, files: 0, bytes: 0 };
+  let files = 0, bytes = 0;
+  async function walk(dir) {
+    let entries;
+    try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { await walk(full); continue; }
+      if (!entry.isFile() || entry.name.endsWith(".part")) continue;
+      try { const st = await fsp.stat(full); files++; bytes += st.size; } catch { /* gone */ }
+    }
+  }
+  await walk(DIR);
+  return { on: true, dir: DIR, files, bytes };
+}
+
 /** From the extension the server itself chose when it made the key. */
 function typeOf(key) {
   return TYPE_BY_EXT[path.extname(String(key)).toLowerCase()] || "application/octet-stream";
 }
 
-module.exports = { DIR, ready, on, put, stat, readStream, remove, typeOf, safe };
+module.exports = { DIR, ready, on, put, stat, readStream, remove, typeOf, safe, usage };

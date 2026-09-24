@@ -210,6 +210,45 @@
   .seg button[aria-pressed="true"] { background: var(--grad-accent); color: var(--accent-ink); box-shadow: var(--shadow-accent); }
   #citySelect { width: auto; min-width: 140px; flex: 0 0 auto; }
 
+  /* ---- admin ------------------------------------------------------------- */
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .grid3 .cell {
+    border: 1px solid var(--line); border-radius: var(--r); background: var(--surface);
+    padding: 10px 11px; min-width: 0;
+  }
+  .grid3 .cell .n { font-size: 17px; font-weight: 800; letter-spacing: -.02em; }
+  .grid3 .cell .k { font-size: 10.5px; color: var(--ink-soft); font-weight: 600; margin-top: 1px; }
+  .board { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+  .board li {
+    display: flex; align-items: center; gap: 10px; padding: 9px 11px;
+    border: 1px solid var(--line); border-radius: var(--r); background: var(--surface);
+  }
+  .board .rank {
+    flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%;
+    display: grid; place-items: center; font-size: 11px; font-weight: 800;
+    background: var(--surface-2); color: var(--ink-soft);
+  }
+  .board li:first-child .rank { background: var(--grad-accent); color: var(--accent-ink); }
+  .board .main { flex: 1 1 auto; min-width: 0; }
+  .board .main b { display: block; font-size: 13px; font-weight: 700; }
+  .board .main span {
+    display: block; font-size: 11px; color: var(--ink-soft);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .board .fig { flex: 0 0 auto; text-align: right; }
+  .board .fig b { display: block; font-size: 13px; font-weight: 800; }
+  .board .fig span { display: block; font-size: 10.5px; color: var(--ink-soft); }
+  .board .acts { flex: 0 0 auto; display: flex; gap: 5px; }
+  .board .acts button { padding: 4px 8px; font-size: 11px; box-shadow: none; }
+  .board li.off { opacity: .55; }
+  .board .tag {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    padding: 2px 6px; border-radius: 999px; background: var(--surface-2); color: var(--ink-soft);
+  }
+  .board .tag.admin { background: var(--accent-soft); color: var(--green-700); }
+  #userForm, #vehForm { margin-top: 10px; }
+  #userForm[hidden] { display: none; }
+
   /* Your account, at the far right of the header. */
   #meMenu { position: relative; flex: 0 0 auto; }
   #meBtn { padding: 3px; border-radius: 999px; box-shadow: none; line-height: 0; }
@@ -537,6 +576,9 @@
   <button class="railbtn" data-view="export">
     <svg viewBox="0 0 24 24"><path d="M12 15V4"/><path d="m8 8 4-4 4 4"/><path d="M4 16v3h16v-3"/></svg>Export
   </button>
+  <button class="railbtn" data-view="admin" id="railAdmin" hidden>
+    <svg viewBox="0 0 24 24"><path d="M12 3.2 4.5 6.4v5c0 4.4 3.1 8.5 7.5 9.6 4.4-1.1 7.5-5.2 7.5-9.6v-5Z"/><path d="m9.2 12.1 2 2 3.6-3.8"/></svg>Admin
+  </button>
   <div class="spacer"></div>
   <button class="railbtn" data-view="settings">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"/></svg>Settings
@@ -801,6 +843,60 @@
         </div>
       </section>
 
+      <section class="view" data-view="admin" hidden>
+        <div class="viewhead">
+          <h2>Admin</h2>
+          <p>People, vehicles and phones, and how the server and everyone on it are doing.</p>
+        </div>
+
+        <p class="eyebrow">This server</p>
+        <div id="srvGrid" class="grid3"></div>
+        <p class="hint" id="srvLine">Loading…</p>
+
+        <p class="eyebrow">Who has driven most</p>
+        <div class="row" style="margin-bottom:8px">
+          <select id="lbDays" title="Over what period">
+            <option value="0">All time</option>
+            <option value="7">Last 7 days</option>
+            <option value="30">Last 30 days</option>
+            <option value="90">Last 90 days</option>
+          </select>
+        </div>
+        <ol id="leaderboard" class="board"></ol>
+        <p class="hint" id="lbEmpty" hidden>Nobody has recorded a drive yet.</p>
+
+        <p class="eyebrow">By vehicle</p>
+        <ul id="vehBoard" class="board plain"></ul>
+        <p class="hint" id="vehEmpty" hidden>No vehicle has a drive against it yet.</p>
+
+        <p class="eyebrow">People</p>
+        <ul id="userList" class="board plain"></ul>
+        <button type="button" id="btnNewUser" class="primary" style="width:100%;margin-top:9px">Add someone</button>
+        <form id="userForm" hidden>
+          <div class="field"><label for="uName">Name</label><input type="text" id="uName" placeholder="Jim Henderson"></div>
+          <div class="field"><label for="uEmail">Email</label><input type="text" id="uEmail" placeholder="jim@example.com"></div>
+          <div class="field"><label for="uRole">Role</label><select id="uRole"></select></div>
+          <div class="field"><label for="uPass">Password</label><input type="text" id="uPass" placeholder="at least 10 characters"></div>
+          <div class="row">
+            <button type="submit" class="primary" style="flex:1 1 auto">Create</button>
+            <button type="button" id="uCancel" style="flex:0 0 auto">Cancel</button>
+          </div>
+        </form>
+
+        <p class="eyebrow">Vehicles</p>
+        <ul id="vehList" class="board plain"></ul>
+        <form id="vehForm" class="row" style="margin-top:9px">
+          <input type="text" id="vName" placeholder="Truck 3" style="flex:2 1 120px">
+          <input type="text" id="vPlate" placeholder="Plate" style="flex:1 1 80px">
+          <button type="submit" class="primary" style="flex:0 0 auto">Add</button>
+        </form>
+
+        <p class="eyebrow">Phones</p>
+        <ul id="devList" class="board plain"></ul>
+        <p class="hint" id="devEmpty" hidden>No phone has signed in yet.</p>
+        <p class="hint" id="adminMsg" hidden></p>
+      </section>
+
       <section class="view" data-view="settings" hidden>
         <div class="viewhead">
           <h2>Settings</h2>
@@ -844,7 +940,13 @@
 
   document.addEventListener("click", function (ev) {
     var b = ev.target.closest && ev.target.closest(".railbtn");
-    if (b) show(b.getAttribute("data-view"));
+    if (b) {
+      var view = b.getAttribute("data-view");
+      show(view);
+      // Loaded when it is first looked at, not on every page load: none of it is
+      // wanted by anyone who never opens this tab.
+      if (view === "admin" && window.__ssLoadAdmin) window.__ssLoadAdmin();
+    }
   });
 
   window.StreetSweepViews = { show: show, current: function () { return current; } };
@@ -1747,6 +1849,9 @@ window.StreetSweepBases = {
 
   function paintMe(user) {
     me = user;
+    // The Admin tab only exists for someone who can use it. The server refuses the
+    // routes behind it regardless; this is so nobody is offered a locked door.
+    el("railAdmin").hidden = user.role !== "admin";
     var letters = initialsFor(user);
     el("meAvatar").textContent = letters;
     el("meAvatarBig").textContent = letters;
@@ -1829,6 +1934,269 @@ window.StreetSweepBases = {
         meSay("Password changed.");
       })
       .catch(function (err) { meSay(err && err.message ? err.message : "That did not work.", true); });
+  });
+
+  // ---- admin --------------------------------------------------------------
+
+  var ROLES = ["admin", "driver", "viewer"];
+  var adminLoaded = false;
+
+  function bytes(n) {
+    if (!n) return "0 B";
+    var units = ["B", "KB", "MB", "GB", "TB"], i = 0, v = Number(n);
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    return (v >= 10 || i === 0 ? Math.round(v) : v.toFixed(1)) + " " + units[i];
+  }
+
+  function forHowLong(seconds) {
+    var d = Math.floor(seconds / 86400), h = Math.floor((seconds % 86400) / 3600);
+    var m = Math.floor((seconds % 3600) / 60);
+    if (d) return d + "d " + h + "h";
+    if (h) return h + "h " + m + "m";
+    return m + "m";
+  }
+
+  function adminSay(text, bad) {
+    var p = el("adminMsg");
+    p.hidden = !text;
+    p.textContent = text || "";
+    p.className = bad ? "hint warn" : "hint";
+  }
+
+  function cell(n, k) {
+    return "<div class='cell'><div class='n'>" + escapeHtml(String(n)) +
+           "</div><div class='k'>" + escapeHtml(k) + "</div></div>";
+  }
+
+  function loadServer() {
+    return apiJson("/api/admin/server").then(function (d) {
+      var c = d.counts;
+      el("srvGrid").innerHTML =
+        cell(c.users_active + (c.users !== c.users_active ? " / " + c.users : ""), "People") +
+        cell(c.vehicles, "Vehicles") +
+        cell(c.devices, "Phones") +
+        cell(c.areas, "Areas") +
+        cell(c.drives.toLocaleString(), "Drives") +
+        cell(c.edges.toLocaleString(), "Street segments") +
+        cell(c.pois.toLocaleString(), "Marked places") +
+        cell(bytes(d.database.bytes), "Database") +
+        cell(bytes(d.photos.bytes), "Photos");
+      el("srvLine").textContent =
+        "Up " + forHowLong(d.server.uptimeSeconds) + " · Node " + d.server.node +
+        " · Postgres " + d.database.version + " · " + bytes(d.server.memoryBytes) + " in use · " +
+        d.photos.files + (d.photos.files === 1 ? " photo" : " photos") +
+        (d.photos.on ? "" : " (photo storage is off)");
+    });
+  }
+
+  function loadLeaderboard() {
+    var days = el("lbDays").value;
+    return apiJson("/api/admin/leaderboard?days=" + encodeURIComponent(days)).then(function (d) {
+      // Somebody with nothing at all in the period is not a leaderboard entry.
+      var people = d.people.filter(function (p) { return p.drives > 0 || p.streets > 0; });
+      el("lbEmpty").hidden = people.length > 0;
+      el("leaderboard").innerHTML = people.map(function (p, i) {
+        // Two figures, because they answer different questions and one without the
+        // other misleads: sweeping is what the app is for, but someone who drove all
+        // day over streets already done would otherwise read as a flat zero.
+        var swept = p.streetMeters > 0 ? fmtDistance(p.streetMeters) : "—";
+        return "<li" + (p.active ? "" : " class='off'") + ">" +
+          "<span class='rank'>" + (i + 1) + "</span>" +
+          "<span class='main'><b>" + escapeHtml(p.name) + "</b><span>" +
+            p.drives + (p.drives === 1 ? " drive" : " drives") +
+            " · " + fmtDistance(p.meters) + " driven" +
+            (p.movingMs ? " · " + fmtDuration(p.movingMs) : "") +
+            (p.lastDriveAt ? " · last " + new Date(p.lastDriveAt).toLocaleDateString() : "") +
+          "</span></span>" +
+          "<span class='fig'><b>" + swept + "</b>" +
+          "<span>" + p.streets.toLocaleString() + " streets swept</span></span>" +
+          "</li>";
+      }).join("");
+    });
+  }
+
+  function loadVehicleStats() {
+    return apiJson("/api/admin/vehicle-stats").then(function (d) {
+      var driven = d.vehicles.filter(function (v) { return v.drives > 0; });
+      el("vehEmpty").hidden = driven.length > 0;
+      el("vehBoard").innerHTML = driven.map(function (v) {
+        return "<li><span class='main'><b>" + escapeHtml(v.name) + "</b><span>" +
+          (v.plate ? escapeHtml(v.plate) + " · " : "") + v.drives +
+          (v.drives === 1 ? " drive" : " drives") + "</span></span>" +
+          "<span class='fig'><b>" + fmtDistance(v.meters) + "</b><span>driven</span></span></li>";
+      }).join("");
+    });
+  }
+
+  function loadUsers() {
+    return apiJson("/api/users").then(function (d) {
+      el("userList").innerHTML = d.users.map(function (u) {
+        return "<li data-user='" + u.id + "'" + (u.active ? "" : " class='off'") + ">" +
+          "<span class='main'><b>" + escapeHtml(u.name) +
+            " <span class='tag " + u.role + "'>" + u.role + "</span></b>" +
+            "<span>" + escapeHtml(u.email) +
+            (u.devices ? " · " + u.devices + (u.devices === 1 ? " phone" : " phones") : "") +
+            (u.active ? "" : " · switched off") + "</span></span>" +
+          "<span class='acts'>" +
+            "<button type='button' data-act='role'>Role</button>" +
+            "<button type='button' data-act='pass'>Password</button>" +
+            "<button type='button' data-act='active'>" + (u.active ? "Disable" : "Enable") + "</button>" +
+          "</span></li>";
+      }).join("");
+    });
+  }
+
+  function loadVehicles() {
+    return apiJson("/api/vehicles").then(function (d) {
+      el("vehList").innerHTML = d.vehicles.map(function (v) {
+        return "<li data-vehicle='" + v.id + "'" + (v.active ? "" : " class='off'") + ">" +
+          "<span class='main'><b>" + escapeHtml(v.name) + "</b><span>" +
+            (v.plate ? escapeHtml(v.plate) : "no plate") + "</span></span>" +
+          "<span class='acts'><button type='button' data-act='rename'>Rename</button>" +
+          "<button type='button' data-act='remove'>Remove</button></span></li>";
+      }).join("");
+    });
+  }
+
+  function loadDevices() {
+    return apiJson("/api/devices").then(function (d) {
+      var live = d.devices.filter(function (x) { return !x.revokedAt; });
+      el("devEmpty").hidden = live.length > 0;
+      el("devList").innerHTML = live.map(function (x) {
+        return "<li data-device='" + x.id + "'>" +
+          "<span class='main'><b>" + escapeHtml(x.label) + "</b><span>" +
+            escapeHtml(x.userName) +
+            (x.vehicleName ? " · " + escapeHtml(x.vehicleName) : "") +
+            (x.lastSeenAt ? " · seen " + new Date(x.lastSeenAt).toLocaleDateString() : " · never used") +
+          "</span></span>" +
+          "<span class='acts'><button type='button' data-act='revoke'>Revoke</button></span></li>";
+      }).join("");
+    });
+  }
+
+  function loadAdmin() {
+    adminSay("");
+    return Promise.all([
+      loadServer(), loadLeaderboard(), loadVehicleStats(),
+      loadUsers(), loadVehicles(), loadDevices(),
+    ]).catch(function (err) { adminSay(err && err.message ? err.message : "Could not load.", true); });
+  }
+
+  el("lbDays").addEventListener("change", function () { loadLeaderboard(); });
+
+  // Every visit refreshes the figures; the lists are only built the first time.
+  window.__ssLoadAdmin = function () {
+    if (adminLoaded) { loadServer(); loadLeaderboard(); return; }
+    adminLoaded = true;
+    loadAdmin();
+  };
+
+  // ---- people ----
+  ROLES.forEach(function (r) {
+    var o = document.createElement("option");
+    o.value = r; o.textContent = r.charAt(0).toUpperCase() + r.slice(1);
+    el("uRole").appendChild(o);
+  });
+  el("uRole").value = "driver";
+
+  el("btnNewUser").addEventListener("click", function () {
+    el("userForm").hidden = false;
+    el("btnNewUser").hidden = true;
+    el("uName").focus();
+  });
+  el("uCancel").addEventListener("click", function () {
+    el("userForm").hidden = true; el("btnNewUser").hidden = false;
+    ["uName", "uEmail", "uPass"].forEach(function (id) { el(id).value = ""; });
+    adminSay("");
+  });
+  el("userForm").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    apiJson("/api/users", "POST", {
+      name: el("uName").value, email: el("uEmail").value,
+      role: el("uRole").value, password: el("uPass").value,
+    }).then(function (d) {
+      el("uCancel").click();
+      adminSay("Added " + d.user.name + ". Tell them the password; there is no email here to send it.");
+      return Promise.all([loadUsers(), loadServer(), loadLeaderboard()]);
+    }).catch(function (err) { adminSay(err.message || "Could not add them.", true); });
+  });
+
+  el("userList").addEventListener("click", function (ev) {
+    var btn = ev.target.closest && ev.target.closest("button[data-act]");
+    if (!btn) return;
+    var li = btn.closest("li"), id = li.getAttribute("data-user");
+    var act = btn.getAttribute("data-act");
+    var name = li.querySelector(".main b").textContent.trim();
+
+    if (act === "role") {
+      var next = prompt("Role for " + name + " — " + ROLES.join(", "), "driver");
+      if (!next) return;
+      patchUser(id, { role: next.trim().toLowerCase() }, "Role changed.");
+    } else if (act === "pass") {
+      var pw = prompt("New password for " + name + " (10 characters or more).\n" +
+                      "They are signed out everywhere when it changes.");
+      if (!pw) return;
+      patchUser(id, { password: pw }, "Password set. Tell them what it is.");
+    } else if (act === "active") {
+      var turningOff = btn.textContent === "Disable";
+      if (turningOff && !confirm("Switch off " + name + "?\n\n" +
+          "They are signed out everywhere and their phones stop syncing. " +
+          "Their drives and the streets they swept stay.")) return;
+      patchUser(id, { active: !turningOff }, turningOff ? "Switched off." : "Switched back on.");
+    }
+  });
+
+  function patchUser(id, body, ok) {
+    apiJson("/api/users/" + id, "PATCH", body)
+      .then(function () { adminSay(ok); return Promise.all([loadUsers(), loadServer()]); })
+      .catch(function (err) { adminSay(err.message || "That did not work.", true); });
+  }
+
+  // ---- vehicles ----
+  el("vehForm").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var name = el("vName").value.trim();
+    if (!name) return;
+    apiJson("/api/vehicles", "POST", { name: name, plate: el("vPlate").value.trim() || null })
+      .then(function () {
+        el("vName").value = ""; el("vPlate").value = "";
+        adminSay("Vehicle added.");
+        return Promise.all([loadVehicles(), loadVehicleStats(), loadServer()]);
+      })
+      .catch(function (err) { adminSay(err.message || "Could not add it.", true); });
+  });
+
+  el("vehList").addEventListener("click", function (ev) {
+    var btn = ev.target.closest && ev.target.closest("button[data-act]");
+    if (!btn) return;
+    var li = btn.closest("li"), id = li.getAttribute("data-vehicle");
+    var name = li.querySelector(".main b").textContent.trim();
+    if (btn.getAttribute("data-act") === "rename") {
+      var next = prompt("Name for this vehicle", name);
+      if (!next || !next.trim()) return;
+      apiJson("/api/vehicles/" + id, "PATCH", { name: next.trim() })
+        .then(function () { adminSay("Renamed."); return Promise.all([loadVehicles(), loadVehicleStats()]); })
+        .catch(function (err) { adminSay(err.message || "Could not rename it.", true); });
+    } else {
+      if (!confirm("Remove " + name + "?\n\nDrives recorded against it keep their mileage " +
+                   "but stop naming a vehicle.")) return;
+      apiJson("/api/vehicles/" + id, "DELETE")
+        .then(function () { adminSay("Removed."); return Promise.all([loadVehicles(), loadVehicleStats(), loadServer()]); })
+        .catch(function (err) { adminSay(err.message || "Could not remove it.", true); });
+    }
+  });
+
+  // ---- phones ----
+  el("devList").addEventListener("click", function (ev) {
+    var btn = ev.target.closest && ev.target.closest("button[data-act='revoke']");
+    if (!btn) return;
+    var li = btn.closest("li"), id = li.getAttribute("data-device");
+    var label = li.querySelector(".main b").textContent.trim();
+    if (!confirm("Revoke " + label + "?\n\nIt stops syncing at once and has to sign in again. " +
+                 "Everything it already sent stays.")) return;
+    apiJson("/api/devices/" + id, "DELETE")
+      .then(function () { adminSay("Revoked."); return Promise.all([loadDevices(), loadServer()]); })
+      .catch(function (err) { adminSay(err.message || "Could not revoke it.", true); });
   });
 
   function escapeHtml(s) {

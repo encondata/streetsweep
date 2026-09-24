@@ -805,6 +805,7 @@ const OPEN_ROUTES = new Set([
 /** Which right a route needs. Anything not listed here needs only "read". */
 function rightFor(route, method) {
   if (route === "/api/vehicles/mine") return "read";
+  if (route.startsWith("/api/admin/")) return "admin";
   if (route.startsWith("/api/users") || route.startsWith("/api/vehicles") ||
       route.startsWith("/api/devices")) return "admin";
   if (route.startsWith("/api/areas") && method !== "GET") return "areas";
@@ -1101,6 +1102,98 @@ async function handle(req, res) {
       "UPDATE device_tokens SET revoked_at=now() WHERE token_hash=$1 AND revoked_at IS NULL",
       [deviceMatch[1]]);
     return rowCount ? sendJson(res, 204, {}) : sendJson(res, 404, { error: "No such phone" });
+  }
+
+  /** What the server itself is doing: sizes, counts and how long it has been up. */
+  if (route === "/api/admin/server" && req.method === "GET") {
+    const [db, counts, photo] = await Promise.all([
+      pool.query(`SELECT current_setting('server_version') AS version,
+                         pg_database_size(current_database()) AS bytes`),
+      pool.query(`SELECT
+          (SELECT count(*) FROM users)          AS users,
+          (SELECT count(*) FROM users WHERE active) AS users_active,
+          (SELECT count(*) FROM vehicles)       AS vehicles,
+          (SELECT count(*) FROM device_tokens WHERE revoked_at IS NULL) AS devices,
+          (SELECT count(*) FROM areas)          AS areas,
+          (SELECT count(*) FROM drives)         AS drives,
+          (SELECT count(*) FROM driven_edges)   AS edges,
+          (SELECT count(*) FROM pois)           AS pois,
+          (SELECT count(*) FROM sessions WHERE expires_at > now()) AS sessions`),
+      photos.usage(),
+    ]);
+    const c = counts.rows[0];
+    return sendJson(res, 200, {
+      server: {
+        node: process.version,
+        uptimeSeconds: Math.round(process.uptime()),
+        startedAt: Date.now() - Math.round(process.uptime() * 1000),
+        memoryBytes: process.memoryUsage().rss,
+      },
+      database: {
+        version: String(db.rows[0].version).split(" ")[0],
+        bytes: Number(db.rows[0].bytes),
+      },
+      photos: photo,
+      counts: Object.fromEntries(Object.entries(c).map(([k, v]) => [k, Number(v)])),
+    });
+  }
+
+  /**
+   * Who has driven what. Drives give the miles and the time; driven_edges give the
+   * streets, and those are credited to whoever swept each one first, so the numbers
+   * add up across people rather than counting a shared street twice.
+   */
+  if (route === "/api/admin/leaderboard" && req.method === "GET") {
+    const days = Math.max(0, Math.min(3650, Number(url.searchParams.get("days")) || 0));
+    const since = days ? Date.now() - days * 86400000 : 0;
+    const { rows } = await pool.query(
+      `SELECT u.id, u.name, u.email, u.role, u.active,
+              COALESCE(d.drives, 0)        AS drives,
+              COALESCE(d.meters, 0)        AS meters,
+              COALESCE(d.moving_ms, 0)     AS moving_ms,
+              COALESCE(d.last_drive, 0)    AS last_drive,
+              COALESCE(e.streets, 0)       AS streets,
+              COALESCE(e.street_meters, 0) AS street_meters
+         FROM users u
+         LEFT JOIN (
+           SELECT user_id,
+                  count(*)                                        AS drives,
+                  sum(distance_m)                                 AS meters,
+                  sum(GREATEST(COALESCE(ended_at, started_at) - started_at - paused_ms, 0)) AS moving_ms,
+                  max(started_at)                                 AS last_drive
+             FROM drives WHERE started_at >= $1 GROUP BY user_id
+         ) d ON d.user_id = u.id
+         LEFT JOIN (
+           SELECT user_id, count(*) AS streets, sum(length_m) AS street_meters
+             FROM driven_edges WHERE driven_at >= $1 AND user_id IS NOT NULL GROUP BY user_id
+         ) e ON e.user_id = u.id
+        ORDER BY COALESCE(e.street_meters, 0) DESC, COALESCE(d.meters, 0) DESC`,
+      [since]);
+    return sendJson(res, 200, {
+      days,
+      people: rows.map((r) => ({
+        id: Number(r.id), name: r.name, email: r.email, role: r.role, active: r.active,
+        drives: Number(r.drives), meters: Number(r.meters),
+        movingMs: Number(r.moving_ms), lastDriveAt: Number(r.last_drive),
+        streets: Number(r.streets), streetMeters: Number(r.street_meters),
+      })),
+    });
+  }
+
+  /** The same, by vehicle rather than by person. */
+  if (route === "/api/admin/vehicle-stats" && req.method === "GET") {
+    const { rows } = await pool.query(
+      `SELECT v.id, v.name, v.plate, v.active,
+              count(d.*) AS drives, COALESCE(sum(d.distance_m), 0) AS meters,
+              COALESCE(max(d.started_at), 0) AS last_drive
+         FROM vehicles v LEFT JOIN drives d ON d.vehicle_id = v.id
+        GROUP BY v.id ORDER BY COALESCE(sum(d.distance_m), 0) DESC, lower(v.name)`);
+    return sendJson(res, 200, {
+      vehicles: rows.map((r) => ({
+        id: Number(r.id), name: r.name, plate: r.plate, active: r.active,
+        drives: Number(r.drives), meters: Number(r.meters), lastDriveAt: Number(r.last_drive),
+      })),
+    });
   }
 
   if (route === "/api/health") {
