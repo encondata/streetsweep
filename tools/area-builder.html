@@ -790,6 +790,8 @@ window.StreetSweepBases = {
   var backend = { online: false };
   var TOKEN_KEY = "streetsweep.token";
   var token = null;
+  /** True while the server wants a token it has not been given. */
+  var locked = false;
   try { token = localStorage.getItem(TOKEN_KEY); } catch (e) { /* storage may be blocked */ }
 
   function apiJson(path, method, body) {
@@ -814,6 +816,7 @@ window.StreetSweepBases = {
   }
 
   function showTokenBox(message) {
+    locked = true;
     el("tokenBox").hidden = false;
     var banner = el("storageMode");
     banner.textContent = message;
@@ -829,6 +832,7 @@ window.StreetSweepBases = {
     el("tokenBox").hidden = true;
     el("tokenInput").value = "";
     coverageLoaded = false;
+    locked = false;
     load();
   });
   el("tokenInput").addEventListener("keydown", function (ev) {
@@ -943,9 +947,14 @@ window.StreetSweepBases = {
         }
         return apiJson("/api/areas").then(function (res) {
           setMode(true);
+          locked = false;
           el("tokenBox").hidden = true;
           adoptFromServer(res.areas);
           if (areas.length) zoomTo(areas[areas.length - 1]);
+          // Only now is the token known to be good, so only now is anything behind it
+          // worth asking for. A first visit to a locked server is a prompt, not a
+          // handful of refused requests.
+          if (window.__ssLoadBehindTheGate) window.__ssLoadBehindTheGate();
         });
       })
       .catch(function (e) {
@@ -1863,10 +1872,10 @@ window.StreetSweepBases = {
   }
 
   function loadDrives() {
-    if (!backend) return;
+    if (!backend || locked) return;
     apiJson("/api/drives?limit=60&shape=full")
       .then(function (data) { renderDrives(data.drives || []); })
-      .catch(function (e) { status("Could not read drives: " + e.message); });
+      .catch(function (e) { if (e.status !== 401) status("Could not read drives: " + e.message); });
   }
 
   // ---- marked places ---------------------------------------------------------
@@ -2088,10 +2097,10 @@ window.StreetSweepBases = {
   }
 
   function loadPois() {
-    if (!backend) return;
+    if (!backend || locked) return;
     apiJson("/api/pois")
       .then(function (data) { renderPois(data.pois || []); })
-      .catch(function (e) { status("Could not read marked places: " + e.message); });
+      .catch(function (e) { if (e.status !== 401) status("Could not read marked places: " + e.message); });
   }
 
   // ---- cities ----------------------------------------------------------------
@@ -2132,15 +2141,19 @@ window.StreetSweepBases = {
 
   // The server tells the map how far along each area is, so the detail panel has
   // something to show even before Statistics has been opened.
-  if (backend) {
+  /** Everything behind the token, fetched once it is known to be accepted. */
+  function loadBehindTheGate() {
+    if (!backend || locked) return;
     apiJson("/api/coverage?edgeLimit=1")
       .then(function (data) {
         (data.areas || []).forEach(function (a) { reported[a.name] = a.stats; });
       })
-      .catch(function () { /* locked or offline; the panel simply says so */ });
+      .catch(function () { /* offline; the panel simply says so */ });
     loadDrives();
     loadPois();
   }
+
+  window.__ssLoadBehindTheGate = loadBehindTheGate;
 
   // Keep the server card honest about where this is talking to.
   (function () {
