@@ -993,6 +993,13 @@ window.StreetSweepBases = {
     }
     area.poly.on("click", function (ev) {
       L.DomEvent.stop(ev);
+      // While drawing, a click on an existing area is a corner for the new one, very
+      // often deliberately on its edge. Treating it as "select me" instead threw the
+      // half-drawn shape away, which is the opposite of borrowing a boundary.
+      if (drawing) {
+        addDraftCorner(ev.latlng);
+        return;
+      }
       // Handles belong to the Areas view; elsewhere a click just reads the area.
       if (window.StreetSweepViews.current() === "areas") select(area.id);
       detailFor(area);
@@ -1337,6 +1344,12 @@ window.StreetSweepBases = {
 
   map.on("click", function (ev) {
     if (!drawing) return;
+    addDraftCorner(ev.latlng);
+  });
+
+  /** One corner of the shape being drawn, wherever the click came from. */
+  function addDraftCorner(latlng) {
+    var ev = { latlng: latlng };
     var snap = snapToOutline(ev.latlng);
     var point = snap ? snap.latlng : ev.latlng;
     var borrowed = 0;
@@ -1361,7 +1374,7 @@ window.StreetSweepBases = {
       (borrowed ? " — took " + borrowed + " from " + snap.area.name : snap ? " — on " + snap.area.name + "'s edge" : "") +
       " — Finish when it closes the shape",
     );
-  });
+  }
   map.on("dblclick", function (ev) {
     if (drawing) { L.DomEvent.stop(ev); el("btnFinish").click(); }
   });
