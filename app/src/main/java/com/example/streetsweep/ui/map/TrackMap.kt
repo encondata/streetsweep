@@ -2,13 +2,18 @@ package com.example.streetsweep.ui.map
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.DashPathEffect
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Point
+import com.example.streetsweep.R
+import kotlin.math.atan2
 import android.view.MotionEvent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -233,6 +238,62 @@ class LayersOverlay : Overlay() {
     private val dotRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt(); style = Paint.Style.STROKE; strokeWidth = 4f }
     private val path = Path()
     private val pt = Point()
+    private val pt2 = Point()
+    private val carMatrix = Matrix()
+    private val carPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+    private val carShadow = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x33000000 }
+
+    /** Loaded once, on first draw: an Overlay has no context until it is drawn into one. */
+    private var carBitmap: Bitmap? = null
+
+    /**
+     * Where you are, pointing the way you are going.
+     *
+     * A plain dot says nothing about which way the car is facing, which is the one thing
+     * that matters when the question is "is this my turn?". The heading comes from the
+     * last two stored fixes rather than the fix's own bearing: points are only kept 50 ft
+     * apart, so the line between them is steady, where a single fix's bearing jitters at
+     * walking pace and spins on the spot when stationary.
+     */
+    private fun drawHere(canvas: Canvas, view: MapView, points: List<LatLngPoint>) {
+        val here = points.lastOrNull() ?: return
+        val proj = view.projection
+        proj.toPixels(GeoPoint(here.latitude, here.longitude), pt)
+        val x = pt.x.toFloat()
+        val y = pt.y.toFloat()
+
+        val bmp = carBitmap ?: runCatching {
+            BitmapFactory.decodeResource(view.context.resources, R.drawable.ic_here_car)
+        }.getOrNull()?.also { carBitmap = it }
+
+        val heading = points.getOrNull(points.size - 2)?.let { prev ->
+            proj.toPixels(GeoPoint(prev.latitude, prev.longitude), pt2)
+            val dx = x - pt2.x
+            val dy = y - pt2.y
+            // Ignore a hop too small to have a believable direction in it.
+            if (dx * dx + dy * dy < 36f) null
+            else Math.toDegrees(atan2(dx.toDouble(), -dy.toDouble())).toFloat()
+        }
+
+        if (bmp == null || heading == null) {
+            // No heading yet, or no artwork: the dot still says where, just not which way.
+            canvas.drawCircle(x, y, 12f, dotFill)
+            canvas.drawCircle(x, y, 12f, dotRing)
+            return
+        }
+
+        // Density, not raw pixels: 60px is 20dp on a three-times screen, which is about
+        // the size of a full stop at arm's length in a car mount.
+        val target = 46f * view.resources.displayMetrics.density
+        val scale = target / bmp.height
+        canvas.drawCircle(x, y, target * 0.42f, carShadow)
+        carMatrix.reset()
+        carMatrix.postTranslate(-bmp.width / 2f, -bmp.height / 2f)
+        carMatrix.postScale(scale, scale)
+        carMatrix.postRotate(heading)
+        carMatrix.postTranslate(x, y)
+        canvas.drawBitmap(bmp, carMatrix, carPaint)
+    }
 
     /** 0 = within a week, 3 = older than three months. */
     private fun ageBucket(drivenAt: Long): Int {
@@ -311,11 +372,7 @@ class LayersOverlay : Overlay() {
         }
         line(l.activeRaw, raw)
         line(l.activeMatched, active)
-        l.activeRaw.lastOrNull()?.let { p ->
-            proj.toPixels(GeoPoint(p.latitude, p.longitude), pt)
-            canvas.drawCircle(pt.x.toFloat(), pt.y.toFloat(), 12f, dotFill)
-            canvas.drawCircle(pt.x.toFloat(), pt.y.toFloat(), 12f, dotRing)
-        }
+        drawHere(canvas, mapView, l.activeRaw)
         l.target?.let { t ->
             line(t.shape, targetHalo)
             line(t.shape, targetStroke)

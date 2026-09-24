@@ -128,6 +128,15 @@ fun HomeScreen(
     var centeredOnce by rememberSaveable { mutableStateOf(false) }
     var confirmArea by remember { mutableStateOf(false) }
 
+    /**
+     * How close in to sit. 15 shows a neighbourhood, which is what you want when picking
+     * an area; it is too far out to read the street you are about to turn into. While
+     * recording, start in close enough for the names to be legible. Following never
+     * changes the zoom after that, so a pinch still wins.
+     */
+    val drivingZoom = 17.0
+    val restingZoom = 15.0
+
     // Another screen asked us to show, or redraw, an area.
     val pendingFocus by MapFocus.pending.collectAsStateWithLifecycle()
     LaunchedEffect(pendingFocus) {
@@ -138,9 +147,19 @@ fun HomeScreen(
     LaunchedEffect(hasLocation) {
         if (hasLocation && !centeredOnce) {
             viewModel.lastKnownLocation()?.let { here ->
-                mapController.animateTo(here, 15.0)
+                mapController.animateTo(here, if (status is TrackingStatus.Recording) drivingZoom else restingZoom)
                 centeredOnce = true
             }
+        }
+    }
+
+    // Starting a drive pulls the map in to driving distance, once. Pinching back out
+    // afterwards sticks, because following leaves the zoom alone.
+    val recording = status is TrackingStatus.Recording
+    LaunchedEffect(recording) {
+        if (recording && follow) {
+            (layers.activeRaw.lastOrNull() ?: viewModel.lastKnownLocation())
+                ?.let { mapController.animateTo(it, drivingZoom) }
         }
     }
     val lastPoint = layers.activeRaw.lastOrNull()
@@ -239,7 +258,9 @@ fun HomeScreen(
                 // the thing that is switched on.
                 follow = true
                 scope.launch {
-                    (lastPoint ?: viewModel.lastKnownLocation())?.let { mapController.animateTo(it, 15.0) }
+                    (lastPoint ?: viewModel.lastKnownLocation())?.let {
+                        mapController.animateTo(it, if (recording) drivingZoom else restingZoom)
+                    }
                 }
             },
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
