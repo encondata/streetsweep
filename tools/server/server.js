@@ -17,6 +17,7 @@ const PORT = Number(process.env.PORT || 80);
 const SYNC_TOKEN = (process.env.SYNC_TOKEN || "").trim();
 const PUBLIC = path.join(__dirname, "public");
 const PAGE = path.join(PUBLIC, "index.html");
+const LOGIN_PAGE = path.join(PUBLIC, "login.html");
 // Everything the browser may fetch by name. An allow list rather than a path join,
 // so a crafted route can never walk out of the folder.
 const ASSET_TYPES = {
@@ -785,6 +786,17 @@ async function handle(req, res) {
       "Cache-Control": "public, max-age=86400",
     });
     return res.end(fs.readFileSync(path.join(PUBLIC, file)));
+  }
+
+  if (route === "/login") {
+    // Already signed in? Nothing to do here.
+    const already = await identity.identify(pool, req, { legacyToken: SYNC_TOKEN });
+    if (already && already.via === "session") {
+      res.writeHead(302, { Location: "/", "Cache-Control": "no-store" });
+      return res.end();
+    }
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    return res.end(fs.readFileSync(LOGIN_PAGE));
   }
 
   if (route === "/" || route === "/index.html") {

@@ -7,6 +7,7 @@ RUN npm install --omit=dev && npm cache clean --force
 COPY server/server.js server/identity.js ./
 COPY public/ ./public/
 COPY area-builder.html ./public/index.html
+COPY login.html ./public/login.html
 
 ENV PORT=80
 EXPOSE 80
