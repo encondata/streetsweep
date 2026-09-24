@@ -34,6 +34,8 @@ private class FakePortal(private val expectedToken: String) {
     private val socket = ServerSocket(0, 4, java.net.InetAddress.getByName("127.0.0.1"))
     val port: Int get() = socket.localPort
     val seen = mutableListOf<Seen>()
+    /** Refuse with an empty body, the way a proxy in front might. */
+    var silentRefusal = false
     private val ready = CountDownLatch(1)
 
     init {
@@ -79,7 +81,8 @@ private class FakePortal(private val expectedToken: String) {
         synchronized(seen) { seen += Seen(method, path, auth, body, contentType, bytes) }
 
         val (code, text) = when {
-            auth != "Bearer $expectedToken" -> 401 to """{"error":"A token is required","needsToken":true}"""
+            auth != "Bearer $expectedToken" ->
+                401 to if (silentRefusal) "" else """{"error":"A token is required","needsToken":true}"""
             path == "/api/health" -> 200 to """{"ok":true}"""
             path == "/api/sync" -> 200 to """{"ok":true}"""
             path.endsWith("/photo") -> 200 to """{"ok":true}"""
@@ -125,11 +128,24 @@ class PortalClientTest {
         assertEquals("/api/health", portal.seen.single().path)
     }
 
+    /**
+     * The server explains itself, so say what it said. A 401 only means "rejected the
+     * token" when a token was sent; on a sign-in it means the password was wrong, and
+     * one blanket sentence made the two impossible to tell apart.
+     */
     @Test
-    fun `a rejected token is reported in plain words`() = runTest {
+    fun `a refusal is reported in the server's own words`() = runTest {
         val failure = runCatching { client(token = "wrong-token").ping() }.exceptionOrNull()
         assertTrue("expected a PortalException, got $failure", failure is PortalException)
-        assertEquals("The server rejected the token", failure!!.message)
+        assertEquals("A token is required", failure!!.message)
+    }
+
+    /** With nothing to quote, it falls back to wording that at least names the cause. */
+    @Test
+    fun `a silent refusal still reads as a rejected token`() = runTest {
+        portal.silentRefusal = true
+        val failure = runCatching { client(token = "wrong-token").ping() }.exceptionOrNull()
+        assertEquals("The server rejected the token", failure?.message)
     }
 
     @Test

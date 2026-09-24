@@ -5,7 +5,10 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
+import android.util.Log
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.example.streetsweep.data.osm.ShapeText
+import com.example.streetsweep.domain.RoadShape
 
 @Database(
     entities = [
@@ -13,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CoverageArea::class, AreaWay::class, OsmWay::class, StreetChunk::class, DrivenEdge::class,
         Poi::class, StreetExclusion::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -63,9 +66,62 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v9: a street can say how much of it counts as finished.
+         *
+         * A traffic circle cannot be driven all the way round — you come in one road and
+         * leave by another — so it never reached the flat 80% and guidance kept sending
+         * people back to circles they had already swept.
+         *
+         * Existing ways are reclassified in place rather than waiting for a re-download.
+         * Only ways whose bounding box is small enough to hold a circle are decoded: a
+         * 150 m ring is about 0.0005 degrees across, so the rest are skipped without
+         * reading their shape at all.
+         */
+        @JvmField
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `osm_ways` ADD COLUMN `minDoneFraction` REAL NOT NULL DEFAULT " +
+                        RoadShape.DEFAULT_DONE_FRACTION,
+                )
+                val candidates = db.query(
+                    """
+                    SELECT id, lengthMeters, shape FROM osm_ways
+                     WHERE lengthMeters > 0 AND lengthMeters <= 150
+                       AND (maxLat - minLat) < 0.0025 AND (maxLng - minLng) < 0.0025
+                    """.trimIndent(),
+                )
+                val circles = ArrayList<Long>()
+                var unreadable = 0
+                candidates.use { c ->
+                    while (c.moveToNext()) {
+                        // One unreadable shape must not stop the migration: failing here
+                        // leaves the database half-upgraded and the app unable to open.
+                        // A way that cannot be read simply keeps the ordinary threshold.
+                        val shape = runCatching { ShapeText.decode(c.getString(2)) }.getOrNull()
+                        if (shape == null) { unreadable++; continue }
+                        if (RoadShape.isTrafficCircle(c.getDouble(1), shape)) circles += c.getLong(0)
+                    }
+                }
+                // Chunked: SQLite will not take an unbounded list of parameters.
+                circles.chunked(500).forEach { batch ->
+                    db.execSQL(
+                        "UPDATE osm_ways SET minDoneFraction = ${RoadShape.CIRCLE_DONE_FRACTION} " +
+                            "WHERE id IN (${batch.joinToString(",")})",
+                    )
+                }
+                Log.i(
+                    "AppDatabase",
+                    "v9: ${circles.size} traffic circles reclassified" +
+                        if (unreadable > 0) ", $unreadable shapes unreadable" else "",
+                )
+            }
+        }
+
         /** Hand-written migrations, oldest first. Add one for each version bump. */
         val MIGRATIONS: Array<Migration> =
-            arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+            arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
 
         fun build(context: Context): AppDatabase =
             // The phone now holds real drives and areas. Every schema change from version 4 on

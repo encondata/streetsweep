@@ -17,6 +17,7 @@ import com.example.streetsweep.data.osm.OsmStreet
 import com.example.streetsweep.data.osm.ShapeText
 import com.example.streetsweep.domain.AreaLevel
 import com.example.streetsweep.domain.Bounds
+import com.example.streetsweep.domain.RoadShape
 import com.example.streetsweep.domain.ExclusionReason
 import com.example.streetsweep.domain.Geo
 import com.example.streetsweep.domain.GraphWay
@@ -46,9 +47,11 @@ data class StreetStatus(
     val shape: List<LatLngPoint>,
     val fraction: Double,
     val excluded: Boolean = false,
+    /** Usually [DONE_THRESHOLD]; less for a street a car cannot finish. See RoadShape. */
+    val doneFraction: Double = DONE_THRESHOLD,
 ) {
-    val isDone: Boolean get() = !excluded && fraction >= DONE_THRESHOLD
-    val isPartial: Boolean get() = !excluded && fraction > PARTIAL_THRESHOLD && fraction < DONE_THRESHOLD
+    val isDone: Boolean get() = !excluded && fraction >= doneFraction
+    val isPartial: Boolean get() = !excluded && fraction > PARTIAL_THRESHOLD && fraction < doneFraction
     val isUndriven: Boolean get() = !excluded && fraction <= PARTIAL_THRESHOLD
     val label: String get() = name ?: "Unnamed ${highway.replace('_', ' ')}"
 
@@ -62,6 +65,7 @@ data class StreetStatus(
             shape = ShapeText.decode(r.shape),
             fraction = if (r.lengthMeters <= 0) 0.0 else (r.drivenMeters / r.lengthMeters).coerceIn(0.0, 1.0),
             excluded = r.excluded,
+            doneFraction = r.minDoneFraction,
         )
     }
 }
@@ -416,6 +420,9 @@ class CoverageRepository(private val db: AppDatabase) {
                     shape = ShapeText.encode(s.shape),
                     minLat = b.south, minLng = b.west, maxLat = b.north, maxLng = b.east,
                     cLat = c.latitude, cLng = c.longitude, loadedAt = now,
+                    // Read off the shape at import, so the coverage queries never have
+                    // to decode a polyline to decide whether a street can be finished.
+                    minDoneFraction = RoadShape.doneFractionFor(s.lengthMeters, s.shape),
                 )
             },
         )

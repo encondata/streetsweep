@@ -15,6 +15,9 @@ layout.buildDirectory.set(
 )
 
 android {
+    // The migration test reads the exported schemas, so they have to ship as assets.
+    sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
+
     namespace = "com.example.streetsweep"
     compileSdk {
         version = release(36)
@@ -103,6 +106,7 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     // Real org.json for local unit tests (the Android SDK stubs throw "not mocked").
     testImplementation(libs.org.json)
+    androidTestImplementation(libs.androidx.room.testing)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

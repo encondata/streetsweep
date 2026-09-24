@@ -6,6 +6,7 @@ import androidx.room.PrimaryKey
 import com.example.streetsweep.data.osm.ShapeText
 import com.example.streetsweep.domain.AreaLevel
 import com.example.streetsweep.domain.Bounds
+import com.example.streetsweep.domain.RoadShape
 import com.example.streetsweep.domain.LatLngPoint
 
 /** A named place the user wants to sweep: neighbourhood, city or metro, optionally nested. */
@@ -59,6 +60,12 @@ data class OsmWay(
     val cLat: Double,
     val cLng: Double,
     val loadedAt: Long,
+    /**
+     * How much of this way has to be driven before it counts as finished. Almost always
+     * [RoadShape.DEFAULT_DONE_FRACTION]; a traffic circle gets less, because a car cannot
+     * drive all of one. See [RoadShape].
+     */
+    val minDoneFraction: Double = RoadShape.DEFAULT_DONE_FRACTION,
 )
 
 /** A 0.1° grid cell whose streets have been downloaded; shared between areas. */
@@ -115,6 +122,7 @@ data class WayCoverageRow(
     val shape: String,
     val drivenMeters: Double,
     val excluded: Boolean,
+    val minDoneFraction: Double = RoadShape.DEFAULT_DONE_FRACTION,
 )
 
 /** Aggregate coverage over an area's streets, ignoring excluded ones. */

@@ -63,7 +63,7 @@ interface CoverageDao {
     /** Streets touching a viewport, with how much of each has been driven. */
     @Query(
         """
-        SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape,
+        SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape, w.minDoneFraction,
                COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) AS drivenMeters,
                EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id) AS excluded
         FROM osm_ways w
@@ -76,7 +76,7 @@ interface CoverageDao {
     /** Every street of an area, for the street list. */
     @Query(
         """
-        SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape,
+        SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape, w.minDoneFraction,
                COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) AS drivenMeters,
                EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id) AS excluded
         FROM area_ways aw
@@ -91,7 +91,7 @@ interface CoverageDao {
     /** The same rows, read once, for planning a route through an area. */
     @Query(
         """
-        SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape,
+        SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape, w.minDoneFraction,
                COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) AS drivenMeters,
                EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id) AS excluded
         FROM area_ways aw
@@ -105,7 +105,7 @@ interface CoverageDao {
     /** Coverage for a named set of streets, for walking down a planned route. */
     @Query(
         """
-        SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape,
+        SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape, w.minDoneFraction,
                COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) AS drivenMeters,
                EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id) AS excluded
         FROM osm_ways w
@@ -117,13 +117,14 @@ interface CoverageDao {
     /** Not-yet-driven, not-excluded streets near a point, for "nearest undriven" guidance. */
     @Query(
         """
-        SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape,
+        SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape, w.minDoneFraction,
                COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) AS drivenMeters,
                0 AS excluded
         FROM osm_ways w
         WHERE w.maxLat >= :south AND w.minLat <= :north AND w.maxLng >= :west AND w.minLng <= :east
           AND NOT EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id)
-          AND COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) < :doneFraction * w.lengthMeters
+          AND COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0)
+              < MIN(:doneFraction, w.minDoneFraction) * w.lengthMeters
         LIMIT :limit
         """,
     )
@@ -132,7 +133,7 @@ interface CoverageDao {
     /** The same, restricted to one area, so guidance keeps you inside the place you are sweeping. */
     @Query(
         """
-        SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape,
+        SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape, w.minDoneFraction,
                COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) AS drivenMeters,
                0 AS excluded
         FROM area_ways aw
@@ -140,7 +141,8 @@ interface CoverageDao {
         WHERE aw.areaId = :areaId
           AND w.maxLat >= :south AND w.minLat <= :north AND w.maxLng >= :west AND w.minLng <= :east
           AND NOT EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id)
-          AND COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) < :doneFraction * w.lengthMeters
+          AND COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0)
+              < MIN(:doneFraction, w.minDoneFraction) * w.lengthMeters
         LIMIT :limit
         """,
     )
@@ -149,7 +151,7 @@ interface CoverageDao {
     /** Ways in a box, fetched once (not observed) to build the local connectivity graph. */
     @Query(
         """
-        SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape,
+        SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape, w.minDoneFraction,
                COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) AS drivenMeters,
                EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id) AS excluded
         FROM osm_ways w
@@ -178,8 +180,8 @@ interface CoverageDao {
         SELECT COUNT(*) AS total,
                SUM(w.lengthMeters) AS meters,
                SUM(MIN(w.lengthMeters, COALESCE(d.m, 0))) AS drivenMeters,
-               SUM(CASE WHEN COALESCE(d.m, 0) >= 0.8 * w.lengthMeters THEN 1 ELSE 0 END) AS done,
-               SUM(CASE WHEN COALESCE(d.m, 0) > 0.02 * w.lengthMeters AND COALESCE(d.m, 0) < 0.8 * w.lengthMeters THEN 1 ELSE 0 END) AS partial,
+               SUM(CASE WHEN COALESCE(d.m, 0) >= w.minDoneFraction * w.lengthMeters THEN 1 ELSE 0 END) AS done,
+               SUM(CASE WHEN COALESCE(d.m, 0) > 0.02 * w.lengthMeters AND COALESCE(d.m, 0) < w.minDoneFraction * w.lengthMeters THEN 1 ELSE 0 END) AS partial,
                (SELECT COUNT(*) FROM area_ways aw2 JOIN street_exclusions x2 ON x2.wayId = aw2.wayId WHERE aw2.areaId = :areaId) AS excluded
         FROM area_ways aw
         JOIN osm_ways w ON w.id = aw.wayId
