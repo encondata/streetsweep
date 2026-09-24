@@ -226,6 +226,7 @@
   #legend .row2 { display: flex; align-items: center; gap: 9px; font-size: 11px; font-weight: 600; }
   #legend .key { width: 20px; height: 4px; border-radius: 2px; flex: 0 0 auto; }
   #legend .key.hollow { height: 0; border-top: 2px dashed var(--slate); }
+  #legend .key.dot { width: 9px; height: 9px; border-radius: 50%; background: #b3261e; box-shadow: 0 0 0 2px #fff; }
 
   #status {
     position: absolute; z-index: 600; left: 50%; transform: translateX(-50%); top: 14px;
@@ -461,9 +462,9 @@
       <div id="map"></div>
       <div id="status" hidden></div>
       <div id="legend">
-        <div class="row2"><span class="key" style="background:var(--accent)"></span>Driven</div>
-        <div class="row2"><span class="key" style="background:var(--line-strong)"></span>Not yet driven</div>
-        <div class="row2"><span class="key hollow"></span>Area boundary</div>
+        <div class="row2"><span class="key" id="keyDriven"></span>Streets you have driven</div>
+        <div class="row2"><span class="key hollow" id="keyArea"></span>Area boundary</div>
+        <div class="row2"><span class="key dot" id="keyPlace"></span>Marked place</div>
       </div>
     </div>
 
@@ -1324,8 +1325,7 @@ window.StreetSweepBases = {
   /** Driven streets and marked spots from an app export, drawn underneath for reference. */
   function drawContextFeature(g) {
     if (g.type === "LineString") {
-      L.polyline(g.coordinates.map(function (c) { return [c[1], c[0]]; }),
-                 { color: "#0b6b57", weight: 3, opacity: 0.55 }).addTo(contextLayer);
+      drawRoad(g.coordinates.map(function (c) { return [c[1], c[0]]; }), contextLayer, roadPaint(), 0.8);
       return 1;
     }
     if (g.type === "Point") {
@@ -1432,31 +1432,38 @@ window.StreetSweepBases = {
     });
   }
 
-  function drawCoverage(data) {
+  var lastCoverage = null;
+
+  function drawCoverage(data, keepView) {
+    lastCoverage = data;
     coverageLayer.clearLayers();
     var bounds = null;
+    var paint = roadPaint();
 
     (data.edges || []).forEach(function (e) {
       if (!e.shape || e.shape.length < 2) return;
-      L.polyline(e.shape, { color: "#0b6b57", weight: 4, opacity: 0.85 }).addTo(coverageLayer);
+      drawRoad(e.shape, coverageLayer, paint);
     });
 
     (data.areas || []).forEach(function (a) {
       if (!a.polygon || a.polygon.length < 3) return;
       var percent = percentOf(a.stats);
-      var poly = L.polygon(a.polygon, {
-        color: completionColor(percent), weight: 2, fillOpacity: 0.06, fillColor: completionColor(percent)
-      }).addTo(coverageLayer);
+      var shade = completionColor(percent);
+      var poly = L.polygon(a.polygon, onImagery
+        ? { color: "#ffffff", weight: 2.5, opacity: 0.95, fillColor: shade, fillOpacity: 0.08 }
+        : { color: shade, weight: 2, opacity: 0.9, fillColor: shade, fillOpacity: 0.06 }
+      ).addTo(coverageLayer);
       poly.bindTooltip(a.name + " · " + percent + "%", { permanent: false });
       bounds = bounds ? bounds.extend(poly.getBounds()) : poly.getBounds();
     });
 
     (data.pois || []).forEach(function (p) {
-      L.circleMarker([p.lat, p.lng], { radius: 4, color: "#b3261e", fillColor: "#b3261e", fillOpacity: 1 })
-        .bindTooltip(p.note || "Marked spot").addTo(coverageLayer);
+      L.circleMarker([p.lat, p.lng], {
+        radius: 5, color: "#ffffff", weight: 2, fillColor: "#b3261e", fillOpacity: 1,
+      }).bindTooltip(p.name || p.note || "Marked place").addTo(coverageLayer);
     });
 
-    if (bounds) map.fitBounds(bounds, { padding: [40, 40] });
+    if (bounds && !keepView) map.fitBounds(bounds, { padding: [40, 40] });
   }
 
   function percentOf(stats) {
@@ -1639,6 +1646,11 @@ window.StreetSweepBases = {
     }
     onImagery = name !== "standard";
     restyleAreas();
+    paintLegend();
+    // Everything drawn over the tiles was painted for the old ground, so paint it again
+    // for the new one. Without moving the map: you are looking at something.
+    if (lastCoverage) drawCoverage(lastCoverage, true);
+    if (lastDrive) showDrive(lastDrive, true);
     try { localStorage.setItem(BASE_KEY, name); } catch (e) { /* this page only */ }
     Array.prototype.forEach.call(document.querySelectorAll("#basemap button"), function (b) {
       b.setAttribute("aria-pressed", b.getAttribute("data-base") === name ? "true" : "false");
@@ -1646,6 +1658,44 @@ window.StreetSweepBases = {
   }
 
   var onImagery = false;
+
+  /**
+   * How to paint a driven street.
+   *
+   * Over photography a single dark line disappears into trees and shadow, so it is drawn
+   * twice: a near-black casing wide enough to separate it from whatever is under it, then
+   * a bright core on top. On the plain map the ground is already pale and the brand green
+   * reads on its own.
+   */
+  function roadPaint() {
+    return onImagery
+      ? { casing: "#04210f", casingWeight: 7, core: "#5bff6b", coreWeight: 3.5, opacity: 1 }
+      : { casing: null, casingWeight: 0, core: "#1e8a28", coreWeight: 4, opacity: 0.9 };
+  }
+
+  function drawRoad(line, layer, paint, scale) {
+    var p = paint || roadPaint();
+    var k = scale || 1;
+    if (p.casing) {
+      L.polyline(line, {
+        color: p.casing, weight: p.casingWeight * k, opacity: 0.95, lineCap: "round", lineJoin: "round",
+      }).addTo(layer);
+    }
+    L.polyline(line, {
+      color: p.core, weight: p.coreWeight * k, opacity: p.opacity, lineCap: "round", lineJoin: "round",
+    }).addTo(layer);
+  }
+
+  function paintLegend() {
+    var p = roadPaint();
+    var driven = el("keyDriven");
+    if (driven) {
+      driven.style.background = p.core;
+      driven.style.boxShadow = p.casing ? "0 0 0 2px " + p.casing : "none";
+    }
+    var area = el("keyArea");
+    if (area) area.style.borderTopColor = onImagery ? "#ffffff" : "var(--slate)";
+  }
 
   /** Over photography a coloured outline disappears; a white one does not. */
   function restyleAreas() {
@@ -1780,13 +1830,15 @@ window.StreetSweepBases = {
     el("drivesEmpty").hidden = rows.length > 0;
   }
 
-  function showDrive(d) {
+  var lastDrive = null;
+
+  function showDrive(d, keepView) {
+    lastDrive = d;
     driveLayer.clearLayers();
-    (d.shape || []).forEach(function (line) {
-      L.polyline(line, { color: "#3fbf49", weight: 4, opacity: 0.95 }).addTo(driveLayer);
-    });
+    var paint = roadPaint();
+    (d.shape || []).forEach(function (line) { drawRoad(line, driveLayer, paint, 1.1); });
     if (!map.hasLayer(driveLayer)) driveLayer.addTo(map);
-    if (d.bounds) {
+    if (d.bounds && !keepView) {
       map.fitBounds([[d.bounds.south, d.bounds.west], [d.bounds.north, d.bounds.east]], { padding: [40, 40] });
     }
     var minutes = Math.max(0, (d.endedAt || d.startedAt) - d.startedAt - (d.pausedMs || 0));
