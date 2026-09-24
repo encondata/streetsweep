@@ -499,6 +499,7 @@
             <button id="btnCancel" disabled><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>Cancel</button>
           </div>
           <p class="hint" id="drawHint">Click the map to drop corners. Drag a corner to move it, click the small dot between two corners to add one there, and right-click a corner to remove it.</p>
+          <p class="hint">Clicking near an area you have already drawn puts the corner exactly on its edge. Two corners along the same edge bring the whole stretch between them, so neighbouring areas share one line rather than two that nearly meet.</p>
         </div>
 
         <div id="editor" hidden>
@@ -1207,7 +1208,7 @@ window.StreetSweepBases = {
     el("btnFinish").disabled = false;
     el("btnCancel").disabled = false;
     el("btnNew").disabled = true;
-    status("Click the map to drop corners, then Finish");
+    status("Click the map to drop corners, then Finish. Click an existing outline to share its edge.");
   });
 
   function endDrawing() {
@@ -1233,11 +1234,133 @@ window.StreetSweepBases = {
     el("fName").select();
   });
 
+  // ---- borrowing a neighbour's boundary ----------------------------------
+  //
+  // Neighbourhoods sit against each other, and the line between two of them belongs to
+  // both. Clicking near an outline that is already drawn puts the corner exactly on it
+  // rather than near it, and two corners running along the same outline bring the whole
+  // stretch between them with it. The shared edge is then the same line, to the last
+  // decimal place, instead of two lines that nearly agree.
+
+  var SNAP_PIXELS = 14;
+
+  /** Where a point falls along a segment, 0 at one end and 1 at the other. */
+  function alongSegment(p, a, b) {
+    var k = Math.cos(a.lat * Math.PI / 180);
+    var dx = (b.lng - a.lng) * k;
+    var dy = b.lat - a.lat;
+    var span = dx * dx + dy * dy;
+    if (span === 0) return 0;
+    var t = (((p.lng - a.lng) * k) * dx + (p.lat - a.lat) * dy) / span;
+    return Math.max(0, Math.min(1, t));
+  }
+
+  function same(a, b) {
+    return Boolean(a) && Boolean(b) &&
+      Math.abs(a.lat - b.lat) < 1e-9 && Math.abs(a.lng - b.lng) < 1e-9;
+  }
+
+  /** The closest point on any existing outline to [latlng], if one is near enough. */
+  function snapToOutline(latlng) {
+    var target = map.latLngToLayerPoint(latlng);
+    var best = null;
+    areas.forEach(function (a) {
+      var ring = a.latlngs;
+      if (!ring || ring.length < 3) return;
+      for (var i = 0; i < ring.length; i++) {
+        var p1 = map.latLngToLayerPoint(ring[i]);
+        var p2 = map.latLngToLayerPoint(ring[(i + 1) % ring.length]);
+        var dx = p2.x - p1.x;
+        var dy = p2.y - p1.y;
+        var span = dx * dx + dy * dy;
+        var t = span === 0 ? 0 : Math.max(0, Math.min(1,
+          ((target.x - p1.x) * dx + (target.y - p1.y) * dy) / span));
+        var hit = L.point(p1.x + dx * t, p1.y + dy * t);
+        var away = target.distanceTo(hit);
+        if (away > SNAP_PIXELS || (best && away >= best.away)) continue;
+
+        // A corner is the thing people are aiming at, so landing near one takes it
+        // exactly. Going through screen pixels and back would otherwise shift it by
+        // a fraction of a metre, which is the very thing this is meant to avoid.
+        var startVertex = (i + 1) % ring.length;
+        if (t <= 0.5 && target.distanceTo(p1) <= SNAP_PIXELS) {
+          best = { area: a, segment: i, along: 0, away: away, latlng: ring[i] };
+        } else if (t > 0.5 && target.distanceTo(p2) <= SNAP_PIXELS) {
+          best = { area: a, segment: startVertex, along: 0, away: away, latlng: ring[startVertex] };
+        } else {
+          // Partway along. How near the click was is a question about the screen, but
+          // where exactly it lands is a question about the ground, and a pixel is tens
+          // of metres when the map is zoomed out. So the position along the segment is
+          // worked out from the coordinates, not from the pixels.
+          var alng = alongSegment(latlng, ring[i], ring[startVertex]);
+          best = {
+            area: a,
+            segment: i,
+            along: alng,
+            away: away,
+            latlng: L.latLng(
+              ring[i].lat + (ring[startVertex].lat - ring[i].lat) * alng,
+              ring[i].lng + (ring[startVertex].lng - ring[i].lng) * alng,
+            ),
+          };
+        }
+      }
+    });
+    return best;
+  }
+
+  /**
+   * The outline's own corners between two points on it, taking the shorter way round.
+   *
+   * Either direction is a legitimate boundary; the shorter one is what someone tracing a
+   * shared edge almost always means. Clicking a corner partway along picks the other.
+   */
+  function cornersBetween(area, from, to) {
+    var ring = area.latlngs;
+    var n = ring.length;
+    function walk(start, end) {
+      var out = [];
+      var i = (start.segment + 1) % n;
+      var guard = 0;
+      while (guard++ <= n) {
+        if (start.segment === end.segment && start.along <= end.along) break;
+        if (i === (end.segment + 1) % n) break;
+        out.push(ring[i]);
+        i = (i + 1) % n;
+      }
+      return out;
+    }
+    var forward = walk(from, to);
+    var backward = walk(to, from).slice().reverse();
+    return forward.length <= backward.length ? forward : backward;
+  }
+
   map.on("click", function (ev) {
     if (!drawing) return;
-    drawing.latlngs.push(ev.latlng);
+    var snap = snapToOutline(ev.latlng);
+    var point = snap ? snap.latlng : ev.latlng;
+    var borrowed = 0;
+
+    if (snap && drawing.lastSnap && drawing.lastSnap.area === snap.area) {
+      var previous = drawing.latlngs[drawing.latlngs.length - 1];
+      cornersBetween(snap.area, drawing.lastSnap, snap).forEach(function (c) {
+        // The corner a snap landed on is already in the line, and the one the next
+        // snap lands on is about to be, so neither is borrowed twice.
+        if (same(c, previous) || same(c, point)) return;
+        previous = L.latLng(c.lat, c.lng);
+        drawing.latlngs.push(previous);
+        borrowed++;
+      });
+    }
+
+    drawing.latlngs.push(point);
+    drawing.lastSnap = snap || null;
     drawing.line.setLatLngs(drawing.latlngs.concat(drawing.latlngs.length > 2 ? [drawing.latlngs[0]] : []));
-    status(drawing.latlngs.length + " corners — Finish when it closes the shape");
+    status(
+      drawing.latlngs.length + " corners" +
+      (borrowed ? " — took " + borrowed + " from " + snap.area.name : snap ? " — on " + snap.area.name + "'s edge" : "") +
+      " — Finish when it closes the shape",
+    );
   });
   map.on("dblclick", function (ev) {
     if (drawing) { L.DomEvent.stop(ev); el("btnFinish").click(); }
