@@ -12,22 +12,22 @@
   /* Same tokens as the builder, so the two pages are recognisably one product. */
   :root {
     --navy-950: #02142a;
-    --navy-900: #0a1f35;
-    --navy-800: #10314f;
-    --navy-700: #1b4670;
     --green-700: #14701f;
     --green-600: #1e8a28;
     --green-500: #299530;
     --green-400: #45bd23;
 
-    --ink: #eaf1f8;
-    --ink-soft: #93a6ba;
-    --line: rgba(255,255,255,.12);
-    --field: rgba(255,255,255,.05);
-    --card: rgba(9, 26, 45, .72);
-    --accent: var(--green-500);
-    --link: #57c7ff;
-    --danger: #ff8579;
+    /* The right-hand side is white in the design, so the ink is dark and the
+       fields are white on an off-white panel. */
+    --panel: #f7f9fb;
+    --ink: #0d1b28;
+    --ink-soft: #5a6a78;
+    --line: #dde4ec;
+    --line-strong: #cfd9e4;
+    --field: #ffffff;
+    --accent: var(--green-600);
+    --link: #1a6fd4;
+    --danger: #b3261e;
     --ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     --r: 12px;
   }
@@ -37,57 +37,47 @@
   body {
     margin: 0; font-family: var(--ui); color: var(--ink);
     background: var(--navy-950);
-    display: grid; grid-template-columns: 1.05fr 1fr;
+    position: relative; overflow-x: hidden;
     -webkit-font-smoothing: antialiased;
   }
 
-  /* ---- the map side ------------------------------------------------------
-     The supplied photograph. There was a drawn map under it for a moment, as a
-     placeholder; it painted straight over the photograph instead, because both
-     were absolutely positioned and the drawing came second in the document. The
-     gradient below does that job with nothing to get out of order. */
+  /* ---- the photograph ----------------------------------------------------
+     Full bleed behind everything. The white panel is cut over the top of it,
+     which is what makes the diagonal read as a white slash rather than a dark
+     one: the seam is the edge of the paper, not a gap between two columns. */
   #art {
-    position: relative; overflow: hidden;
-    background:
-      radial-gradient(120% 80% at 20% 10%, #123b5e 0%, transparent 60%),
-      radial-gradient(90% 70% at 80% 90%, #0d2c46 0%, transparent 55%),
-      linear-gradient(160deg, #061d33 0%, #02142a 100%);
-    /* The diagonal seam from the mockup. */
-    clip-path: polygon(0 0, 100% 0, calc(100% - 90px) 100%, 0 100%);
+    position: fixed; inset: 0; overflow: hidden;
+    background: linear-gradient(160deg, #0d3350 0%, #02142a 100%);
   }
   #photo {
     position: absolute; inset: 0; width: 100%; height: 100%;
-    object-fit: cover; object-position: 58% 52%;
+    object-fit: cover; object-position: 30% 55%;
     opacity: 0; transition: opacity .4s ease;
   }
   #photo.ready { opacity: 1; }
 
-  #artcopy {
-    position: absolute; left: 0; right: 90px; bottom: 0; padding: 40px 46px 44px;
-    background: linear-gradient(0deg, rgba(2,20,42,.95) 26%, rgba(2,20,42,.55) 62%, transparent 100%);
-  }
-  #artcopy h2 { margin: 0 0 8px; font-size: 25px; line-height: 1.25; letter-spacing: -.02em; }
-  #artcopy p { margin: 0; color: var(--ink-soft); font-size: 14px; line-height: 1.6; max-width: 42ch; }
 
-  /* ---- the form side ----------------------------------------------------- */
+  /* ---- the white panel ---------------------------------------------------
+     Measured off the supplied design: its left edge runs from 36% of the width
+     at the top to 22% at the bottom, so the photograph keeps a wedge down the
+     left rather than half the page. */
   #panel {
+    position: relative; z-index: 1; min-height: 100%;
+    background: var(--panel);
+    clip-path: polygon(36% 0, 100% 0, 100% 100%, 22% 100%);
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    padding: 40px 34px; gap: 22px; min-width: 0;
+    /* Pushed right of the widest part of the slash so nothing sits on the angle. */
+    padding: 48px 6% 48px calc(36% + 40px);
   }
-  #brand { text-align: center; }
-  /* Width only: the mark is not square, and fixing both dimensions squashed it. */
-  #brand .mark { width: 118px; height: auto; display: block; margin: 0 auto 16px; }
-  #brand .lockup { width: 286px; max-width: 76vw; height: auto; display: block; margin: 0 auto; }
+  #inner { width: 100%; max-width: 404px; }
 
-  form {
-    width: 100%; max-width: 396px;
-    background: var(--card); border: 1px solid var(--line); border-radius: 18px;
-    padding: 26px 26px 24px;
-    -webkit-backdrop-filter: blur(14px) saturate(140%); backdrop-filter: blur(14px) saturate(140%);
-    box-shadow: 0 20px 50px rgba(0,0,0,.42);
-  }
-  h1 { margin: 0 0 5px; font-size: 26px; letter-spacing: -.02em; }
-  .sub { margin: 0 0 20px; color: var(--ink-soft); font-size: 13.5px; }
+  #brand { text-align: center; margin-bottom: 26px; }
+  #brand .mark { width: 128px; height: auto; display: block; margin: 0 auto 14px; }
+  #brand .lockup { width: 300px; max-width: 100%; height: auto; display: block; margin: 0 auto; }
+
+  form { width: 100%; }
+  h1 { margin: 0 0 6px; font-size: 30px; letter-spacing: -.025em; }
+  .sub { margin: 0 0 22px; color: var(--ink-soft); font-size: 14px; }
 
   .field { position: relative; margin-bottom: 12px; }
   .field .ico {
@@ -96,22 +86,22 @@
     stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; pointer-events: none;
   }
   input[type=email], input[type=password], input[type=text] {
-    width: 100%; height: 50px; padding: 0 14px 0 43px;
-    font: 500 14px var(--ui); color: var(--ink);
-    background: var(--field); border: 1px solid var(--line); border-radius: var(--r);
-    transition: border-color .15s, box-shadow .15s, background .15s;
+    width: 100%; height: 52px; padding: 0 14px 0 45px;
+    font: 500 14.5px var(--ui); color: var(--ink);
+    background: var(--field); border: 1px solid var(--line-strong); border-radius: var(--r);
+    transition: border-color .15s, box-shadow .15s;
   }
   input::placeholder { color: var(--ink-soft); font-weight: 400; }
   input:focus {
-    outline: none; border-color: var(--accent); background: rgba(255,255,255,.07);
-    box-shadow: 0 0 0 3px rgba(41,149,48,.26);
+    outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(30,138,40,.18);
   }
   #peek {
     position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
     width: 34px; height: 34px; display: grid; place-items: center;
     background: none; border: 0; border-radius: 8px; cursor: pointer; color: var(--ink-soft);
   }
-  #peek:hover { color: var(--ink); background: rgba(255,255,255,.07); }
+  #peek:hover { color: var(--ink); background: #eef2f7; }
   #peek svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; }
 
   .row {
@@ -119,7 +109,7 @@
     gap: 12px; margin: 14px 0 18px; font-size: 13px;
   }
   .remember { display: flex; align-items: center; gap: 9px; cursor: pointer; user-select: none; }
-  .remember input { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; }
+  .remember input { width: 18px; height: 18px; accent-color: var(--link); cursor: pointer; }
   .row a, .foot a { color: var(--link); text-decoration: none; font-weight: 600; }
   .row a:hover, .foot a:hover { text-decoration: underline; }
 
@@ -143,26 +133,26 @@
   .or::before, .or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--line); }
 
   button.sso {
-    width: 100%; height: 48px; border-radius: var(--r); cursor: pointer;
-    font: 600 14px var(--ui); color: #1f2937; background: #fff; border: 1px solid transparent;
+    width: 100%; height: 50px; border-radius: var(--r); cursor: pointer;
+    font: 600 14px var(--ui); color: var(--ink);
+    background: #fff; border: 1px solid var(--line-strong);
     display: flex; align-items: center; justify-content: center; gap: 10px;
+    margin-bottom: 10px;
   }
-  button.sso:hover:not([disabled]) { filter: brightness(.96); }
-  /* Shown, because it is coming, but it cannot pretend to work yet. */
-  button.sso[disabled] { opacity: .42; cursor: not-allowed; }
-  button.sso svg { width: 18px; height: 18px; }
-  .ssonote { margin: 9px 0 0; text-align: center; font-size: 11.5px; color: var(--ink-soft); }
+  button.sso:hover:not([disabled]) { border-color: var(--line-strong); background: #f3f6f9; }
+  /* Drawn as designed, but it cannot pretend to work yet. */
+  button.sso[disabled] { opacity: .5; cursor: not-allowed; }
+  button.sso svg { width: 19px; height: 19px; }
+  .ssonote { margin: 2px 0 0; text-align: center; font-size: 11.5px; color: var(--ink-soft); }
 
   .foot { margin: 18px 0 0; text-align: center; font-size: 13px; color: var(--ink-soft); }
 
   #msg {
     margin: 0 0 14px; padding: 10px 12px; border-radius: var(--r); font-size: 13px;
-    background: rgba(255,133,121,.12); border: 1px solid rgba(255,133,121,.34); color: var(--danger);
+    background: #fdecea; border: 1px solid #f3c3bd; color: var(--danger);
   }
   #msg[hidden] { display: none; }
-  #msg.info {
-    background: rgba(87,199,255,.10); border-color: rgba(87,199,255,.30); color: #9bd9f7;
-  }
+  #msg.info { background: #e8f1fd; border-color: #c2dbf7; color: #14508f; }
 
   /* ---- the three things it does, along the bottom ------------------------ */
   #uses {
@@ -170,22 +160,33 @@
     justify-content: space-between; text-align: center;
   }
   #uses div { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 7px; }
-  #uses img { height: 22px; width: auto; display: block; }
+  #uses img { height: 24px; width: auto; display: block; }
   #uses span { font-size: 11.5px; line-height: 1.35; color: var(--ink-soft); font-weight: 600; }
+  #uses { margin-top: 26px; }
 
   /* ---- narrow: the art becomes a header band, as in the phone mockups ---- */
+  /* Narrow: the diagonal has nowhere to go, so the photograph becomes a band
+     across the top and the paper takes the rest, straight-edged. */
   @media (max-width: 900px) {
-    body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-    #art { clip-path: none; min-height: 168px; }
-    #artcopy { right: 0; padding: 20px 22px 18px; }
-    #artcopy h2 { font-size: 19px; }
-    #artcopy p { display: none; }
-    #panel { padding: 26px 20px 34px; gap: 18px; }
-    #brand .mark { width: 92px; }
-    #brand .lockup { width: 246px; }
+    /* flow-root, or #panel's top margin collapses through body and takes the
+       photograph down with it — the band ends up under the panel, not above it. */
+    body { display: flow-root; }
+    #art { position: absolute; inset: 0 0 auto 0; height: 190px; }
+    #photo { object-position: 50% 58%; }
+    #panel {
+      clip-path: none; margin-top: 190px; min-height: calc(100% - 190px);
+      padding: 30px 20px 38px; border-radius: 22px 22px 0 0;
+      justify-content: flex-start;
+    }
+    #brand { margin-bottom: 20px; }
+    #brand .mark { width: 96px; }
+    #brand .lockup { width: 252px; }
+    h1 { font-size: 26px; }
   }
-  @media (max-height: 720px) and (min-width: 901px) {
-    #brand .mark { width: 84px; margin-bottom: 10px; }
+  @media (max-height: 760px) and (min-width: 901px) {
+    #brand .mark { width: 92px; margin-bottom: 10px; }
+    #brand .lockup { width: 248px; }
+    #brand { margin-bottom: 18px; }
     #uses { display: none; }
   }
 </style>
@@ -195,17 +196,13 @@
 <div id="art" aria-hidden="true">
   <img id="photo" src="/login-art.webp" alt="" decoding="async" fetchpriority="low"
        onload="this.classList.add('ready')">
-  <div id="artcopy">
-    <h2>Every street, once.</h2>
-    <p>Draw the area, drive it, and watch it fill in. StreetSweep keeps the map of what
-       you have covered and what is still waiting.</p>
-  </div>
 </div>
 
 <main id="panel">
+  <div id="inner">
   <div id="brand">
     <img class="mark" src="/login-mark.png" alt="" width="384" height="433">
-    <img class="lockup" src="/login-lockup.png" width="810" height="165" alt="StreetSweep — drive, explore, complete">
+    <img class="lockup" src="/login-lockup-dark.png" width="810" height="165" alt="StreetSweep — drive, explore, complete">
   </div>
 
   <form id="signin" novalidate>
@@ -253,7 +250,15 @@
       </svg>
       Continue with Google
     </button>
-    <p class="ssonote">Google sign-in is not set up on this server yet.</p>
+    <button type="button" class="sso" id="microsoft" disabled
+            title="Microsoft sign-in has not been set up on this server yet">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="#F25022" d="M2.5 2.5h9v9h-9z"/><path fill="#7FBA00" d="M12.5 2.5h9v9h-9z"/>
+        <path fill="#00A4EF" d="M2.5 12.5h9v9h-9z"/><path fill="#FFB900" d="M12.5 12.5h9v9h-9z"/>
+      </svg>
+      Continue with Microsoft
+    </button>
+    <p class="ssonote">Neither is set up on this server yet.</p>
 
     <p class="foot">New to StreetSweep? <a href="#" id="noaccount">Create an account</a></p>
   </form>
@@ -271,6 +276,7 @@
       <img src="/use_complete.png" alt="" width="24" height="22">
       <span>Complete<br>Every Street</span>
     </div>
+  </div>
   </div>
 </main>
 
