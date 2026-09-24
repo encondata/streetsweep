@@ -475,6 +475,47 @@
   .viewhead.withaction > div { min-width: 0; }
   .viewhead.withaction select { width: auto; flex: 0 0 auto; }
 
+  /* ---- charts -------------------------------------------------------------- */
+  .chart { height: 168px; display: flex; align-items: flex-end; gap: 5px; }
+  .chart .col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column;
+    justify-content: flex-end; height: 100%; gap: 5px; }
+  .chart .col .fill {
+    background: var(--grad-accent); border-radius: 5px 5px 2px 2px; min-height: 2px;
+    transition: height .25s;
+  }
+  .chart .col .fill.zero { background: var(--surface-2); }
+  .chart .col .lab {
+    font-size: 9.5px; color: var(--ink-soft); text-align: center; font-weight: 600;
+    overflow: hidden; white-space: nowrap;
+  }
+  .chart .col:hover .fill { filter: brightness(1.08); }
+
+  @media (min-width: 1120px) {
+    #trendCols, #dataCols {
+      display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 0 34px; align-items: start;
+    }
+    #trendCols > *, #dataCols > * { min-width: 0; }
+  }
+  pre.cmd {
+    margin: 10px 0; padding: 11px 12px; border-radius: var(--r);
+    background: var(--navy-950); color: #d7e6f5; font-size: 11.5px; line-height: 1.6;
+    overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+  }
+
+  /* Analytics and Data are full-width pages too. */
+  :root[data-view="stats"] #stage, :root[data-view="export"] #stage { grid-template-columns: 1fr; }
+  :root[data-view="stats"] #mapwrap, :root[data-view="export"] #mapwrap { display: none; }
+  :root[data-view="stats"] #side, :root[data-view="export"] #side {
+    border-left: none; padding: 24px 28px 48px;
+  }
+  :root[data-view="stats"] .view[data-view="stats"],
+  :root[data-view="export"] .view[data-view="export"] { max-width: 1280px; margin: 0 auto; }
+  :root[data-view="stats"] #citySelect, :root[data-view="export"] #citySelect,
+  :root[data-view="stats"] #showMenu,   :root[data-view="export"] #showMenu,
+  :root[data-view="stats"] #basemap,    :root[data-view="export"] #basemap { display: none; }
+  :root[data-view="stats"] .eyebrow, :root[data-view="export"] .eyebrow { margin: 26px 0 11px; }
+
   /* ---- a table of areas ---------------------------------------------------- */
   :root[data-view="areas"][data-areas="table"] #stage { grid-template-columns: 1fr; }
   :root[data-view="areas"][data-areas="table"] #mapwrap { display: none; }
@@ -1119,9 +1160,37 @@
       </section>
 
       <section class="view" data-view="stats" hidden>
-        <div class="viewhead">
-          <h2>Statistics</h2>
-          <p>Progress across everything you are sweeping.</p>
+        <div class="viewhead withaction">
+          <div>
+            <h2>Analytics</h2>
+            <p>How much ground is being covered, and how that is changing.</p>
+          </div>
+          <select id="trendWeeks" title="Over how many weeks" hidden>
+            <option value="8">8 weeks</option>
+            <option value="12" selected>12 weeks</option>
+            <option value="26">26 weeks</option>
+            <option value="52">52 weeks</option>
+          </select>
+        </div>
+
+        <div id="trendBlock" hidden>
+          <p class="eyebrow">Streets swept each week</p>
+          <div class="card"><div id="chartStreets" class="chart"></div></div>
+          <p class="eyebrow">Distance driven each week</p>
+          <div class="card"><div id="chartMiles" class="chart"></div></div>
+          <div id="trendCols">
+            <div>
+              <p class="eyebrow">Most swept, by person</p>
+              <ul class="board plain" id="trendDrivers"></ul>
+              <p class="hint" id="trendDriversEmpty" hidden>Nobody has swept a street in this period.</p>
+            </div>
+            <div>
+              <p class="eyebrow">Furthest along, by area</p>
+              <ul class="board plain" id="trendAreas"></ul>
+              <p class="hint" id="trendAreasEmpty" hidden>No area has been reported yet.</p>
+            </div>
+          </div>
+          <p class="eyebrow">Your own coverage</p>
         </div>
         <div class="seg" id="statTabs" role="group" aria-label="Statistics view">
           <button type="button" data-stat="overview" aria-pressed="true">Overview</button>
@@ -1154,17 +1223,40 @@
 
       <section class="view" data-view="export" hidden>
         <div class="viewhead">
-          <h2>Export</h2>
-          <p>Move areas between this server and the phone.</p>
+          <h2>Data management</h2>
+          <p>Moving areas in and out, what this server is holding, and how to keep a copy of it.</p>
         </div>
-        <div>
-          <p class="eyebrow">File</p>
-          <div class="row">
-            <button id="btnExport" class="primary">Export GeoJSON</button>
-            <button id="btnImport">Import…</button>
+
+        <div id="dataCols">
+          <div>
+            <p class="eyebrow">Areas</p>
+            <div class="card">
+              <div class="row">
+                <button id="btnExport" class="primary" style="flex:1 1 auto">Export GeoJSON</button>
+                <button id="btnImport" style="flex:0 0 auto">Import…</button>
+              </div>
+              <input type="file" id="fileInput" accept=".geojson,.json,application/geo+json,application/json" hidden>
+              <p class="hint">Import also accepts the app&rsquo;s own coverage export, so you can see the
+                streets you have already driven while deciding where an area should stop.</p>
+            </div>
+
+            <div id="dataAdmin" hidden>
+              <p class="eyebrow">Keeping a copy</p>
+              <div class="card">
+                <p class="hint" style="margin-top:0">Everything lives in Postgres except the photos,
+                  which are files on a volume. This dumps the database; run it before any upgrade
+                  that changes the schema.</p>
+                <pre class="cmd" id="backupCmd"></pre>
+                <button type="button" id="btnCopyBackup">Copy that command</button>
+              </div>
+            </div>
           </div>
-          <input type="file" id="fileInput" accept=".geojson,.json,application/geo+json,application/json" hidden>
-          <p class="hint">Import also accepts the app's own coverage export, so you can see the streets you have already driven while deciding where an area should stop.</p>
+
+          <div id="dataStorage" hidden>
+            <p class="eyebrow">What is stored</p>
+            <div class="grid3" id="dataGrid"></div>
+            <p class="hint" id="dataLine"></p>
+          </div>
         </div>
       </section>
 
@@ -1366,6 +1458,8 @@
         window.__ssLoadAdmin(view);
       }
       if (view === "areas" && window.__ssAreasOpened) window.__ssAreasOpened();
+      if (view === "stats" && window.__ssAnalyticsOpened) window.__ssAnalyticsOpened();
+      if (view === "export" && window.__ssDataOpened) window.__ssDataOpened();
     }
   });
 
@@ -2752,6 +2846,105 @@ window.StreetSweepBases = {
       }).join("");
     });
   }
+
+  // ---- analytics and data ----------------------------------------------------
+
+  /**
+   * A bar per week. Plain divs rather than a charting library: this is one series of a
+   * dozen values, and the page already carries Leaflet without adding a second thing to
+   * keep current.
+   */
+  function drawChart(node, series, pick, label) {
+    var max = 0;
+    series.forEach(function (w) { max = Math.max(max, pick(w)); });
+    node.innerHTML = series.map(function (w, i) {
+      var v = pick(w);
+      var h = max ? Math.round((v / max) * 100) : 0;
+      var when = new Date(w.weekStart);
+      // Only every other label below about a dozen bars, or they collide.
+      var show = series.length <= 13 || i % Math.ceil(series.length / 13) === 0;
+      return "<div class='col' title='" +
+          escapeHtml(when.toLocaleDateString(undefined, { month: "short", day: "numeric" })) +
+          " — " + escapeHtml(label(v)) + "'>" +
+        "<div class='fill" + (v ? "" : " zero") + "' style='height:" +
+          Math.max(v ? 4 : 2, h) + "%'></div>" +
+        "<div class='lab'>" + (show
+          ? escapeHtml(when.toLocaleDateString(undefined, { month: "short", day: "numeric" }))
+          : "&nbsp;") + "</div></div>";
+    }).join("");
+  }
+
+  function loadTrends() {
+    var weeks = Number(el("trendWeeks").value) || 12;
+    return apiJson("/api/admin/trends?weeks=" + weeks).then(function (d) {
+      drawChart(el("chartStreets"), d.series, function (w) { return w.streets; },
+        function (v) { return v.toLocaleString() + " streets"; });
+      drawChart(el("chartMiles"), d.series, function (w) { return w.meters; },
+        function (v) { return fmtDistance(v); });
+
+      el("trendDriversEmpty").hidden = d.byDriver.length > 0;
+      el("trendDrivers").innerHTML = d.byDriver.map(function (x) {
+        return "<li><span class='main'><b>" + escapeHtml(x.name) + "</b><span>" +
+          x.streets.toLocaleString() + " streets</span></span>" +
+          "<span class='fig'><b>" + fmtDistance(x.meters) + "</b><span>swept</span></span></li>";
+      }).join("");
+
+      el("trendAreasEmpty").hidden = d.byArea.length > 0;
+      el("trendAreas").innerHTML = d.byArea.map(function (a) {
+        var pct = a.total ? Math.round((a.done / a.total) * 100) : 0;
+        return "<li><span class='main'><b>" + escapeHtml(a.name) + "</b><span>" +
+          a.done.toLocaleString() + " / " + a.total.toLocaleString() + " streets</span>" +
+          "<span class='bar'><i style='width:" + pct + "%'></i></span></span>" +
+          "<span class='fig'><b>" + pct + "%</b></span></li>";
+      }).join("");
+    });
+  }
+
+  el("trendWeeks").addEventListener("change", function () {
+    loadTrends().catch(function () { /* the coverage figures below still stand */ });
+  });
+
+  /** The trends are everyone's, so they are an administrator's to see. */
+  window.__ssAnalyticsOpened = function () {
+    if (!me || me.role !== "admin") return;
+    el("trendWeeks").hidden = false;
+    el("trendBlock").hidden = false;
+    loadTrends().catch(function (err) {
+      status("Could not read the trends: " + (err.message || "unknown"), "warn");
+    });
+  };
+
+  window.__ssDataOpened = function () {
+    var cmd = "docker compose exec -T db pg_dump -U streetsweep -d streetsweep" +
+      " --clean --if-exists > streetsweep-$(date +%F).sql";
+    el("backupCmd").textContent = cmd;
+    if (!me || me.role !== "admin") return;
+    el("dataAdmin").hidden = false;
+    el("dataStorage").hidden = false;
+    apiJson("/api/admin/server").then(function (d) {
+      var c = d.counts;
+      el("dataGrid").innerHTML =
+        cell(bytes(d.database.bytes), "Database") +
+        cell(bytes(d.photos.bytes), "Photos") +
+        cell(d.photos.files.toLocaleString(), "Photo files") +
+        cell(c.areas.toLocaleString(), "Areas") +
+        cell(c.edges.toLocaleString(), "Street segments") +
+        cell(c.drives.toLocaleString(), "Drives") +
+        cell(c.pois.toLocaleString(), "Marked places") +
+        cell(c.users.toLocaleString(), "People") +
+        cell(c.devices.toLocaleString(), "Phones");
+      el("dataLine").textContent = "Photos are files under " + d.photos.dir +
+        ", which a database dump does not include — copy that directory as well.";
+    }).catch(function () { el("dataStorage").hidden = true; });
+  };
+
+  el("btnCopyBackup").addEventListener("click", function () {
+    var text = el("backupCmd").textContent;
+    var done = function () { el("btnCopyBackup").textContent = "Copied"; 
+      setTimeout(function () { el("btnCopyBackup").textContent = "Copy that command"; }, 1600); };
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, function () {});
+    else done();
+  });
 
   // ---- the areas table ------------------------------------------------------
 

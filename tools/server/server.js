@@ -1472,6 +1472,59 @@ async function handle(req, res) {
     });
   }
 
+  /**
+   * Week-by-week activity, for the charts on Analytics. Bucketed in SQL from the epoch
+   * milliseconds the phone sends, so the weeks line up with everything else here.
+   */
+  if (route === "/api/admin/trends" && req.method === "GET") {
+    const weeks = Math.max(4, Math.min(52, Number(url.searchParams.get("weeks")) || 12));
+    const since = Date.now() - weeks * 7 * 86400000;
+
+    const [edgeRows, driveRows, byArea, byDriver] = await Promise.all([
+      pool.query(
+        `SELECT (driven_at / 604800000)::bigint AS wk, count(*)::int AS streets,
+                COALESCE(sum(length_m),0) AS meters
+           FROM driven_edges WHERE driven_at >= $1 GROUP BY wk ORDER BY wk`, [since]),
+      pool.query(
+        `SELECT (started_at / 604800000)::bigint AS wk, count(*)::int AS drives,
+                COALESCE(sum(distance_m),0) AS meters
+           FROM drives WHERE started_at >= $1 GROUP BY wk ORDER BY wk`, [since]),
+      pool.query(
+        `SELECT name, max(streets_done)::int AS done, max(streets_total)::int AS total
+           FROM reported_areas GROUP BY name
+          ORDER BY max(streets_done) DESC LIMIT 10`),
+      pool.query(
+        `SELECT u.name, count(e.*)::int AS streets, COALESCE(sum(e.length_m),0) AS meters
+           FROM driven_edges e JOIN users u ON u.id = e.user_id
+          WHERE e.driven_at >= $1
+          GROUP BY u.id, u.name ORDER BY count(e.*) DESC LIMIT 8`, [since]),
+    ]);
+
+    // Fill the gaps: a week with nothing in it is a real answer and the chart needs it.
+    const thisWeek = Math.floor(Date.now() / 604800000);
+    const edges = new Map(edgeRows.rows.map((r) => [String(r.wk), r]));
+    const drivesBy = new Map(driveRows.rows.map((r) => [String(r.wk), r]));
+    const series = [];
+    for (let w = thisWeek - weeks + 1; w <= thisWeek; w++) {
+      const e = edges.get(String(w)), d = drivesBy.get(String(w));
+      series.push({
+        weekStart: w * 604800000,
+        streets: e ? e.streets : 0,
+        streetMeters: e ? Number(e.meters) : 0,
+        drives: d ? d.drives : 0,
+        meters: d ? Number(d.meters) : 0,
+      });
+    }
+
+    return sendJson(res, 200, {
+      weeks, series,
+      byArea: byArea.rows.map((r) => ({ name: r.name, done: r.done, total: r.total })),
+      byDriver: byDriver.rows.map((r) => ({
+        name: r.name, streets: r.streets, meters: Number(r.meters),
+      })),
+    });
+  }
+
   /** The same, by vehicle rather than by person. */
   if (route === "/api/admin/vehicle-stats" && req.method === "GET") {
     const { rows } = await pool.query(
