@@ -240,6 +240,17 @@
   /* An area whose whole level is switched off cannot be turned on by itself. */
   .showrow.muted { opacity: .45; }
   .showrow.muted input { cursor: not-allowed; }
+  #showSearch { width: 100%; margin: 8px 0 6px; }
+  #showSort { width: auto; font-size: 11px; padding: 4px 8px; flex: 0 0 auto; }
+  .showrow.master { border-bottom: 1px solid var(--line); border-radius: 0; padding-bottom: 9px; }
+  .showrow .only {
+    flex: 0 0 auto; font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+    box-shadow: none; opacity: 0; transition: opacity .12s;
+  }
+  .showrow:hover .only, .showrow .only:focus-visible { opacity: 1; }
+  /* Touch has no hover, so the shortcut has to stay put there. */
+  @media (hover: none) { .showrow .only { opacity: 1; } }
+  mark { background: var(--accent-ring); color: inherit; border-radius: 3px; padding: 0 1px; }
 
   /* ---- map and the panel beside it --------------------------------------- */
   #stage { display: grid; grid-template-columns: 1fr 372px; min-height: 0; }
@@ -289,6 +300,13 @@
     .railbtn { font-size: 0; gap: 0; }
   }
   /* ---- shared pieces ------------------------------------------------------ */
+  /*
+   * A display: flex or grid rule beats the browser's own [hidden] { display: none },
+   * so anything laid out that way stays on screen when its .hidden is set. This has
+   * caught the draw panel and the menu's section headings already; make it global once.
+   */
+  [hidden] { display: none !important; }
+
   .eyebrow {
     font-size: 10px; text-transform: uppercase; letter-spacing: 0.10em;
     color: var(--ink-soft); font-weight: 700; margin: 0 0 9px;
@@ -488,14 +506,25 @@
       <div id="showPanel" hidden role="dialog" aria-label="Which areas are drawn">
         <div class="shead">
           <strong>Show on the map</strong>
-          <button type="button" id="showAllBtn">All</button>
-          <button type="button" id="showNoneBtn">None</button>
+          <select id="showSort" title="Order the list">
+            <option value="level">By level</option>
+            <option value="az">Name A–Z</option>
+            <option value="za">Name Z–A</option>
+          </select>
         </div>
-        <p class="eyebrow">By level</p>
+        <input type="search" id="showSearch" placeholder="Search areas…" autocomplete="off"
+               aria-label="Search the list">
+        <label class="showrow master">
+          <input type="checkbox" id="showMaster">
+          <span class="lbl"><strong id="showMasterLabel">Select all</strong></span>
+          <span class="n" id="showTally"></span>
+        </label>
+        <p class="eyebrow" id="showLevelHead">By level</p>
         <div id="showLevels"></div>
-        <p class="eyebrow">Areas</p>
+        <p class="eyebrow" id="showAreaHead">Areas</p>
         <div id="showAreas"></div>
         <p class="hint" id="showEmpty" hidden>No areas yet.</p>
+        <p class="hint" id="showNoMatch" hidden>Nothing matches that.</p>
       </div>
     </div>
     <div class="seg" id="basemap" role="group" aria-label="Base map">
@@ -1375,6 +1404,8 @@ window.StreetSweepBases = {
   var HIDE_KEY = "streetsweep.hidden";
   var hiddenLevels = {};
   var hiddenAreas = {};
+  var showQuery = "";          // what is typed in the panel's search box
+  var showSort = "level";      // level | az | za
 
   /** Stable across reloads once saved; a never-saved area falls back to its name. */
   function areaKey(a) { return a.serverId ? "id:" + a.serverId : "name:" + a.name; }
@@ -1384,13 +1415,14 @@ window.StreetSweepBases = {
       var raw = JSON.parse(localStorage.getItem(HIDE_KEY) || "{}");
       (raw.levels || []).forEach(function (l) { hiddenLevels[l] = true; });
       (raw.areas || []).forEach(function (k) { hiddenAreas[k] = true; });
+      if (raw.sort === "az" || raw.sort === "za" || raw.sort === "level") showSort = raw.sort;
     } catch (e) { /* a cleared or blocked store just means everything shows */ }
   }
 
   function saveHidden() {
     try {
       localStorage.setItem(HIDE_KEY, JSON.stringify({
-        levels: Object.keys(hiddenLevels), areas: Object.keys(hiddenAreas)
+        levels: Object.keys(hiddenLevels), areas: Object.keys(hiddenAreas), sort: showSort
       }));
     } catch (e) { /* private window: the choice simply will not outlive the tab */ }
   }
@@ -1430,14 +1462,54 @@ window.StreetSweepBases = {
       row.appendChild(sw);
     }
     var lbl = document.createElement("span");
-    lbl.className = "lbl"; lbl.textContent = opts.label;
+    lbl.className = "lbl";
+    lbl.innerHTML = highlight(opts.label, showQuery);
     row.appendChild(lbl);
     if (opts.note) {
       var n = document.createElement("span");
       n.className = "n"; n.textContent = opts.note;
       row.appendChild(n);
     }
+    if (opts.onOnly) {
+      var only = document.createElement("button");
+      only.type = "button"; only.className = "only"; only.textContent = "Only";
+      only.title = "Show this one and nothing else";
+      only.addEventListener("click", function (ev) {
+        // The row is a <label>, so a plain click here would also toggle its checkbox.
+        ev.preventDefault(); ev.stopPropagation();
+        opts.onOnly();
+      });
+      row.appendChild(only);
+    }
     return row;
+  }
+
+  /** The matched run of the name, marked, with everything escaped either way. */
+  function highlight(text, query) {
+    if (!query) return escapeHtml(text);
+    var at = text.toLowerCase().indexOf(query);
+    if (at < 0) return escapeHtml(text);
+    return escapeHtml(text.slice(0, at)) +
+      "<mark>" + escapeHtml(text.slice(at, at + query.length)) + "</mark>" +
+      escapeHtml(text.slice(at + query.length));
+  }
+
+  function matchesQuery(text) {
+    return !showQuery || String(text).toLowerCase().indexOf(showQuery) >= 0;
+  }
+
+  /** Areas in list order, after the search box and the sort picker have had their say. */
+  function listedAreas() {
+    var out = areas.filter(function (a) {
+      return matchesQuery(a.name) || matchesQuery(LEVELS[a.level]);
+    });
+    out.sort(function (x, y) {
+      if (showSort === "az") return x.name.localeCompare(y.name);
+      if (showSort === "za") return y.name.localeCompare(x.name);
+      // Biggest place first, then alphabetically inside each level.
+      return levelRank(y.level) - levelRank(x.level) || x.name.localeCompare(y.name);
+    });
+    return out;
   }
 
   function renderShowMenu() {
@@ -1446,12 +1518,19 @@ window.StreetSweepBases = {
     el("showEmpty").hidden = areas.length > 0;
 
     // Only levels actually in use, biggest first, the way the list reads.
-    LEVEL_ORDER.slice().reverse().forEach(function (level) {
+    var levels = LEVEL_ORDER.slice().reverse().filter(function (level) {
+      return areas.some(function (a) { return a.level === level; }) && matchesQuery(LEVELS[level]);
+    });
+    levels.forEach(function (level) {
       var mine = areas.filter(function (a) { return a.level === level; });
-      if (!mine.length) return;
       levelBox.appendChild(showRow({
         label: LEVELS[level], color: LEVEL_COLOR[level],
         note: String(mine.length), checked: !hiddenLevels[level],
+        onOnly: function () {
+          hiddenLevels = {}; hiddenAreas = {};
+          LEVEL_ORDER.forEach(function (l) { if (l !== level) hiddenLevels[l] = true; });
+          saveHidden(); applyVisibility(); renderShowMenu();
+        },
         onChange: function (ev) {
           if (ev.target.checked) delete hiddenLevels[level]; else hiddenLevels[level] = true;
           saveHidden(); applyVisibility(); renderShowMenu();
@@ -1459,26 +1538,80 @@ window.StreetSweepBases = {
       }));
     });
 
-    areas.forEach(function (a) {
+    var listed = listedAreas();
+    listed.forEach(function (a) {
       var offByLevel = !!hiddenLevels[a.level];
       areaBox.appendChild(showRow({
         label: a.name, color: a.color || LEVEL_COLOR[a.level],
         note: LEVELS[a.level], muted: offByLevel,
         checked: !offByLevel && !hiddenAreas[areaKey(a)],
+        onOnly: function () {
+          hiddenLevels = {}; hiddenAreas = {};
+          areas.forEach(function (other) {
+            if (other !== a) hiddenAreas[areaKey(other)] = true;
+          });
+          saveHidden(); applyVisibility(); renderShowMenu();
+        },
         onChange: function (ev) {
           if (ev.target.checked) delete hiddenAreas[areaKey(a)]; else hiddenAreas[areaKey(a)] = true;
           saveHidden(); applyVisibility(); renderShowMenu();
         }
       }));
     });
+
+    el("showLevelHead").hidden = levels.length === 0;
+    el("showAreaHead").hidden = listed.length === 0;
+    el("showNoMatch").hidden = !(areas.length > 0 && listed.length === 0 && levels.length === 0);
+
+    // The master reflects the rows you can actually see and act on, as Excel's does.
+    var actionable = listed.filter(function (a) { return !hiddenLevels[a.level]; });
+    var on = actionable.filter(function (a) { return !hiddenAreas[areaKey(a)]; }).length;
+    var master = el("showMaster");
+    master.disabled = actionable.length === 0;
+    master.checked = actionable.length > 0 && on === actionable.length;
+    master.indeterminate = on > 0 && on < actionable.length;
+    el("showMasterLabel").textContent = showQuery ? "Select all results" : "Select all";
+    el("showTally").textContent = showQuery
+      ? on + " of " + actionable.length + " matching"
+      : on + " of " + areas.length;
   }
+
+  el("showSearch").addEventListener("input", function () {
+    showQuery = el("showSearch").value.trim().toLowerCase();
+    renderShowMenu();
+  });
+  // Escape clears the box first and only closes the panel once it is empty.
+  el("showSearch").addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape" && el("showSearch").value) {
+      ev.stopPropagation();
+      el("showSearch").value = ""; showQuery = ""; renderShowMenu();
+    }
+  });
+  el("showSort").addEventListener("change", function () {
+    showSort = el("showSort").value;
+    saveHidden(); renderShowMenu();
+  });
+  el("showMaster").addEventListener("change", function (ev) {
+    var wanted = ev.target.checked;
+    listedAreas().forEach(function (a) {
+      if (hiddenLevels[a.level]) return;          // its level decides, not this
+      if (wanted) delete hiddenAreas[areaKey(a)]; else hiddenAreas[areaKey(a)] = true;
+    });
+    saveHidden(); applyVisibility(); renderShowMenu();
+  });
 
   el("showBtn").addEventListener("click", function (ev) {
     ev.stopPropagation();
     var panel = el("showPanel");
     panel.hidden = !panel.hidden;
     el("showBtn").setAttribute("aria-expanded", String(!panel.hidden));
-    if (!panel.hidden) renderShowMenu();
+    if (!panel.hidden) {
+      showQuery = "";
+      el("showSearch").value = "";
+      el("showSort").value = showSort;
+      renderShowMenu();
+      el("showSearch").focus();
+    }
   });
   el("showPanel").addEventListener("click", function (ev) { ev.stopPropagation(); });
   document.addEventListener("click", function () {
@@ -1492,14 +1625,6 @@ window.StreetSweepBases = {
       el("showBtn").setAttribute("aria-expanded", "false");
       el("showBtn").focus();
     }
-  });
-  el("showAllBtn").addEventListener("click", function () {
-    hiddenLevels = {}; hiddenAreas = {};
-    saveHidden(); applyVisibility(); renderShowMenu();
-  });
-  el("showNoneBtn").addEventListener("click", function () {
-    areas.forEach(function (a) { hiddenAreas[areaKey(a)] = true; });
-    saveHidden(); applyVisibility(); renderShowMenu();
   });
 
   function escapeHtml(s) {
