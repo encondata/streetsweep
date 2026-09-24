@@ -66,7 +66,7 @@ elif ! grep -q '^ADMIN_PASSWORD=' .env; then
 fi
 
 say "Pulling images"
-docker compose pull db minio
+docker compose pull db
 
 say "Building and starting"
 docker compose up -d --build
