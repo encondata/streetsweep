@@ -1339,7 +1339,31 @@ window.StreetSweepBases = {
     }
     var forward = walk(from, to);
     var backward = walk(to, from).slice().reverse();
-    return forward.length <= backward.length ? forward : backward;
+    // Shorter on the ground, not fewer corners. A wiggly lakeside edge between two
+    // points a street apart can carry hundreds of corners while the way round the far
+    // side of the neighbourhood is a handful of long straight runs, and counting corners
+    // picks that one: a mile of detour because it had less to say for itself.
+    return arcMetres(from.latlng, forward, to.latlng) <= arcMetres(from.latlng, backward, to.latlng)
+      ? forward
+      : backward;
+  }
+
+  /** How far it is from one point to another by way of a run of corners. */
+  function arcMetres(start, corners, end) {
+    var total = 0;
+    var at = start;
+    for (var i = 0; i < corners.length; i++) {
+      total += metresBetween(at, corners[i]);
+      at = corners[i];
+    }
+    return total + metresBetween(at, end);
+  }
+
+  function metresBetween(a, b) {
+    var k = Math.cos(a.lat * Math.PI / 180);
+    var dLat = (b.lat - a.lat) * 111320;
+    var dLng = (b.lng - a.lng) * 111320 * k;
+    return Math.sqrt(dLat * dLat + dLng * dLng);
   }
 
   map.on("click", function (ev) {
