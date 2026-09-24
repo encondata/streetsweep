@@ -798,6 +798,10 @@ function rowToVehicle(row) {
 }
 
 /** Routes anyone may reach without proving who they are. */
+// A picture of a face, already shrunk to 256px by the browser. Anything approaching
+// this is not a face, it is someone pushing.
+const AVATAR_MAX_BYTES = 1024 * 1024;
+
 const OPEN_ROUTES = new Set([
   "/api/config", "/api/health", "/api/auth/login", "/api/auth/device",
 ]);
@@ -805,6 +809,8 @@ const OPEN_ROUTES = new Set([
 /** Which right a route needs. Anything not listed here needs only "read". */
 function rightFor(route, method) {
   if (route === "/api/vehicles/mine") return "read";
+  if (route === "/api/auth/avatar") return "read";          // your own picture
+  if (/^\/api\/users\/\d+\/avatar$/.test(route)) return "read";
   if (route.startsWith("/api/admin/")) return "admin";
   if (route.startsWith("/api/users") || route.startsWith("/api/vehicles") ||
       route.startsWith("/api/devices")) return "admin";
@@ -916,6 +922,49 @@ async function handle(req, res) {
     }
     setCookie(res, "", 0, req);
     return sendJson(res, 200, { ok: true });
+  }
+
+  /**
+   * Your own picture. Sized down to 256px in the browser before it gets here, so this
+   * only has to guard the type and the size rather than decode anything.
+   */
+  if (route === "/api/auth/avatar" && (req.method === "POST" || req.method === "PUT")) {
+    if (!photos.on()) return sendJson(res, 503, { error: "Photo storage is not working on this server" });
+    const type = String(req.headers["content-type"] || "").split(";")[0].trim();
+    if (!PHOTO_TYPES.has(type)) return sendJson(res, 400, { error: "Send a JPEG, PNG or WebP" });
+    const bytes = await readBytes(req, AVATAR_MAX_BYTES);
+    if (!bytes.length) return sendJson(res, 400, { error: "That upload was empty" });
+    const key = "avatars/" + who.user.id + extensionFor(type);
+    await photos.put(key, bytes);
+    await pool.query("UPDATE users SET avatar_key=$1, updated_at=now() WHERE id=$2",
+      [key, who.user.id]);
+    return sendJson(res, 200, { ok: true, bytes: bytes.length });
+  }
+
+  if (route === "/api/auth/avatar" && req.method === "DELETE") {
+    const { rows } = await pool.query("SELECT avatar_key FROM users WHERE id=$1", [who.user.id]);
+    if (rows[0] && rows[0].avatar_key) await photos.remove(rows[0].avatar_key);
+    await pool.query("UPDATE users SET avatar_key=NULL, updated_at=now() WHERE id=$1", [who.user.id]);
+    return sendJson(res, 200, { ok: true });
+  }
+
+  // Anyone signed in may see anyone's picture: they are shown beside names all over
+  // the admin page, and they are not a secret from the people they work with.
+  const avatarMatch = route.match(/^\/api\/users\/(\d+)\/avatar$/);
+  if (avatarMatch && req.method === "GET") {
+    if (!photos.on()) return sendJson(res, 404, { error: "No picture" });
+    const { rows } = await pool.query("SELECT avatar_key FROM users WHERE id=$1", [Number(avatarMatch[1])]);
+    const key = rows[0] && rows[0].avatar_key;
+    if (!key) return sendJson(res, 404, { error: "No picture" });
+    const stat = await photos.stat(key);
+    if (!stat) return sendJson(res, 404, { error: "That picture is no longer in storage" });
+    res.writeHead(200, {
+      "Content-Type": stat.type,
+      "Content-Length": stat.size,
+      // It is keyed by user id, so the url never changes; the version query does.
+      "Cache-Control": "private, max-age=86400",
+    });
+    return photos.readStream(key).pipe(res);
   }
 
   if (route === "/api/auth/me" && req.method === "GET") {
@@ -1177,6 +1226,63 @@ async function handle(req, res) {
         movingMs: Number(r.moving_ms), lastDriveAt: Number(r.last_drive),
         streets: Number(r.streets), streetMeters: Number(r.street_meters),
       })),
+    });
+  }
+
+  /**
+   * The headline figures: today and this week, and who is ahead in each.
+   *
+   * The day boundary comes from the browser rather than being guessed here. A server in
+   * UTC deciding when "today" started would be several hours out for anyone driving in
+   * Texas, and "miles driven today" is exactly the number that has to agree with the
+   * person looking at it.
+   */
+  if (route === "/api/admin/metrics" && req.method === "GET") {
+    const now = Date.now();
+    const dayStart = Number(url.searchParams.get("dayStart")) || (now - 86400000);
+    const weekStart = Number(url.searchParams.get("weekStart")) || (now - 7 * 86400000);
+
+    async function window_(since) {
+      const [drives, edges, top] = await Promise.all([
+        pool.query(
+          `SELECT count(*)::int AS drives,
+                  COALESCE(sum(distance_m), 0) AS meters,
+                  COALESCE(sum(GREATEST(COALESCE(ended_at, started_at) - started_at - paused_ms, 0)), 0) AS moving_ms,
+                  count(DISTINCT user_id)::int AS drivers
+             FROM drives WHERE started_at >= $1`, [since]),
+        pool.query(
+          `SELECT count(*)::int AS streets, COALESCE(sum(length_m), 0) AS meters
+             FROM driven_edges WHERE driven_at >= $1`, [since]),
+        pool.query(
+          `SELECT u.name, COALESCE(sum(d.distance_m), 0) AS meters, count(*)::int AS drives
+             FROM drives d JOIN users u ON u.id = d.user_id
+            WHERE d.started_at >= $1
+            GROUP BY u.id, u.name
+            ORDER BY sum(d.distance_m) DESC NULLS LAST
+            LIMIT 1`, [since]),
+      ]);
+      const d = drives.rows[0], e = edges.rows[0], t = top.rows[0];
+      return {
+        drives: d.drives, meters: Number(d.meters), movingMs: Number(d.moving_ms),
+        drivers: d.drivers,
+        streets: e.streets, streetMeters: Number(e.meters),
+        top: t ? { name: t.name, meters: Number(t.meters), drives: t.drives } : null,
+      };
+    }
+
+    // How far through the areas everyone is, from the phones' own reports. Each area is
+    // counted once, at its furthest-along report, so two phones reporting the same
+    // neighbourhood do not double it.
+    const coverage = await pool.query(
+      `SELECT COALESCE(sum(done), 0)::int AS done, COALESCE(sum(total), 0)::int AS total
+         FROM (SELECT name, max(streets_done) AS done, max(streets_total) AS total
+                 FROM reported_areas GROUP BY name) a`);
+
+    const [today, week] = await Promise.all([window_(dayStart), window_(weekStart)]);
+    const c = coverage.rows[0];
+    return sendJson(res, 200, {
+      today, week,
+      coverage: { done: Number(c.done), total: Number(c.total) },
     });
   }
 

@@ -45,6 +45,8 @@ async function ensureSchema(pool) {
       -- the many accounts without one do not collide.
       google_sub    TEXT UNIQUE,
       active        BOOLEAN NOT NULL DEFAULT TRUE,
+      -- Where the picture lives in the photo store; null means show their initials.
+      avatar_key    TEXT,
       created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
     );
@@ -83,6 +85,10 @@ async function ensureSchema(pool) {
       revoked_at   TIMESTAMPTZ
     );
     CREATE INDEX IF NOT EXISTS device_tokens_user ON device_tokens (user_id);
+
+    -- Added after the first release, so it goes on separately rather than in the
+    -- CREATE above, which existing installations have already run.
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_key TEXT;
   `);
 }
 
@@ -248,6 +254,9 @@ function publicUser(row) {
     role: ROLES.includes(row.role) ? row.role : "driver",
     active: row.active !== false,
     hasPassword: Boolean(row.password_hash),
+    hasAvatar: Boolean(row.avatar_key),
+    // Changes whenever the row does, so a new picture is not hidden by a cached one.
+    avatarVersion: row.updated_at ? new Date(row.updated_at).getTime() : 0,
   };
 }
 

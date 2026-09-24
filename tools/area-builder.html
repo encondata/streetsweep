@@ -220,6 +220,30 @@
   @media (max-width: 820px)  { #topbar .theme-switch { display: none; } #topbar #showMenu { margin-left: auto; } }
 
   /* ---- admin ------------------------------------------------------------- */
+  /* The headline figures. Bigger than the counters below them on purpose: these are
+     the ones anyone opening this page came to read. */
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(178px, 1fr)); gap: 10px; }
+  .metric {
+    border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface);
+    padding: 14px 16px; min-width: 0; box-shadow: var(--shadow-1);
+  }
+  .metric .k {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--ink-soft); font-weight: 700; line-height: 1.8;
+  }
+  .metric .n {
+    font-size: 26px; font-weight: 800; letter-spacing: -.03em; line-height: 1.25;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .metric .sub { font-size: 11.5px; color: var(--ink-soft); line-height: 1.5; }
+  .metric.lead .n { color: var(--green-700); }
+  :root[data-theme="dark"] .metric.lead .n { color: var(--green-400); }
+  .metric .bar {
+    height: 6px; border-radius: 999px; background: var(--surface-2);
+    margin-top: 8px; overflow: hidden;
+  }
+  .metric .bar i { display: block; height: 100%; background: var(--grad-accent); }
+
   .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .grid3 .cell {
     border: 1px solid var(--line); border-radius: var(--r); background: var(--surface);
@@ -266,7 +290,9 @@
     display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%;
     background: var(--grad-accent); color: var(--accent-ink);
     font-size: 12px; font-weight: 700; letter-spacing: .02em; line-height: 1;
+    overflow: hidden; flex: 0 0 auto;
   }
+  .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .avatar.big { width: 42px; height: 42px; font-size: 15px; }
   /* ---- the account, as a modal -------------------------------------------- */
   #meModal { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; }
@@ -284,6 +310,10 @@
   #meCard .viewhead { margin-bottom: 14px; }
   #meCard h2 { margin: 0 0 4px; }
   #meCard .eyebrow { margin-top: 18px; }
+  #meCard .meacts { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
+  #meCard .meacts button { width: 100%; }
+  #meCard #pwForm { margin-top: 14px; }
+  #meCard #pwForm[hidden] { display: none; }
   #meClose {
     position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; padding: 0;
     border: none; background: none; box-shadow: none; border-radius: 50%;
@@ -387,6 +417,9 @@
     :root[data-view="admin"] #adminCols > * { min-width: 0; }
   }
   :root[data-view="admin"] .grid3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* Sections need air between them; they were running into one another. */
+  :root[data-view="admin"] .eyebrow { margin: 26px 0 11px; }
+  :root[data-view="admin"] #adminCols > div > .eyebrow:first-child { margin-top: 6px; }
   #mapwrap { position: relative; min-width: 0; }
   #map { position: absolute; inset: 0; }
   .leaflet-container { background: var(--ground); font-family: var(--ui); }
@@ -443,6 +476,9 @@
   .eyebrow {
     font-size: 10px; text-transform: uppercase; letter-spacing: 0.10em;
     color: var(--ink-soft); font-weight: 700; margin: 0 0 9px;
+    /* Capitals at 10px need more than the 11px line box "normal" gave them here; the
+       tops of the letters were being clipped. */
+    line-height: 1.8;
     display: flex; align-items: center; gap: 8px;
   }
   .eyebrow::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--line); }
@@ -630,7 +666,7 @@
     <button type="button" id="meClose" aria-label="Close">&times;</button>
       <div class="viewhead">
         <h2 id="meCardTitle">Your account</h2>
-        <p>Who this browser is signed in as, and the two things you can do about it.</p>
+        <p>Who this browser is signed in as.</p>
       </div>
 
       <div class="mehead">
@@ -642,8 +678,15 @@
         </div>
       </div>
 
-      <p class="eyebrow">Change your password</p>
-      <form id="pwForm">
+      <div class="meacts">
+        <button type="button" id="meAvatarPick">Change picture</button>
+        <button type="button" id="meAvatarClear" hidden>Use my initials instead</button>
+        <input type="file" id="meAvatarFile" accept="image/png,image/jpeg,image/webp" hidden>
+        <button type="button" id="mePassword">Change password</button>
+        <button type="button" id="meSignOut">Sign out of this browser</button>
+      </div>
+
+      <form id="pwForm" hidden>
         <div class="field">
           <label for="pwCurrent">Current password</label>
           <input type="password" id="pwCurrent" autocomplete="current-password">
@@ -652,16 +695,14 @@
           <label for="pwNext">New password</label>
           <input type="password" id="pwNext" autocomplete="new-password" placeholder="10 characters or more">
         </div>
-        <button type="submit" class="primary" style="width:100%">Change it</button>
+        <div class="row">
+          <button type="submit" class="primary" style="flex:1 1 auto">Change it</button>
+          <button type="button" id="pwCancel" style="flex:0 0 auto">Cancel</button>
+        </div>
+        <p class="hint">Knowing the current one is required even for an administrator: a
+          session left open on someone else&rsquo;s screen should not be enough to take the account.</p>
       </form>
       <p class="hint" id="meMsg" hidden></p>
-      <p class="hint">Knowing the current one is required even for an administrator: a
-        session left open on someone else&rsquo;s screen should not be enough to take the account.</p>
-
-      <p class="eyebrow">Sign out</p>
-      <button type="button" id="meSignOut" style="width:100%">Sign out of this browser</button>
-      <p class="hint">Other browsers and any phones stay signed in. To end those too, an
-        administrator can set your password again.</p>
   </div>
 </div>
 
@@ -902,6 +943,11 @@
           <h2>Admin</h2>
           <p>People, vehicles and phones, and how the server and everyone on it are doing.</p>
         </div>
+
+        <p class="eyebrow">Today</p>
+        <div id="mTodayGrid" class="metrics"></div>
+        <p class="eyebrow">This week</p>
+        <div id="mWeekGrid" class="metrics"></div>
 
         <div id="adminCols">
         <div>
@@ -1909,14 +1955,32 @@ window.StreetSweepBases = {
     return String(user.email || "?").slice(0, 2).toUpperCase();
   }
 
+  /**
+   * A picture if there is one, initials if there is not. The version query is what
+   * stops a newly uploaded picture hiding behind the cached old one.
+   */
+  function paintAvatar(node, user) {
+    if (user.hasAvatar) {
+      node.innerHTML = "";
+      var img = document.createElement("img");
+      img.alt = "";
+      img.src = "/api/users/" + user.id + "/avatar?v=" + (user.avatarVersion || 0);
+      // A picture that will not load should fall back rather than leave a hole.
+      img.addEventListener("error", function () { node.textContent = initialsFor(user); });
+      node.appendChild(img);
+    } else {
+      node.textContent = initialsFor(user);
+    }
+  }
+
   function paintMe(user) {
     me = user;
     // The Admin tab only exists for someone who can use it. The server refuses the
     // routes behind it regardless; this is so nobody is offered a locked door.
     el("railAdmin").hidden = user.role !== "admin";
-    var letters = initialsFor(user);
-    el("meAvatar").textContent = letters;
-    el("meAvatarBig").textContent = letters;
+    paintAvatar(el("meAvatar"), user);
+    paintAvatar(el("meAvatarBig"), user);
+    el("meAvatarClear").hidden = !user.hasAvatar;
     el("meName").textContent = user.name || user.email;
     el("meEmail").textContent = user.email;
     el("meEmail").title = user.email;
@@ -1949,15 +2013,103 @@ window.StreetSweepBases = {
   // view you were looking at to run it.
   function openMe() {
     el("meModal").hidden = false;
+    hidePassword();
     meSay("");
-    el("pwCurrent").focus();
+    el("mePassword").focus();
+  }
+
+  function hidePassword() {
+    el("pwForm").hidden = true;
+    el("pwCurrent").value = "";
+    el("pwNext").value = "";
   }
   function closeMe() {
     el("meModal").hidden = true;
-    el("pwCurrent").value = ""; el("pwNext").value = "";
+    hidePassword();
     meSay("");
     el("meBtn").focus();
   }
+  /**
+   * Squares and shrinks the picture here rather than on the server: the server has no
+   * image library, a phone camera file is several megabytes, and the thing is only ever
+   * drawn at 42px. Centre-cropped so a portrait does not come out squashed.
+   */
+  var AVATAR_PX = 256;
+  function squareOff(file) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        URL.revokeObjectURL(url);
+        var side = Math.min(img.width, img.height);
+        var canvas = document.createElement("canvas");
+        canvas.width = AVATAR_PX; canvas.height = AVATAR_PX;
+        var ctx = canvas.getContext("2d");
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(img,
+          (img.width - side) / 2, (img.height - side) / 2, side, side,
+          0, 0, AVATAR_PX, AVATAR_PX);
+        canvas.toBlob(function (blob) {
+          if (blob) resolve(blob); else reject(new Error("Could not read that image"));
+        }, "image/jpeg", 0.88);
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error("That file is not an image this browser can read"));
+      };
+      img.src = url;
+    });
+  }
+
+  el("meAvatarPick").addEventListener("click", function () { el("meAvatarFile").click(); });
+
+  el("meAvatarFile").addEventListener("change", function () {
+    var file = el("meAvatarFile").files && el("meAvatarFile").files[0];
+    el("meAvatarFile").value = "";
+    if (!file) return;
+    meSay("Preparing…");
+    squareOff(file)
+      .then(function (blob) {
+        return fetch("/api/auth/avatar", {
+          method: "POST",
+          headers: Object.assign({ "Content-Type": "image/jpeg" },
+            token ? { Authorization: "Bearer " + token } : {}),
+          body: blob,
+        }).then(function (r) {
+          if (!r.ok) return r.json().catch(function () { return {}; })
+            .then(function (j) { throw new Error(j.error || "Upload failed"); });
+        });
+      })
+      .then(function () { meSay("Picture updated."); return refreshMe(); })
+      .catch(function (err) { meSay(err.message || "Could not use that picture.", true); });
+  });
+
+  el("meAvatarClear").addEventListener("click", function () {
+    apiJson("/api/auth/avatar", "DELETE")
+      .then(function () { meSay("Back to your initials."); return refreshMe(); })
+      .catch(function (err) { meSay(err.message || "Could not remove it.", true); });
+  });
+
+  /** Re-reads the account so the header and the modal both redraw. */
+  function refreshMe() {
+    return apiJson("/api/auth/me").then(function (res) {
+      if (res && res.user) paintMe(res.user);
+    });
+  }
+
+  // Changing a password is something you came to do, not something to be presented
+  // with: the form stays behind its own button until it is asked for.
+  el("mePassword").addEventListener("click", function () {
+    var showing = !el("pwForm").hidden;
+    if (showing) { hidePassword(); meSay(""); return; }
+    el("pwForm").hidden = false;
+    meSay("");
+    el("pwCurrent").focus();
+  });
+  el("pwCancel").addEventListener("click", function () {
+    hidePassword(); meSay(""); el("mePassword").focus();
+  });
+
   el("meBtn").addEventListener("click", openMe);
   el("meClose").addEventListener("click", closeMe);
   el("meBackdrop").addEventListener("click", closeMe);
@@ -1983,7 +2135,7 @@ window.StreetSweepBases = {
     meSay("Changing…");
     apiJson("/api/auth/password", "POST", { current: current, password: next })
       .then(function () {
-        el("pwCurrent").value = ""; el("pwNext").value = "";
+        hidePassword();
         meSay("Password changed.");
       })
       .catch(function (err) { meSay(err && err.message ? err.message : "That did not work.", true); });
@@ -2019,6 +2171,51 @@ window.StreetSweepBases = {
   function cell(n, k) {
     return "<div class='cell'><div class='n'>" + escapeHtml(String(n)) +
            "</div><div class='k'>" + escapeHtml(k) + "</div></div>";
+  }
+
+  function metric(key, value, sub, opts) {
+    opts = opts || {};
+    return "<div class='metric" + (opts.lead ? " lead" : "") + "'>" +
+      "<div class='k'>" + escapeHtml(key) + "</div>" +
+      "<div class='n' title='" + escapeHtml(String(value)) + "'>" + escapeHtml(String(value)) + "</div>" +
+      (sub ? "<div class='sub'>" + escapeHtml(sub) + "</div>" : "") +
+      (opts.percent != null
+        ? "<div class='bar'><i style='width:" + Math.max(0, Math.min(100, opts.percent)) + "%'></i></div>"
+        : "") +
+      "</div>";
+  }
+
+  function periodCards(w, label) {
+    var lead = w.top && w.top.meters > 0
+      ? metric("Out in front", w.top.name,
+          fmtDistance(w.top.meters) + " over " + w.top.drives +
+          (w.top.drives === 1 ? " drive" : " drives"), { lead: true })
+      : metric("Out in front", "—", "Nobody has driven " + label);
+    return metric("Miles driven", fmtDistance(w.meters),
+             w.drives + (w.drives === 1 ? " drive" : " drives")) +
+           metric("Streets swept", w.streets.toLocaleString(),
+             w.streetMeters > 0 ? fmtDistance(w.streetMeters) + " of road" : "none yet") +
+           lead +
+           metric("Drivers out", String(w.drivers),
+             w.movingMs ? fmtDuration(w.movingMs) + " moving" : "no time recorded");
+  }
+
+  function loadMetrics() {
+    // The day and week start where the person looking at this lives, not where the
+    // server does: "today" has to agree with the person reading it.
+    var now = new Date();
+    var day = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    var week = day - ((now.getDay() + 6) % 7) * 86400000;   // Monday
+    return apiJson("/api/admin/metrics?dayStart=" + day + "&weekStart=" + week)
+      .then(function (d) {
+        el("mTodayGrid").innerHTML = periodCards(d.today, "today");
+        var pct = d.coverage.total ? Math.round((d.coverage.done / d.coverage.total) * 100) : 0;
+        el("mWeekGrid").innerHTML = periodCards(d.week, "this week") +
+          metric("Streets finished", pct + "%",
+            d.coverage.done.toLocaleString() + " of " +
+            d.coverage.total.toLocaleString() + " across every area",
+            { percent: pct });
+      });
   }
 
   function loadServer() {
@@ -2130,7 +2327,7 @@ window.StreetSweepBases = {
   function loadAdmin() {
     adminSay("");
     return Promise.all([
-      loadServer(), loadLeaderboard(), loadVehicleStats(),
+      loadMetrics(), loadServer(), loadLeaderboard(), loadVehicleStats(),
       loadUsers(), loadVehicles(), loadDevices(),
     ]).catch(function (err) { adminSay(err && err.message ? err.message : "Could not load.", true); });
   }
@@ -2139,7 +2336,7 @@ window.StreetSweepBases = {
 
   // Every visit refreshes the figures; the lists are only built the first time.
   window.__ssLoadAdmin = function () {
-    if (adminLoaded) { loadServer(); loadLeaderboard(); return; }
+    if (adminLoaded) { loadMetrics(); loadServer(); loadLeaderboard(); return; }
     adminLoaded = true;
     loadAdmin();
   };
