@@ -192,11 +192,15 @@
     display: flex; align-items: center; gap: 14px; padding: 0 16px;
     background: var(--surface); border-bottom: 1px solid var(--line);
   }
+  /* Everything from here sits against the right edge, with the account last. */
+  #topbar .theme-switch { margin-left: auto; }
   #topbar .word { height: 22px; width: auto; flex: 0 0 auto; }
   #topbar .word.on-dark { display: none; }
   :root[data-theme="dark"] #topbar .word.on-light { display: none; }
   :root[data-theme="dark"] #topbar .word.on-dark { display: block; }
-  #searchForm { flex: 1 1 auto; max-width: 420px; display: flex; gap: 8px; }
+  /* Takes the slack across the header, but never squeezed to nothing: below this it
+     is quicker to give up a control than to leave a search box you cannot type in. */
+  #searchForm { flex: 1 1 260px; min-width: 210px; max-width: 560px; display: flex; gap: 8px; }
   #searchForm input { flex: 1 1 auto; }
   .seg {
     display: flex; padding: 3px; gap: 2px; border-radius: 999px;
@@ -209,6 +213,11 @@
   .seg button:hover { color: var(--ink); background: var(--surface); box-shadow: none; transform: none; }
   .seg button[aria-pressed="true"] { background: var(--grad-accent); color: var(--accent-ink); box-shadow: var(--shadow-accent); }
   #citySelect { width: auto; min-width: 140px; flex: 0 0 auto; }
+  /* A narrow window cannot hold all of this. The city jump and the base-map choice
+     both have equivalents elsewhere on the page; the search and the account do not. */
+  @media (max-width: 1180px) { #topbar #citySelect { display: none; } }
+  @media (max-width: 1000px) { #topbar #basemap { display: none; } }
+  @media (max-width: 820px)  { #topbar .theme-switch { display: none; } #topbar #showMenu { margin-left: auto; } }
 
   /* ---- admin ------------------------------------------------------------- */
   .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
@@ -259,25 +268,14 @@
     font-size: 12px; font-weight: 700; letter-spacing: .02em; line-height: 1;
   }
   .avatar.big { width: 42px; height: 42px; font-size: 15px; }
-  #mePanel {
-    position: absolute; z-index: 900; top: calc(100% + 8px); right: 0; width: 272px;
-    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
-    box-shadow: var(--shadow-2); padding: 14px;
-  }
-  #mePanel .mehead { display: flex; align-items: center; gap: 11px; margin-bottom: 12px; }
-  #mePanel .who { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-  #mePanel .who strong { font-size: 13.5px; }
-  #mePanel .who span {
-    font-size: 11.5px; color: var(--ink-soft);
+  .mehead { display: flex; align-items: center; gap: 13px; margin-bottom: 4px; }
+  .mehead .who { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .mehead .who strong { font-size: 15px; }
+  .mehead .who span {
+    font-size: 12px; color: var(--ink-soft);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  #mePanel .who .role { text-transform: capitalize; color: var(--accent); font-weight: 700; }
-  #mePanel .meacts { display: flex; flex-direction: column; gap: 7px; }
-  #mePanel .meacts button { width: 100%; text-align: left; font-size: 12.5px; padding: 9px 11px; }
-  #mePanel .meacts button.danger { color: var(--danger); }
-  #mePanel .meacts button.danger:hover { border-color: var(--danger); }
-  #pwForm { margin-top: 11px; display: flex; flex-direction: column; gap: 8px; }
-  #pwForm[hidden] { display: none; }
+  .mehead .who .role { text-transform: capitalize; color: var(--accent); font-weight: 700; }
 
   /* Which outlines are drawn. Anchored to its button so it opens under it. */
   #showMenu { position: relative; flex: 0 0 auto; }
@@ -633,40 +631,14 @@
       <button type="button" data-base="satellite" aria-pressed="false">Satellite</button>
       <button type="button" data-base="hybrid" aria-pressed="false">Hybrid</button>
     </div>
-    <div id="meMenu">
-      <button type="button" id="meBtn" aria-expanded="false" aria-haspopup="dialog"
-              title="Your account">
-        <span class="avatar" id="meAvatar" aria-hidden="true">·</span>
-      </button>
-      <div id="mePanel" hidden role="dialog" aria-label="Your account">
-        <div class="mehead">
-          <span class="avatar big" id="meAvatarBig" aria-hidden="true">·</span>
-          <div class="who">
-            <strong id="meName">Signed in</strong>
-            <span id="meEmail"></span>
-            <span class="role" id="meRole"></span>
-          </div>
-        </div>
-        <div class="meacts">
-          <button type="button" id="mePassword">Change password</button>
-          <button type="button" id="meSignOut" class="danger">Sign out</button>
-        </div>
-        <form id="pwForm" hidden>
-          <input type="password" id="pwCurrent" placeholder="Current password" autocomplete="current-password">
-          <input type="password" id="pwNext" placeholder="New password, 10 characters or more" autocomplete="new-password">
-          <div class="row">
-            <button type="submit" class="primary" style="flex:1 1 auto">Change it</button>
-            <button type="button" id="pwCancel" style="flex:0 0 auto">Cancel</button>
-          </div>
-        </form>
-        <p class="hint" id="meMsg" hidden></p>
-      </div>
-    </div>
     <div class="theme-switch" role="group" aria-label="Colour theme">
       <button type="button" data-theme-set="system" title="Match the system" aria-label="Match the system" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8.4"/><path d="M12 3.6a8.4 8.4 0 0 1 0 16.8Z" fill="currentColor" stroke="none"/></svg></button>
       <button type="button" data-theme-set="light" title="Light" aria-label="Light" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.2v2.4M12 19.4v2.4M2.2 12h2.4M19.4 12h2.4M5 5l1.7 1.7M17.3 17.3 19 19M19 5l-1.7 1.7M6.7 17.3 5 19"/></svg></button>
       <button type="button" data-theme-set="dark" title="Dark" aria-label="Dark" aria-pressed="false"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.8 8.8 0 1 0 11.1 11.1Z"/></svg></button>
     </div>
+    <button type="button" id="meBtn" title="Your account" aria-label="Your account">
+      <span class="avatar" id="meAvatar" aria-hidden="true">·</span>
+    </button>
   </header>
 
   <div id="stage">
@@ -841,6 +813,43 @@
           <input type="file" id="fileInput" accept=".geojson,.json,application/geo+json,application/json" hidden>
           <p class="hint">Import also accepts the app's own coverage export, so you can see the streets you have already driven while deciding where an area should stop.</p>
         </div>
+      </section>
+
+      <section class="view" data-view="profile" hidden>
+        <div class="viewhead">
+          <h2>Your account</h2>
+          <p>Who this browser is signed in as, and the two things you can do about it.</p>
+        </div>
+
+        <div class="mehead">
+          <span class="avatar big" id="meAvatarBig" aria-hidden="true">·</span>
+          <div class="who">
+            <strong id="meName">Signed in</strong>
+            <span id="meEmail"></span>
+            <span class="role" id="meRole"></span>
+          </div>
+        </div>
+
+        <p class="eyebrow">Change your password</p>
+        <form id="pwForm">
+          <div class="field">
+            <label for="pwCurrent">Current password</label>
+            <input type="password" id="pwCurrent" autocomplete="current-password">
+          </div>
+          <div class="field">
+            <label for="pwNext">New password</label>
+            <input type="password" id="pwNext" autocomplete="new-password" placeholder="10 characters or more">
+          </div>
+          <button type="submit" class="primary" style="width:100%">Change it</button>
+        </form>
+        <p class="hint" id="meMsg" hidden></p>
+        <p class="hint">Knowing the current one is required even for an administrator: a
+          session left open on someone else&rsquo;s screen should not be enough to take the account.</p>
+
+        <p class="eyebrow">Sign out</p>
+        <button type="button" id="meSignOut" style="width:100%">Sign out of this browser</button>
+        <p class="hint">Other browsers and any phones stay signed in. To end those too, an
+          administrator can set your password again.</p>
       </section>
 
       <section class="view" data-view="admin" hidden>
@@ -1883,24 +1892,10 @@ window.StreetSweepBases = {
     p.style.color = bad ? "var(--danger)" : "var(--ink-soft)";
   }
 
-  function closeMe() {
-    el("mePanel").hidden = true;
-    el("meBtn").setAttribute("aria-expanded", "false");
-    el("pwForm").hidden = true;
+  // The avatar is a way in to the account page, not a menu of its own.
+  el("meBtn").addEventListener("click", function () {
+    window.StreetSweepViews.show("profile");
     meSay("");
-  }
-
-  el("meBtn").addEventListener("click", function (ev) {
-    ev.stopPropagation();
-    var panel = el("mePanel");
-    if (!panel.hidden) return closeMe();
-    panel.hidden = false;
-    el("meBtn").setAttribute("aria-expanded", "true");
-  });
-  el("mePanel").addEventListener("click", function (ev) { ev.stopPropagation(); });
-  document.addEventListener("click", function () { if (!el("mePanel").hidden) closeMe(); });
-  document.addEventListener("keydown", function (ev) {
-    if (ev.key === "Escape" && !el("mePanel").hidden) { closeMe(); el("meBtn").focus(); }
   });
 
   el("meSignOut").addEventListener("click", function () {
@@ -1914,14 +1909,6 @@ window.StreetSweepBases = {
       .then(function () { location.href = "/login"; });
   });
 
-  el("mePassword").addEventListener("click", function () {
-    el("pwForm").hidden = !el("pwForm").hidden;
-    meSay("");
-    if (!el("pwForm").hidden) el("pwCurrent").focus();
-  });
-  el("pwCancel").addEventListener("click", function () {
-    el("pwForm").hidden = true; el("pwCurrent").value = ""; el("pwNext").value = ""; meSay("");
-  });
   el("pwForm").addEventListener("submit", function (ev) {
     ev.preventDefault();
     var current = el("pwCurrent").value, next = el("pwNext").value;
@@ -1930,7 +1917,6 @@ window.StreetSweepBases = {
     apiJson("/api/auth/password", "POST", { current: current, password: next })
       .then(function () {
         el("pwCurrent").value = ""; el("pwNext").value = "";
-        el("pwForm").hidden = true;
         meSay("Password changed.");
       })
       .catch(function (err) { meSay(err && err.message ? err.message : "That did not work.", true); });
