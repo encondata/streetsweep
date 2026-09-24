@@ -268,6 +268,30 @@
     font-size: 12px; font-weight: 700; letter-spacing: .02em; line-height: 1;
   }
   .avatar.big { width: 42px; height: 42px; font-size: 15px; }
+  /* ---- the account, as a modal -------------------------------------------- */
+  #meModal { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; }
+  #meModal[hidden] { display: none !important; }
+  #meBackdrop {
+    position: absolute; inset: 0; background: rgba(2, 20, 42, .52);
+    -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  }
+  #meCard {
+    position: relative; width: min(440px, calc(100vw - 32px));
+    max-height: min(86vh, 760px); overflow-y: auto;
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
+    box-shadow: 0 24px 60px rgba(2,20,42,.34); padding: 22px 24px 26px;
+  }
+  #meCard .viewhead { margin-bottom: 14px; }
+  #meCard h2 { margin: 0 0 4px; }
+  #meCard .eyebrow { margin-top: 18px; }
+  #meClose {
+    position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; padding: 0;
+    border: none; background: none; box-shadow: none; border-radius: 50%;
+    font-size: 19px; line-height: 1; color: var(--ink-soft);
+    display: grid; place-items: center;
+  }
+  #meClose:hover { background: var(--surface-2); color: var(--ink); box-shadow: none; }
+
   .mehead { display: flex; align-items: center; gap: 13px; margin-bottom: 4px; }
   .mehead .who { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .mehead .who strong { font-size: 15px; }
@@ -346,6 +370,23 @@
 
   /* ---- map and the panel beside it --------------------------------------- */
   #stage { display: grid; grid-template-columns: 1fr 372px; min-height: 0; }
+
+  /* Admin has nothing to say about a map, so it does not sit next to one. */
+  :root[data-view="admin"] #stage { grid-template-columns: 1fr; }
+  :root[data-view="admin"] #mapwrap { display: none; }
+  :root[data-view="admin"] #side { border-left: none; padding: 22px 26px 40px; }
+  :root[data-view="admin"] .view[data-view="admin"] {
+    max-width: 1180px; margin: 0 auto;
+  }
+  /* Two columns once there is room: the figures on the left, the lists on the right. */
+  @media (min-width: 1100px) {
+    :root[data-view="admin"] #adminCols {
+      display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 0 34px; align-items: start;
+    }
+    :root[data-view="admin"] #adminCols > * { min-width: 0; }
+  }
+  :root[data-view="admin"] .grid3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   #mapwrap { position: relative; min-width: 0; }
   #map { position: absolute; inset: 0; }
   .leaflet-container { background: var(--ground); font-family: var(--ui); }
@@ -583,6 +624,47 @@
   </button>
 </aside>
 
+<div id="meModal" hidden>
+  <div id="meBackdrop"></div>
+  <div id="meCard" role="dialog" aria-modal="true" aria-labelledby="meCardTitle">
+    <button type="button" id="meClose" aria-label="Close">&times;</button>
+      <div class="viewhead">
+        <h2 id="meCardTitle">Your account</h2>
+        <p>Who this browser is signed in as, and the two things you can do about it.</p>
+      </div>
+
+      <div class="mehead">
+        <span class="avatar big" id="meAvatarBig" aria-hidden="true">·</span>
+        <div class="who">
+          <strong id="meName">Signed in</strong>
+          <span id="meEmail"></span>
+          <span class="role" id="meRole"></span>
+        </div>
+      </div>
+
+      <p class="eyebrow">Change your password</p>
+      <form id="pwForm">
+        <div class="field">
+          <label for="pwCurrent">Current password</label>
+          <input type="password" id="pwCurrent" autocomplete="current-password">
+        </div>
+        <div class="field">
+          <label for="pwNext">New password</label>
+          <input type="password" id="pwNext" autocomplete="new-password" placeholder="10 characters or more">
+        </div>
+        <button type="submit" class="primary" style="width:100%">Change it</button>
+      </form>
+      <p class="hint" id="meMsg" hidden></p>
+      <p class="hint">Knowing the current one is required even for an administrator: a
+        session left open on someone else&rsquo;s screen should not be enough to take the account.</p>
+
+      <p class="eyebrow">Sign out</p>
+      <button type="button" id="meSignOut" style="width:100%">Sign out of this browser</button>
+      <p class="hint">Other browsers and any phones stay signed in. To end those too, an
+        administrator can set your password again.</p>
+  </div>
+</div>
+
 <div id="shell">
   <header id="topbar">
     <img class="word on-light" src="/wordmark.png" srcset="/wordmark.png 1x, /wordmark@2x.png 2x" alt="StreetSweep" height="22">
@@ -815,49 +897,14 @@
         </div>
       </section>
 
-      <section class="view" data-view="profile" hidden>
-        <div class="viewhead">
-          <h2>Your account</h2>
-          <p>Who this browser is signed in as, and the two things you can do about it.</p>
-        </div>
-
-        <div class="mehead">
-          <span class="avatar big" id="meAvatarBig" aria-hidden="true">·</span>
-          <div class="who">
-            <strong id="meName">Signed in</strong>
-            <span id="meEmail"></span>
-            <span class="role" id="meRole"></span>
-          </div>
-        </div>
-
-        <p class="eyebrow">Change your password</p>
-        <form id="pwForm">
-          <div class="field">
-            <label for="pwCurrent">Current password</label>
-            <input type="password" id="pwCurrent" autocomplete="current-password">
-          </div>
-          <div class="field">
-            <label for="pwNext">New password</label>
-            <input type="password" id="pwNext" autocomplete="new-password" placeholder="10 characters or more">
-          </div>
-          <button type="submit" class="primary" style="width:100%">Change it</button>
-        </form>
-        <p class="hint" id="meMsg" hidden></p>
-        <p class="hint">Knowing the current one is required even for an administrator: a
-          session left open on someone else&rsquo;s screen should not be enough to take the account.</p>
-
-        <p class="eyebrow">Sign out</p>
-        <button type="button" id="meSignOut" style="width:100%">Sign out of this browser</button>
-        <p class="hint">Other browsers and any phones stay signed in. To end those too, an
-          administrator can set your password again.</p>
-      </section>
-
       <section class="view" data-view="admin" hidden>
         <div class="viewhead">
           <h2>Admin</h2>
           <p>People, vehicles and phones, and how the server and everyone on it are doing.</p>
         </div>
 
+        <div id="adminCols">
+        <div>
         <p class="eyebrow">This server</p>
         <div id="srvGrid" class="grid3"></div>
         <p class="hint" id="srvLine">Loading…</p>
@@ -878,6 +925,8 @@
         <ul id="vehBoard" class="board plain"></ul>
         <p class="hint" id="vehEmpty" hidden>No vehicle has a drive against it yet.</p>
 
+        </div>
+        <div>
         <p class="eyebrow">People</p>
         <ul id="userList" class="board plain"></ul>
         <button type="button" id="btnNewUser" class="primary" style="width:100%;margin-top:9px">Add someone</button>
@@ -903,6 +952,8 @@
         <p class="eyebrow">Phones</p>
         <ul id="devList" class="board plain"></ul>
         <p class="hint" id="devEmpty" hidden>No phone has signed in yet.</p>
+        </div>
+        </div>
         <p class="hint" id="adminMsg" hidden></p>
       </section>
 
@@ -936,6 +987,8 @@
 
   function show(name) {
     current = name;
+    // Admin is a dashboard, not a panel beside a map, so the layout reads this.
+    document.documentElement.setAttribute("data-view", name);
     Array.prototype.forEach.call(document.querySelectorAll("#side .view"), function (v) {
       v.hidden = v.getAttribute("data-view") !== name;
     });
@@ -1892,10 +1945,24 @@ window.StreetSweepBases = {
     p.style.color = bad ? "var(--danger)" : "var(--ink-soft)";
   }
 
-  // The avatar is a way in to the account page, not a menu of its own.
-  el("meBtn").addEventListener("click", function () {
-    window.StreetSweepViews.show("profile");
+  // The account is a modal: it is a short errand, and it should not cost you the
+  // view you were looking at to run it.
+  function openMe() {
+    el("meModal").hidden = false;
     meSay("");
+    el("pwCurrent").focus();
+  }
+  function closeMe() {
+    el("meModal").hidden = true;
+    el("pwCurrent").value = ""; el("pwNext").value = "";
+    meSay("");
+    el("meBtn").focus();
+  }
+  el("meBtn").addEventListener("click", openMe);
+  el("meClose").addEventListener("click", closeMe);
+  el("meBackdrop").addEventListener("click", closeMe);
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape" && !el("meModal").hidden) closeMe();
   });
 
   el("meSignOut").addEventListener("click", function () {
