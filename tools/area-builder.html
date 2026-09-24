@@ -160,7 +160,7 @@
     background: var(--ground);
     color: var(--ink);
     display: grid;
-    grid-template-columns: 68px 1fr;
+    grid-template-columns: 236px 1fr;
     height: 100%;
     overflow: hidden;
     -webkit-font-smoothing: antialiased;
@@ -170,21 +170,43 @@
   #rail {
     background: var(--rail);
     border-right: 1px solid var(--rail-line);
-    display: flex; flex-direction: column; align-items: center;
-    padding: 12px 0; gap: 4px;
+    display: flex; flex-direction: column;
+    padding: 14px 12px 12px; gap: 2px; overflow-y: auto;
   }
-  #rail .mark { width: 36px; height: 36px; margin-bottom: 14px; }
+  /* The brand, with what this is, at the head of the navigation. */
+  #railHead { display: flex; align-items: center; gap: 11px; padding: 4px 6px 16px; }
+  #railHead .mark { width: 38px; height: 38px; flex: 0 0 auto; }
+  #railHead .name { min-width: 0; line-height: 1.2; }
+  #railHead .name b {
+    display: block; font-size: 16px; letter-spacing: -.02em; color: var(--rail-ink-strong);
+  }
+  #railHead .name b i { font-style: normal; color: var(--green-400); }
+  #railHead .name span { font-size: 11px; color: var(--rail-ink); font-weight: 600; }
+  .railgroup {
+    font-size: 9.5px; text-transform: uppercase; letter-spacing: .1em; font-weight: 700;
+    color: var(--rail-ink); opacity: .65; padding: 14px 10px 6px; line-height: 1.8;
+  }
   .railbtn {
-    width: 52px; padding: 9px 0 7px; border: none; background: none; cursor: pointer;
-    border-radius: 12px; color: var(--rail-ink); display: grid; justify-items: center; gap: 3px;
-    font: 600 9px/1.1 var(--ui); letter-spacing: .02em; box-shadow: none;
+    width: 100%; padding: 9px 11px; border: none; background: none; cursor: pointer;
+    border-radius: 10px; color: var(--rail-ink);
+    display: flex; align-items: center; gap: 11px; text-align: left;
+    font: 600 13px/1.2 var(--ui); letter-spacing: 0; box-shadow: none;
     transition: background .15s, color .15s;
   }
-  .railbtn svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+  .railbtn svg { width: 19px; height: 19px; stroke: currentColor; fill: none; stroke-width: 1.8; flex: 0 0 auto; }
   .railbtn:hover { background: var(--rail-hover); color: var(--rail-ink-strong); box-shadow: none; transform: none; }
   .railbtn[aria-current="true"] { background: var(--grad-accent); color: var(--accent-ink); box-shadow: var(--shadow-accent); }
   .railbtn:focus-visible { outline: 3px solid var(--accent-ring); outline-offset: -2px; }
-  #rail .spacer { flex: 1 1 auto; }
+  #rail .spacer { flex: 1 1 auto; min-height: 10px; }
+  /* Narrow: back to icons only rather than a sidebar eating half the window. */
+  @media (max-width: 1080px) {
+    body { grid-template-columns: 64px 1fr; }
+    #rail { align-items: center; padding: 12px 6px; }
+    #railHead { padding: 4px 0 14px; justify-content: center; }
+    #railHead .name { display: none; }
+    .railgroup { display: none; }
+    .railbtn { width: 46px; justify-content: center; font-size: 0; gap: 0; padding: 11px 0; }
+  }
 
   /* ---- the bar across the top -------------------------------------------- */
   #shell { display: grid; grid-template-rows: 58px 1fr; min-width: 0; min-height: 0; }
@@ -284,7 +306,15 @@
 
   /* Your account, at the far right of the header. */
   #meMenu { position: relative; flex: 0 0 auto; }
-  #meBtn { padding: 3px; border-radius: 999px; box-shadow: none; line-height: 0; }
+  #meBtn {
+    padding: 3px 12px 3px 3px; border-radius: 999px; box-shadow: none; line-height: 0;
+    display: flex; align-items: center; gap: 9px; flex: 0 0 auto;
+  }
+  #meBtn .meWho { display: flex; flex-direction: column; gap: 1px; text-align: left; line-height: 1.25; }
+  #meBtn .meWho b { font-size: 12.5px; font-weight: 700; }
+  #meBtn .meWho span { font-size: 10.5px; color: var(--ink-soft); font-weight: 600; }
+  /* The name is the first thing to go when the bar runs out of room. */
+  @media (max-width: 1240px) { #meBtn .meWho { display: none; } #meBtn { padding: 3px; } }
   #meBtn:hover { border-color: var(--accent); }
   .avatar {
     display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%;
@@ -402,24 +432,99 @@
   #stage { display: grid; grid-template-columns: 1fr 372px; min-height: 0; }
 
   /* Admin has nothing to say about a map, so it does not sit next to one. */
-  :root[data-view="admin"] #stage { grid-template-columns: 1fr; }
-  :root[data-view="admin"] #mapwrap { display: none; }
-  :root[data-view="admin"] #side { border-left: none; padding: 22px 26px 40px; }
-  :root[data-view="admin"] .view[data-view="admin"] {
-    max-width: 1180px; margin: 0 auto;
+  /* Controls that only steer the map have no business on a dashboard. */
+  :root[data-view="admin"] #citySelect, :root[data-view="people"] #citySelect, :root[data-view="board"] #citySelect,
+  :root[data-view="admin"] #showMenu,   :root[data-view="people"] #showMenu,   :root[data-view="board"] #showMenu,
+  :root[data-view="admin"] #basemap,    :root[data-view="people"] #basemap,    :root[data-view="board"] #basemap {
+    display: none;
   }
-  /* Two columns once there is room: the figures on the left, the lists on the right. */
-  @media (min-width: 1100px) {
-    :root[data-view="admin"] #adminCols {
-      display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+
+  /* The three admin pages are dashboards, not panels beside a map. */
+  :root[data-view="admin"] #stage,
+  :root[data-view="people"] #stage,
+  :root[data-view="board"] #stage { grid-template-columns: 1fr; }
+  :root[data-view="admin"] #mapwrap,
+  :root[data-view="people"] #mapwrap,
+  :root[data-view="board"] #mapwrap { display: none; }
+  :root[data-view="admin"] #side,
+  :root[data-view="people"] #side,
+  :root[data-view="board"] #side { border-left: none; padding: 24px 28px 48px; }
+  :root[data-view="admin"] .view[data-view="admin"],
+  :root[data-view="people"] .view[data-view="people"],
+  :root[data-view="board"] .view[data-view="board"] { max-width: 1280px; margin: 0 auto; }
+
+  @media (min-width: 1120px) {
+    #dashCols, #peopleCols {
+      display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
       gap: 0 34px; align-items: start;
     }
-    :root[data-view="admin"] #adminCols > * { min-width: 0; }
+    #dashCols > *, #peopleCols > * { min-width: 0; }
   }
   :root[data-view="admin"] .grid3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  /* Sections need air between them; they were running into one another. */
-  :root[data-view="admin"] .eyebrow { margin: 26px 0 11px; }
-  :root[data-view="admin"] #adminCols > div > .eyebrow:first-child { margin-top: 6px; }
+  :root[data-view="admin"] .eyebrow,
+  :root[data-view="people"] .eyebrow,
+  :root[data-view="board"] .eyebrow { margin: 26px 0 11px; }
+  #dashCols > div > .eyebrow:first-child,
+  #peopleCols > div > .eyebrow:first-child { margin-top: 6px; }
+
+  /* ---- the figures across the top ---------------------------------------- */
+  .kpis {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(198px, 1fr));
+    gap: 12px; margin-bottom: 8px;
+  }
+  .kpi {
+    border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface);
+    padding: 14px 16px; display: flex; gap: 13px; align-items: flex-start;
+    box-shadow: var(--shadow-1); min-width: 0;
+  }
+  .kpi .ico {
+    width: 40px; height: 40px; border-radius: 12px; flex: 0 0 auto;
+    display: grid; place-items: center; background: var(--accent-soft);
+  }
+  .kpi .ico svg { width: 20px; height: 20px; stroke: var(--green-700); fill: none; stroke-width: 1.9; }
+  :root[data-theme="dark"] .kpi .ico { background: rgba(69,189,35,.14); }
+  :root[data-theme="dark"] .kpi .ico svg { stroke: var(--green-400); }
+  .kpi .body { min-width: 0; flex: 1 1 auto; }
+  .kpi .k {
+    font-size: 11px; color: var(--ink-soft); font-weight: 600; line-height: 1.7;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .kpi .n {
+    font-size: 25px; font-weight: 800; letter-spacing: -.03em; line-height: 1.22;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .kpi .sub { font-size: 11px; color: var(--ink-soft); line-height: 1.5; }
+  .trend {
+    display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 700;
+    padding: 1px 7px; border-radius: 999px; margin-left: 7px; vertical-align: 3px;
+  }
+  .trend.up { background: var(--accent-soft); color: var(--green-700); }
+  .trend.down { background: #fdecea; color: var(--danger); }
+  .trend.flat { background: var(--surface-2); color: var(--ink-soft); }
+  :root[data-theme="dark"] .trend.up { background: rgba(69,189,35,.16); color: var(--green-400); }
+  :root[data-theme="dark"] .trend.down { background: rgba(255,133,121,.14); color: #ff9c92; }
+
+  /* ---- completion ring ---------------------------------------------------- */
+  .donutcard { display: flex; align-items: center; gap: 20px; }
+  .donutcard svg { width: 132px; height: 132px; flex: 0 0 auto; }
+  .donutcard .mid { font-size: 24px; font-weight: 800; letter-spacing: -.03em; }
+  .donutkeys { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+  .donutkeys div { display: flex; align-items: center; gap: 9px; font-size: 12.5px; }
+  .donutkeys i { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+  .donutkeys b { font-weight: 700; }
+  .donutkeys span { color: var(--ink-soft); }
+
+  /* ---- activity feed ------------------------------------------------------ */
+  .feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .feed li {
+    display: flex; align-items: flex-start; gap: 11px;
+    padding: 10px 2px; border-bottom: 1px solid var(--line);
+  }
+  .feed li:last-child { border-bottom: none; }
+  .feed .what { flex: 1 1 auto; min-width: 0; font-size: 12.5px; line-height: 1.5; }
+  .feed .what b { font-weight: 700; }
+  .feed .what em { font-style: normal; color: var(--accent); font-weight: 700; }
+  .feed .when { font-size: 11px; color: var(--ink-soft); }
   #mapwrap { position: relative; min-width: 0; }
   #map { position: absolute; inset: 0; }
   .leaflet-container { background: var(--ground); font-family: var(--ui); }
@@ -463,7 +568,6 @@
     body { grid-template-columns: 56px 1fr; }
     #stage { grid-template-columns: 1fr; grid-template-rows: 44vh 1fr; }
     #side { border-left: none; border-top: 1px solid var(--line); }
-    .railbtn { font-size: 0; gap: 0; }
   }
   /* ---- shared pieces ------------------------------------------------------ */
   /*
@@ -632,7 +736,21 @@
 </head>
 <body>
 <aside id="rail">
-  <img class="mark" src="/logo-mark.png" alt="StreetSweep" width="36" height="36">
+  <div id="railHead">
+    <img class="mark" src="/logo-mark.png" alt="" width="38" height="38">
+    <span class="name"><b>Street<i>Sweep</i></b><span id="railRole">Signed in</span></span>
+  </div>
+  <div class="railgroup" id="railGroupAdmin" hidden>Overview</div>
+  <button class="railbtn" data-view="admin" id="railAdmin" hidden>
+    <svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/></svg>Dashboard
+  </button>
+  <button class="railbtn" data-view="people" id="railPeople" hidden>
+    <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.4"/><path d="M3 20c0-3.2 2.7-5.4 6-5.4s6 2.2 6 5.4"/><path d="M16 5.2a3.4 3.4 0 0 1 0 5.6M17.5 14.9c2 .8 3.5 2.6 3.5 5.1"/></svg>Users
+  </button>
+  <button class="railbtn" data-view="board" id="railBoard" hidden>
+    <svg viewBox="0 0 24 24"><path d="M5 20V11M12 20V5M19 20v-6"/><path d="M3 20h18"/></svg>Leaderboard
+  </button>
+  <div class="railgroup">Sweeping</div>
   <button class="railbtn" data-view="map" aria-current="true">
     <svg viewBox="0 0 24 24"><path d="M9 4 3 6.5v14L9 18l6 2.5 6-2.5v-14L15 6.5 9 4Z"/><path d="M9 4v14M15 6.5v14"/></svg>Map
   </button>
@@ -646,13 +764,10 @@
     <svg viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Z"/><circle cx="12" cy="10" r="2.6"/></svg>Places
   </button>
   <button class="railbtn" data-view="stats">
-    <svg viewBox="0 0 24 24"><path d="M5 19V11M12 19V5M19 19v-6"/></svg>Stats
+    <svg viewBox="0 0 24 24"><path d="M5 19V11M12 19V5M19 19v-6"/></svg>Analytics
   </button>
   <button class="railbtn" data-view="export">
-    <svg viewBox="0 0 24 24"><path d="M12 15V4"/><path d="m8 8 4-4 4 4"/><path d="M4 16v3h16v-3"/></svg>Export
-  </button>
-  <button class="railbtn" data-view="admin" id="railAdmin" hidden>
-    <svg viewBox="0 0 24 24"><path d="M12 3.2 4.5 6.4v5c0 4.4 3.1 8.5 7.5 9.6 4.4-1.1 7.5-5.2 7.5-9.6v-5Z"/><path d="m9.2 12.1 2 2 3.6-3.8"/></svg>Admin
+    <svg viewBox="0 0 24 24"><path d="M12 15V4"/><path d="m8 8 4-4 4 4"/><path d="M4 16v3h16v-3"/></svg>Data
   </button>
   <div class="spacer"></div>
   <button class="railbtn" data-view="settings">
@@ -761,6 +876,7 @@
     </div>
     <button type="button" id="meBtn" title="Your account" aria-label="Your account">
       <span class="avatar" id="meAvatar" aria-hidden="true">·</span>
+      <span class="meWho"><b id="meBtnName">Signed in</b><span id="meBtnRole"></span></span>
     </button>
   </header>
 
@@ -940,23 +1056,44 @@
 
       <section class="view" data-view="admin" hidden>
         <div class="viewhead">
-          <h2>Admin</h2>
-          <p>People, vehicles and phones, and how the server and everyone on it are doing.</p>
+          <h2>Dashboard</h2>
+          <p>How the sweeping is going, and how this server is holding up.</p>
         </div>
 
-        <p class="eyebrow">Today</p>
-        <div id="mTodayGrid" class="metrics"></div>
-        <p class="eyebrow">This week</p>
-        <div id="mWeekGrid" class="metrics"></div>
+        <div class="kpis" id="kpiRow"></div>
 
-        <div id="adminCols">
-        <div>
-        <p class="eyebrow">This server</p>
-        <div id="srvGrid" class="grid3"></div>
-        <p class="hint" id="srvLine">Loading…</p>
+        <div id="dashCols">
+          <div>
+            <p class="eyebrow">Overall completion</p>
+            <div class="card donutcard" id="donutCard"></div>
 
-        <p class="eyebrow">Who has driven most</p>
-        <div class="row" style="margin-bottom:8px">
+            <p class="eyebrow">Areas near completion</p>
+            <ul class="board plain" id="nearList"></ul>
+            <p class="hint" id="nearEmpty" hidden>No area has any streets reported yet.</p>
+
+            <p class="eyebrow">This server</p>
+            <div id="srvGrid" class="grid3"></div>
+            <p class="hint" id="srvLine">Loading…</p>
+          </div>
+          <div>
+            <p class="eyebrow">Recent activity</p>
+            <ul class="feed" id="activityFeed"></ul>
+            <p class="hint" id="actEmpty" hidden>Nothing has been recorded yet.</p>
+
+            <p class="eyebrow">Top drivers</p>
+            <ol class="board" id="topDrivers"></ol>
+            <p class="hint" id="topEmpty" hidden>Nobody has driven in this period.</p>
+          </div>
+        </div>
+        <p class="hint" id="adminMsg" hidden></p>
+      </section>
+
+      <section class="view" data-view="board" hidden>
+        <div class="viewhead">
+          <h2>Leaderboard</h2>
+          <p>Who has swept the most, and how far each vehicle has been driven.</p>
+        </div>
+        <div class="row" style="margin-bottom:10px">
           <select id="lbDays" title="Over what period">
             <option value="0">All time</option>
             <option value="7">Last 7 days</option>
@@ -964,43 +1101,51 @@
             <option value="90">Last 90 days</option>
           </select>
         </div>
+        <p class="eyebrow">Who has driven most</p>
         <ol id="leaderboard" class="board"></ol>
         <p class="hint" id="lbEmpty" hidden>Nobody has recorded a drive yet.</p>
 
         <p class="eyebrow">By vehicle</p>
         <ul id="vehBoard" class="board plain"></ul>
         <p class="hint" id="vehEmpty" hidden>No vehicle has a drive against it yet.</p>
+      </section>
 
+      <section class="view" data-view="people" hidden>
+        <div class="viewhead">
+          <h2>Users</h2>
+          <p>Who can sign in, what they may do, the vehicles they drive and the phones they carry.</p>
         </div>
-        <div>
-        <p class="eyebrow">People</p>
-        <ul id="userList" class="board plain"></ul>
-        <button type="button" id="btnNewUser" class="primary" style="width:100%;margin-top:9px">Add someone</button>
-        <form id="userForm" hidden>
-          <div class="field"><label for="uName">Name</label><input type="text" id="uName" placeholder="Jim Henderson"></div>
-          <div class="field"><label for="uEmail">Email</label><input type="text" id="uEmail" placeholder="jim@example.com"></div>
-          <div class="field"><label for="uRole">Role</label><select id="uRole"></select></div>
-          <div class="field"><label for="uPass">Password</label><input type="text" id="uPass" placeholder="at least 10 characters"></div>
-          <div class="row">
-            <button type="submit" class="primary" style="flex:1 1 auto">Create</button>
-            <button type="button" id="uCancel" style="flex:0 0 auto">Cancel</button>
+        <div id="peopleCols">
+          <div>
+            <p class="eyebrow">People</p>
+            <ul id="userList" class="board plain"></ul>
+            <button type="button" id="btnNewUser" class="primary" style="width:100%;margin-top:9px">Add someone</button>
+            <form id="userForm" hidden>
+              <div class="field"><label for="uName">Name</label><input type="text" id="uName" placeholder="Jim Henderson"></div>
+              <div class="field"><label for="uEmail">Email</label><input type="text" id="uEmail" placeholder="jim@example.com"></div>
+              <div class="field"><label for="uRole">Role</label><select id="uRole"></select></div>
+              <div class="field"><label for="uPass">Password</label><input type="text" id="uPass" placeholder="at least 10 characters"></div>
+              <div class="row">
+                <button type="submit" class="primary" style="flex:1 1 auto">Create</button>
+                <button type="button" id="uCancel" style="flex:0 0 auto">Cancel</button>
+              </div>
+            </form>
           </div>
-        </form>
+          <div>
+            <p class="eyebrow">Vehicles</p>
+            <ul id="vehList" class="board plain"></ul>
+            <form id="vehForm" class="row" style="margin-top:9px">
+              <input type="text" id="vName" placeholder="Truck 3" style="flex:2 1 120px">
+              <input type="text" id="vPlate" placeholder="Plate" style="flex:1 1 80px">
+              <button type="submit" class="primary" style="flex:0 0 auto">Add</button>
+            </form>
 
-        <p class="eyebrow">Vehicles</p>
-        <ul id="vehList" class="board plain"></ul>
-        <form id="vehForm" class="row" style="margin-top:9px">
-          <input type="text" id="vName" placeholder="Truck 3" style="flex:2 1 120px">
-          <input type="text" id="vPlate" placeholder="Plate" style="flex:1 1 80px">
-          <button type="submit" class="primary" style="flex:0 0 auto">Add</button>
-        </form>
-
-        <p class="eyebrow">Phones</p>
-        <ul id="devList" class="board plain"></ul>
-        <p class="hint" id="devEmpty" hidden>No phone has signed in yet.</p>
+            <p class="eyebrow">Phones</p>
+            <ul id="devList" class="board plain"></ul>
+            <p class="hint" id="devEmpty" hidden>No phone has signed in yet.</p>
+          </div>
         </div>
-        </div>
-        <p class="hint" id="adminMsg" hidden></p>
+        <p class="hint" id="peopleMsg" hidden></p>
       </section>
 
       <section class="view" data-view="settings" hidden>
@@ -1053,7 +1198,9 @@
       show(view);
       // Loaded when it is first looked at, not on every page load: none of it is
       // wanted by anyone who never opens this tab.
-      if (view === "admin" && window.__ssLoadAdmin) window.__ssLoadAdmin();
+      if ((view === "admin" || view === "people" || view === "board") && window.__ssLoadAdmin) {
+        window.__ssLoadAdmin(view);
+      }
     }
   });
 
@@ -1977,7 +2124,15 @@ window.StreetSweepBases = {
     me = user;
     // The Admin tab only exists for someone who can use it. The server refuses the
     // routes behind it regardless; this is so nobody is offered a locked door.
-    el("railAdmin").hidden = user.role !== "admin";
+    var isAdmin = user.role !== "admin" ? false : true;
+    ["railAdmin", "railPeople", "railBoard", "railGroupAdmin"].forEach(function (id) {
+      el(id).hidden = !isAdmin;
+    });
+    el("meBtnName").textContent = user.name || user.email;
+    el("meBtnRole").textContent = user.role === "admin" ? "Administrator"
+      : user.role.charAt(0).toUpperCase() + user.role.slice(1);
+    el("railRole").textContent = user.role === "admin" ? "Administrator"
+      : user.role.charAt(0).toUpperCase() + user.role.slice(1);
     paintAvatar(el("meAvatar"), user);
     paintAvatar(el("meAvatarBig"), user);
     el("meAvatarClear").hidden = !user.hasAvatar;
@@ -2145,6 +2300,9 @@ window.StreetSweepBases = {
 
   var ROLES = ["admin", "driver", "viewer"];
   var adminLoaded = false;
+  var peopleLoaded = false;
+  var boardLoaded = false;
+  var dashDays = 30;
 
   function bytes(n) {
     if (!n) return "0 B";
@@ -2162,7 +2320,7 @@ window.StreetSweepBases = {
   }
 
   function adminSay(text, bad) {
-    var p = el("adminMsg");
+    var p = el(window.StreetSweepViews.current() === "people" ? "peopleMsg" : "adminMsg");
     p.hidden = !text;
     p.textContent = text || "";
     p.className = bad ? "hint warn" : "hint";
@@ -2173,49 +2331,123 @@ window.StreetSweepBases = {
            "</div><div class='k'>" + escapeHtml(k) + "</div></div>";
   }
 
-  function metric(key, value, sub, opts) {
-    opts = opts || {};
-    return "<div class='metric" + (opts.lead ? " lead" : "") + "'>" +
+  /** "12%" with an arrow, or a flat dash when there is nothing to compare against. */
+  function trendChip(now, before) {
+    if (!before) {
+      return now ? "<span class='trend up'>new</span>" : "";
+    }
+    var pct = Math.round(((now - before) / before) * 100);
+    if (pct === 0) return "<span class='trend flat'>0%</span>";
+    var up = pct > 0;
+    return "<span class='trend " + (up ? "up" : "down") + "'>" +
+      (up ? "\u2191" : "\u2193") + " " + Math.abs(pct) + "%</span>";
+  }
+
+  function kpi(icon, key, value, sub, now, before) {
+    return "<div class='kpi'><div class='ico'>" + icon + "</div><div class='body'>" +
       "<div class='k'>" + escapeHtml(key) + "</div>" +
-      "<div class='n' title='" + escapeHtml(String(value)) + "'>" + escapeHtml(String(value)) + "</div>" +
-      (sub ? "<div class='sub'>" + escapeHtml(sub) + "</div>" : "") +
-      (opts.percent != null
-        ? "<div class='bar'><i style='width:" + Math.max(0, Math.min(100, opts.percent)) + "%'></i></div>"
-        : "") +
-      "</div>";
+      "<div class='n'>" + escapeHtml(String(value)) + trendChip(now, before) + "</div>" +
+      "<div class='sub'>" + escapeHtml(sub) + "</div></div></div>";
   }
 
-  function periodCards(w, label) {
-    var lead = w.top && w.top.meters > 0
-      ? metric("Out in front", w.top.name,
-          fmtDistance(w.top.meters) + " over " + w.top.drives +
-          (w.top.drives === 1 ? " drive" : " drives"), { lead: true })
-      : metric("Out in front", "—", "Nobody has driven " + label);
-    return metric("Miles driven", fmtDistance(w.meters),
-             w.drives + (w.drives === 1 ? " drive" : " drives")) +
-           metric("Streets swept", w.streets.toLocaleString(),
-             w.streetMeters > 0 ? fmtDistance(w.streetMeters) + " of road" : "none yet") +
-           lead +
-           metric("Drivers out", String(w.drivers),
-             w.movingMs ? fmtDuration(w.movingMs) + " moving" : "no time recorded");
+  var ICON = {
+    users: "<svg viewBox='0 0 24 24'><circle cx='9' cy='8' r='3.4'/><path d='M3 20c0-3.2 2.7-5.4 6-5.4s6 2.2 6 5.4'/><path d='M16 5.2a3.4 3.4 0 0 1 0 5.6'/></svg>",
+    street: "<svg viewBox='0 0 24 24'><path d='M7 3v18M17 3v18M12 4v3M12 10.5v3M12 17v3'/></svg>",
+    dist: "<svg viewBox='0 0 24 24'><path d='M4 17c3-6 6 4 9-2s4-6 7-8'/><circle cx='4' cy='17' r='2'/><circle cx='20' cy='7' r='2'/></svg>",
+    area: "<svg viewBox='0 0 24 24'><path d='M9 4 3 6.5v14L9 18l6 2.5 6-2.5v-14L15 6.5 9 4Z'/><path d='M9 4v14M15 6.5v14'/></svg>",
+    drive: "<svg viewBox='0 0 24 24'><path d='M5 16.5h14M6.5 16.5v2M17.5 16.5v2'/><path d='M6 16.5 7.6 10a2 2 0 0 1 1.9-1.4h5a2 2 0 0 1 1.9 1.4L18 16.5'/></svg>",
+  };
+
+  function ago(ms) {
+    var s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+    if (s < 90) return s + " sec ago";
+    var m = Math.round(s / 60);
+    if (m < 90) return m + " min ago";
+    var h = Math.round(m / 60);
+    if (h < 36) return h + " hour" + (h === 1 ? "" : "s") + " ago";
+    return Math.round(h / 24) + " days ago";
   }
 
-  function loadMetrics() {
-    // The day and week start where the person looking at this lives, not where the
-    // server does: "today" has to agree with the person reading it.
-    var now = new Date();
-    var day = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    var week = day - ((now.getDay() + 6) % 7) * 86400000;   // Monday
-    return apiJson("/api/admin/metrics?dayStart=" + day + "&weekStart=" + week)
-      .then(function (d) {
-        el("mTodayGrid").innerHTML = periodCards(d.today, "today");
-        var pct = d.coverage.total ? Math.round((d.coverage.done / d.coverage.total) * 100) : 0;
-        el("mWeekGrid").innerHTML = periodCards(d.week, "this week") +
-          metric("Streets finished", pct + "%",
-            d.coverage.done.toLocaleString() + " of " +
-            d.coverage.total.toLocaleString() + " across every area",
-            { percent: pct });
-      });
+  function avatarHtml(person, size) {
+    var style = size ? " style='width:" + size + "px;height:" + size + "px;font-size:" +
+      Math.round(size * 0.4) + "px'" : "";
+    if (person.hasAvatar) {
+      return "<span class='avatar'" + style + "><img alt='' src='/api/users/" + person.id +
+        "/avatar?v=" + (person.avatarVersion || 0) + "'></span>";
+    }
+    return "<span class='avatar'" + style + ">" + escapeHtml(initialsFor(person)) + "</span>";
+  }
+
+  function donut(pct) {
+    var r = 54, c = 2 * Math.PI * r;
+    return "<svg viewBox='0 0 132 132' aria-hidden='true'>" +
+      "<circle cx='66' cy='66' r='" + r + "' fill='none' stroke='var(--surface-2)' stroke-width='15'/>" +
+      "<circle cx='66' cy='66' r='" + r + "' fill='none' stroke='var(--green-500)' stroke-width='15'" +
+      " stroke-linecap='round' stroke-dasharray='" + c + "'" +
+      " stroke-dashoffset='" + (c * (1 - pct / 100)) + "'" +
+      " transform='rotate(-90 66 66)'/>" +
+      "<text class='mid' x='66' y='74' text-anchor='middle' fill='var(--ink)'>" + pct + "%</text></svg>";
+  }
+
+  function loadDashboard() {
+    var to = Date.now();
+    var from = to - dashDays * 86400000;
+    return apiJson("/api/admin/dashboard?from=" + from + "&to=" + to).then(function (d) {
+      var n = d.now, p = d.previous, cov = d.coverage;
+
+      el("kpiRow").innerHTML =
+        kpi(ICON.users, "Active drivers", n.activeUsers.toLocaleString(),
+            cov.areas + (cov.areas === 1 ? " area reported" : " areas reported"),
+            n.activeUsers, p.activeUsers) +
+        kpi(ICON.street, "Streets completed", n.streets.toLocaleString(),
+            cov.total.toLocaleString() + " streets in total", n.streets, p.streets) +
+        kpi(ICON.dist, "Distance driven", fmtDistance(n.meters),
+            "over " + n.drives.toLocaleString() + (n.drives === 1 ? " drive" : " drives"),
+            Math.round(n.meters), Math.round(p.meters)) +
+        kpi(ICON.area, "Areas finished", cov.finished.toLocaleString(),
+            "of " + cov.areas.toLocaleString() + " total", cov.finished, cov.finished) +
+        kpi(ICON.drive, "Drives", n.drives.toLocaleString(),
+            n.activeUsers + (n.activeUsers === 1 ? " driver active" : " drivers active"),
+            n.drives, p.drives);
+
+      var pct = cov.total ? Math.round((cov.done / cov.total) * 100) : 0;
+      el("donutCard").innerHTML = donut(pct) +
+        "<div class='donutkeys'>" +
+        "<div><i style='background:var(--green-500)'></i><b>" + cov.done.toLocaleString() +
+          "</b> <span>streets driven</span></div>" +
+        "<div><i style='background:var(--surface-2);border:1px solid var(--line-strong)'></i><b>" +
+          (cov.total - cov.done).toLocaleString() + "</b> <span>remaining</span></div>" +
+        "<div><i style='background:var(--navy-800)'></i><b>" + cov.total.toLocaleString() +
+          "</b> <span>streets in total</span></div></div>";
+
+      el("nearEmpty").hidden = d.areasNear.length > 0;
+      el("nearList").innerHTML = d.areasNear.map(function (a) {
+        var p2 = a.total ? Math.round((a.done / a.total) * 100) : 0;
+        return "<li><span class='main'><b>" + escapeHtml(a.name) + "</b>" +
+          "<span>" + a.done.toLocaleString() + " / " + a.total.toLocaleString() + " streets</span>" +
+          "<span class='bar' style='display:block;height:6px;border-radius:999px;background:var(--surface-2);margin-top:6px;overflow:hidden'>" +
+          "<i style='display:block;height:100%;width:" + p2 + "%;background:var(--grad-accent)'></i></span></span>" +
+          "<span class='fig'><b>" + p2 + "%</b></span></li>";
+      }).join("");
+
+      el("actEmpty").hidden = d.activity.length > 0;
+      el("activityFeed").innerHTML = d.activity.map(function (a) {
+        var what = a.kind === "finished"
+          ? "<b>" + escapeHtml(a.who.name) + "</b> finished <em>" + escapeHtml(a.area) +
+            "</em><br><span class='when'>" + escapeHtml(a.detail) + " · " + ago(a.at) + "</span>"
+          : "<b>" + escapeHtml(a.who.name) + "</b> drove " + fmtDistance(a.meters) +
+            "<br><span class='when'>" + (a.newStreets || 0) + " new streets · " + ago(a.at) + "</span>";
+        return "<li>" + avatarHtml(a.who, 34) + "<span class='what'>" + what + "</span></li>";
+      }).join("");
+
+      el("topEmpty").hidden = d.topDrivers.length > 0;
+      el("topDrivers").innerHTML = d.topDrivers.map(function (t, i) {
+        return "<li><span class='rank'>" + (i + 1) + "</span>" + avatarHtml(t, 30) +
+          "<span class='main'><b>" + escapeHtml(t.name) + "</b><span>" +
+          t.streets.toLocaleString() + " streets · " + fmtDistance(t.meters) + " driven</span></span>" +
+          "<span class='fig'><b>" + fmtDistance(t.streetMeters) + "</b><span>swept</span></span></li>";
+      }).join("");
+    });
   }
 
   function loadServer() {
@@ -2326,19 +2558,34 @@ window.StreetSweepBases = {
 
   function loadAdmin() {
     adminSay("");
-    return Promise.all([
-      loadMetrics(), loadServer(), loadLeaderboard(), loadVehicleStats(),
-      loadUsers(), loadVehicles(), loadDevices(),
-    ]).catch(function (err) { adminSay(err && err.message ? err.message : "Could not load.", true); });
+    return Promise.all([loadDashboard(), loadServer()])
+      .catch(function (err) { adminSay(err && err.message ? err.message : "Could not load.", true); });
+  }
+
+  function loadPeople() {
+    return Promise.all([loadUsers(), loadVehicles(), loadDevices()])
+      .catch(function (err) { adminSay(err && err.message ? err.message : "Could not load.", true); });
+  }
+
+  function loadBoard() {
+    return Promise.all([loadLeaderboard(), loadVehicleStats()])
+      .catch(function (err) { adminSay(err && err.message ? err.message : "Could not load.", true); });
   }
 
   el("lbDays").addEventListener("change", function () { loadLeaderboard(); });
 
   // Every visit refreshes the figures; the lists are only built the first time.
-  window.__ssLoadAdmin = function () {
-    if (adminLoaded) { loadMetrics(); loadServer(); loadLeaderboard(); return; }
+  window.__ssLoadAdmin = function (which) {
+    if (which === "people") {
+      if (peopleLoaded) return loadPeople();
+      peopleLoaded = true; return loadPeople();
+    }
+    if (which === "board") {
+      if (boardLoaded) return loadBoard();
+      boardLoaded = true; return loadBoard();
+    }
     adminLoaded = true;
-    loadAdmin();
+    return loadAdmin();
   };
 
   // ---- people ----

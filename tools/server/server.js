@@ -1286,6 +1286,111 @@ async function handle(req, res) {
     });
   }
 
+  /**
+   * Everything the dashboard shows, for a window, with the same window immediately
+   * before it for comparison. The arrows are real: they are this period against the
+   * last one of equal length, not a number anybody typed in.
+   */
+  if (route === "/api/admin/dashboard" && req.method === "GET") {
+    const to = Number(url.searchParams.get("to")) || Date.now();
+    const from = Number(url.searchParams.get("from")) || (to - 30 * 86400000);
+    const span = Math.max(1, to - from);
+    const prevFrom = from - span;
+
+    async function tally(a, b) {
+      const { rows } = await pool.query(
+        `SELECT
+           (SELECT count(DISTINCT user_id)::int FROM drives WHERE started_at >= $1 AND started_at < $2) AS active_users,
+           (SELECT count(*)::int FROM driven_edges WHERE driven_at >= $1 AND driven_at < $2) AS streets,
+           (SELECT COALESCE(sum(distance_m), 0) FROM drives WHERE started_at >= $1 AND started_at < $2) AS meters,
+           (SELECT count(*)::int FROM drives WHERE started_at >= $1 AND started_at < $2) AS drives`,
+        [a, b]);
+      const r = rows[0];
+      return {
+        activeUsers: r.active_users, streets: r.streets,
+        meters: Number(r.meters), drives: r.drives,
+      };
+    }
+
+    // One row per area, at its furthest-along report, so two phones reporting the same
+    // neighbourhood are not counted twice.
+    const best = `SELECT name, max(streets_done) AS done, max(streets_total) AS total
+                    FROM reported_areas GROUP BY name`;
+
+    const [now_, prev, coverage, areasList, top, drivesFeed, doneFeed] = await Promise.all([
+      tally(from, to),
+      tally(prevFrom, from),
+      pool.query(`SELECT COALESCE(sum(done),0)::int AS done, COALESCE(sum(total),0)::int AS total,
+                         count(*)::int AS areas,
+                         count(*) FILTER (WHERE total > 0 AND done >= total)::int AS finished
+                    FROM (${best}) a`),
+      pool.query(`SELECT name, done, total FROM (${best}) a
+                   WHERE total > 0 AND done < total
+                   ORDER BY (done::float / total) DESC LIMIT 6`),
+      pool.query(
+        `SELECT u.id, u.name, u.avatar_key IS NOT NULL AS has_avatar, u.updated_at,
+                COALESCE(e.streets,0)::int AS streets, COALESCE(e.meters,0) AS street_meters,
+                COALESCE(d.meters,0) AS meters
+           FROM users u
+           LEFT JOIN (SELECT user_id, count(*) AS streets, sum(length_m) AS meters
+                        FROM driven_edges WHERE driven_at >= $1 AND driven_at < $2
+                       GROUP BY user_id) e ON e.user_id = u.id
+           LEFT JOIN (SELECT user_id, sum(distance_m) AS meters
+                        FROM drives WHERE started_at >= $1 AND started_at < $2
+                       GROUP BY user_id) d ON d.user_id = u.id
+          WHERE COALESCE(e.streets,0) > 0 OR COALESCE(d.meters,0) > 0
+          ORDER BY COALESCE(e.streets,0) DESC, COALESCE(d.meters,0) DESC
+          LIMIT 5`, [from, to]),
+      pool.query(
+        `SELECT d.started_at, d.distance_m, d.new_segments, u.id AS user_id, u.name,
+                u.avatar_key IS NOT NULL AS has_avatar, u.updated_at
+           FROM drives d JOIN users u ON u.id = d.user_id
+          ORDER BY d.started_at DESC LIMIT 8`),
+      pool.query(
+        `SELECT r.name, r.streets_done, r.streets_total, r.reported_at,
+                u.id AS user_id, u.name AS user_name,
+                u.avatar_key IS NOT NULL AS has_avatar, u.updated_at
+           FROM reported_areas r JOIN users u ON u.id = r.user_id
+          WHERE r.streets_total > 0 AND r.streets_done >= r.streets_total
+          ORDER BY r.reported_at DESC LIMIT 5`),
+    ]);
+
+    const c = coverage.rows[0];
+    function person(r) {
+      return {
+        id: Number(r.user_id != null ? r.user_id : r.id), name: r.name || r.user_name,
+        hasAvatar: r.has_avatar,
+        avatarVersion: r.updated_at ? new Date(r.updated_at).getTime() : 0,
+      };
+    }
+
+    return sendJson(res, 200, {
+      from, to,
+      now: now_, previous: prev,
+      coverage: {
+        done: Number(c.done), total: Number(c.total),
+        areas: c.areas, finished: c.finished,
+      },
+      topDrivers: top.rows.map((r) => Object.assign(person(r), {
+        streets: r.streets, streetMeters: Number(r.street_meters), meters: Number(r.meters),
+      })),
+      areasNear: areasList.rows.map((r) => ({
+        name: r.name, done: Number(r.done), total: Number(r.total),
+      })),
+      activity: [
+        ...doneFeed.rows.map((r) => ({
+          kind: "finished", at: new Date(r.reported_at).getTime(),
+          who: person(r), area: r.name,
+          detail: Number(r.streets_done).toLocaleString() + " streets",
+        })),
+        ...drivesFeed.rows.map((r) => ({
+          kind: "drove", at: Number(r.started_at), who: person(r),
+          meters: Number(r.distance_m), newStreets: r.new_segments,
+        })),
+      ].sort((x, y) => y.at - x.at).slice(0, 8),
+    });
+  }
+
   /** The same, by vehicle rather than by person. */
   if (route === "/api/admin/vehicle-stats" && req.method === "GET") {
     const { rows } = await pool.query(
