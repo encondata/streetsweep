@@ -210,6 +210,37 @@
   .seg button[aria-pressed="true"] { background: var(--grad-accent); color: var(--accent-ink); box-shadow: var(--shadow-accent); }
   #citySelect { width: auto; min-width: 140px; flex: 0 0 auto; }
 
+  /* Which outlines are drawn. Anchored to its button so it opens under it. */
+  #showMenu { position: relative; flex: 0 0 auto; }
+  #showBtn { display: flex; align-items: center; gap: 7px; padding: 8px 12px; }
+  #showBtn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+  #showBtn .badge {
+    font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px;
+    background: var(--grad-accent); color: var(--accent-ink);
+  }
+  #showPanel {
+    position: absolute; z-index: 900; top: calc(100% + 8px); right: 0; width: 290px;
+    max-height: min(60vh, 460px); overflow-y: auto;
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+    box-shadow: var(--shadow-2); padding: 12px 14px 14px;
+  }
+  #showPanel .shead { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  #showPanel .shead strong { font-size: 13px; flex: 1 1 auto; }
+  #showPanel .shead button { padding: 4px 9px; font-size: 11px; box-shadow: none; }
+  #showPanel .eyebrow { margin-top: 12px; }
+  .showrow {
+    display: flex; align-items: center; gap: 9px; padding: 6px 4px; border-radius: 8px;
+    font-size: 12.5px; cursor: pointer; user-select: none;
+  }
+  .showrow:hover { background: var(--surface-2); }
+  .showrow input { flex: 0 0 auto; width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+  .showrow .swatch { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
+  .showrow .lbl { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .showrow .n { font-size: 11px; color: var(--ink-soft); flex: 0 0 auto; }
+  /* An area whose whole level is switched off cannot be turned on by itself. */
+  .showrow.muted { opacity: .45; }
+  .showrow.muted input { cursor: not-allowed; }
+
   /* ---- map and the panel beside it --------------------------------------- */
   #stage { display: grid; grid-template-columns: 1fr 372px; min-height: 0; }
   #mapwrap { position: relative; min-width: 0; }
@@ -448,6 +479,25 @@
       <button type="submit" style="flex:0 0 auto">Go</button>
     </form>
     <select id="citySelect" title="Jump to a city"><option value="">All cities</option></select>
+    <div id="showMenu">
+      <button type="button" id="showBtn" aria-expanded="false" aria-haspopup="dialog"
+              title="Choose which area outlines are drawn">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+        Shown<span class="badge" id="showBadge" hidden></span>
+      </button>
+      <div id="showPanel" hidden role="dialog" aria-label="Which areas are drawn">
+        <div class="shead">
+          <strong>Show on the map</strong>
+          <button type="button" id="showAllBtn">All</button>
+          <button type="button" id="showNoneBtn">None</button>
+        </div>
+        <p class="eyebrow">By level</p>
+        <div id="showLevels"></div>
+        <p class="eyebrow">Areas</p>
+        <div id="showAreas"></div>
+        <p class="hint" id="showEmpty" hidden>No areas yet.</p>
+      </div>
+    </div>
     <div class="seg" id="basemap" role="group" aria-label="Base map">
       <button type="button" data-base="standard" aria-pressed="true">Map</button>
       <button type="button" data-base="satellite" aria-pressed="false">Satellite</button>
@@ -1129,6 +1179,9 @@ window.StreetSweepBases = {
     selectedId = id;
     var area = byId(id);
     if (!area) { clearHandles(); el("editor").hidden = true; renderList(); return; }
+    if (!areaShown(area)) {
+      status(area.name + " is switched off under Shown, so it is not on the map.", "warn");
+    }
     drawHandles(area);
     showEditor(area);
     renderList();
@@ -1305,7 +1358,149 @@ window.StreetSweepBases = {
       list.appendChild(li);
     });
     el("emptyNote").hidden = areas.length > 0;
+    applyVisibility();
+    if (!el("showPanel").hidden) renderShowMenu();
   }
+
+  // ---- which outlines are drawn ------------------------------------------
+
+  /**
+   * Two switches, and an area is drawn only when both are on: its level, and itself.
+   * Hiding a level does not forget which individual areas were hidden under it, so
+   * turning the level back on restores exactly what was showing before.
+   *
+   * Kept per browser rather than on the server: this is about what one person wants to
+   * look at right now, not a property of the area that should follow it to the phone.
+   */
+  var HIDE_KEY = "streetsweep.hidden";
+  var hiddenLevels = {};
+  var hiddenAreas = {};
+
+  /** Stable across reloads once saved; a never-saved area falls back to its name. */
+  function areaKey(a) { return a.serverId ? "id:" + a.serverId : "name:" + a.name; }
+
+  function loadHidden() {
+    try {
+      var raw = JSON.parse(localStorage.getItem(HIDE_KEY) || "{}");
+      (raw.levels || []).forEach(function (l) { hiddenLevels[l] = true; });
+      (raw.areas || []).forEach(function (k) { hiddenAreas[k] = true; });
+    } catch (e) { /* a cleared or blocked store just means everything shows */ }
+  }
+
+  function saveHidden() {
+    try {
+      localStorage.setItem(HIDE_KEY, JSON.stringify({
+        levels: Object.keys(hiddenLevels), areas: Object.keys(hiddenAreas)
+      }));
+    } catch (e) { /* private window: the choice simply will not outlive the tab */ }
+  }
+
+  loadHidden();
+
+  function areaShown(a) { return !hiddenLevels[a.level] && !hiddenAreas[areaKey(a)]; }
+
+  function applyVisibility() {
+    areas.forEach(function (a) {
+      var on = areaShown(a), has = areaLayer.hasLayer(a.poly);
+      if (on && !has) areaLayer.addLayer(a.poly);
+      else if (!on && has) areaLayer.removeLayer(a.poly);
+    });
+    // Corner handles belong to an outline that is actually on the map, and only in the
+    // Areas view — applyVisibility runs everywhere, so it must not conjure them elsewhere.
+    var sel = byId(selectedId);
+    if (sel && !areaShown(sel)) clearHandles();
+    else if (sel && !drawing && window.StreetSweepViews.current() === "areas") drawHandles(sel);
+    var hidden = areas.filter(function (a) { return !areaShown(a); }).length;
+    el("showBadge").hidden = hidden === 0;
+    el("showBadge").textContent = hidden + " hidden";
+  }
+
+  function showRow(opts) {
+    var row = document.createElement("label");
+    row.className = "showrow" + (opts.muted ? " muted" : "");
+    var box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = opts.checked;
+    box.disabled = !!opts.muted;
+    box.addEventListener("change", opts.onChange);
+    row.appendChild(box);
+    if (opts.color) {
+      var sw = document.createElement("span");
+      sw.className = "swatch"; sw.style.background = opts.color;
+      row.appendChild(sw);
+    }
+    var lbl = document.createElement("span");
+    lbl.className = "lbl"; lbl.textContent = opts.label;
+    row.appendChild(lbl);
+    if (opts.note) {
+      var n = document.createElement("span");
+      n.className = "n"; n.textContent = opts.note;
+      row.appendChild(n);
+    }
+    return row;
+  }
+
+  function renderShowMenu() {
+    var levelBox = el("showLevels"), areaBox = el("showAreas");
+    levelBox.innerHTML = ""; areaBox.innerHTML = "";
+    el("showEmpty").hidden = areas.length > 0;
+
+    // Only levels actually in use, biggest first, the way the list reads.
+    LEVEL_ORDER.slice().reverse().forEach(function (level) {
+      var mine = areas.filter(function (a) { return a.level === level; });
+      if (!mine.length) return;
+      levelBox.appendChild(showRow({
+        label: LEVELS[level], color: LEVEL_COLOR[level],
+        note: String(mine.length), checked: !hiddenLevels[level],
+        onChange: function (ev) {
+          if (ev.target.checked) delete hiddenLevels[level]; else hiddenLevels[level] = true;
+          saveHidden(); applyVisibility(); renderShowMenu();
+        }
+      }));
+    });
+
+    areas.forEach(function (a) {
+      var offByLevel = !!hiddenLevels[a.level];
+      areaBox.appendChild(showRow({
+        label: a.name, color: a.color || LEVEL_COLOR[a.level],
+        note: LEVELS[a.level], muted: offByLevel,
+        checked: !offByLevel && !hiddenAreas[areaKey(a)],
+        onChange: function (ev) {
+          if (ev.target.checked) delete hiddenAreas[areaKey(a)]; else hiddenAreas[areaKey(a)] = true;
+          saveHidden(); applyVisibility(); renderShowMenu();
+        }
+      }));
+    });
+  }
+
+  el("showBtn").addEventListener("click", function (ev) {
+    ev.stopPropagation();
+    var panel = el("showPanel");
+    panel.hidden = !panel.hidden;
+    el("showBtn").setAttribute("aria-expanded", String(!panel.hidden));
+    if (!panel.hidden) renderShowMenu();
+  });
+  el("showPanel").addEventListener("click", function (ev) { ev.stopPropagation(); });
+  document.addEventListener("click", function () {
+    if (el("showPanel").hidden) return;
+    el("showPanel").hidden = true;
+    el("showBtn").setAttribute("aria-expanded", "false");
+  });
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape" && !el("showPanel").hidden) {
+      el("showPanel").hidden = true;
+      el("showBtn").setAttribute("aria-expanded", "false");
+      el("showBtn").focus();
+    }
+  });
+  el("showAllBtn").addEventListener("click", function () {
+    hiddenLevels = {}; hiddenAreas = {};
+    saveHidden(); applyVisibility(); renderShowMenu();
+  });
+  el("showNoneBtn").addEventListener("click", function () {
+    areas.forEach(function (a) { hiddenAreas[areaKey(a)] = true; });
+    saveHidden(); applyVisibility(); renderShowMenu();
+  });
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, function (c) {
