@@ -145,6 +145,67 @@ async function ensureSchema() {
   `);
 }
 
+/**
+ * Who each drive, segment and marked place belongs to.
+ *
+ * Runs after the accounts schema, because everything here points at users(id), and after
+ * the first administrator exists, because that is who the rows already in the database
+ * are backfilled to: they arrived over the one shared token, and that token is now that
+ * account.
+ *
+ * The keys matter more than the columns. "drives" was keyed by started_at alone and
+ * "reported_areas" by name alone, which quietly assumed one phone: a second driver
+ * starting in the same millisecond, or reporting an area of the same name, would
+ * overwrite the first. Both keys grow to include the person.
+ */
+async function ensureAttribution() {
+  const { rows } = await pool.query("SELECT id FROM users ORDER BY id LIMIT 1");
+  const first = rows[0] ? rows[0].id : null;
+  if (!first) return;                      // no accounts yet; nothing to point at
+
+  await pool.query(`
+    ALTER TABLE drives         ADD COLUMN IF NOT EXISTS user_id    BIGINT REFERENCES users(id) ON DELETE CASCADE;
+    ALTER TABLE drives         ADD COLUMN IF NOT EXISTS vehicle_id BIGINT REFERENCES vehicles(id) ON DELETE SET NULL;
+    ALTER TABLE driven_edges   ADD COLUMN IF NOT EXISTS user_id    BIGINT REFERENCES users(id) ON DELETE SET NULL;
+    ALTER TABLE driven_edges   ADD COLUMN IF NOT EXISTS vehicle_id BIGINT REFERENCES vehicles(id) ON DELETE SET NULL;
+    ALTER TABLE pois           ADD COLUMN IF NOT EXISTS user_id    BIGINT REFERENCES users(id) ON DELETE SET NULL;
+    ALTER TABLE reported_areas ADD COLUMN IF NOT EXISTS user_id    BIGINT REFERENCES users(id) ON DELETE CASCADE;
+  `);
+
+  // Everything already here came in over the shared token, which is the first account.
+  await pool.query("UPDATE drives         SET user_id=$1 WHERE user_id IS NULL", [first]);
+  await pool.query("UPDATE driven_edges   SET user_id=$1 WHERE user_id IS NULL", [first]);
+  await pool.query("UPDATE pois           SET user_id=$1 WHERE user_id IS NULL", [first]);
+  await pool.query("UPDATE reported_areas SET user_id=$1 WHERE user_id IS NULL", [first]);
+
+  await pool.query("ALTER TABLE drives ALTER COLUMN user_id SET NOT NULL");
+  await pool.query("ALTER TABLE reported_areas ALTER COLUMN user_id SET NOT NULL");
+
+  // A drive is one person's, at one moment. Two people may start in the same
+  // millisecond; one person cannot start twice in it.
+  await pool.query(`
+    DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'drives_pkey') THEN
+        ALTER TABLE drives DROP CONSTRAINT drives_pkey;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'drives_person_moment') THEN
+        ALTER TABLE drives ADD CONSTRAINT drives_person_moment PRIMARY KEY (user_id, started_at);
+      END IF;
+      IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'reported_areas_pkey') THEN
+        ALTER TABLE reported_areas DROP CONSTRAINT reported_areas_pkey;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'reported_person_area') THEN
+        ALTER TABLE reported_areas ADD CONSTRAINT reported_person_area PRIMARY KEY (user_id, name);
+      END IF;
+    END $$;
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS drives_user ON drives (user_id, started_at DESC);
+    CREATE INDEX IF NOT EXISTS edges_user  ON driven_edges (user_id);
+  `);
+}
+
 /** Postgres is usually still starting when we are, so wait rather than crash-loop. */
 async function waitForDatabase() {
   for (let attempt = 1; ; attempt++) {
@@ -402,14 +463,16 @@ function bbox(points) {
  * batches without resending the rest. A malformed row is skipped rather than failing the
  * whole push: losing one segment beats losing the sync.
  */
-async function applySync(body) {
+async function applySync(body, by) {
   const result = { areas: 0, edges: 0, drives: 0, pois: 0, skipped: 0 };
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
 
     if (Array.isArray(body.areas)) {
-      await client.query("DELETE FROM reported_areas");
+      // Only this person's. Without the WHERE, one phone syncing wiped every other
+      // driver's reported areas — the exact overwrite the composite key exists to stop.
+      await client.query("DELETE FROM reported_areas WHERE user_id=$1", [by.userId]);
       for (const a of body.areas) {
         const points = shapePoints(a.polygon);
         const name = String(a.name || "").trim();
@@ -417,10 +480,10 @@ async function applySync(body) {
         const st = a.stats || {};
         await client.query(
           `INSERT INTO reported_areas
-             (name, level, parent_name, polygon, streets_total, streets_done, streets_partial,
-              streets_excluded, meters_total, meters_driven, reported_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())
-           ON CONFLICT (name) DO UPDATE SET
+             (user_id, name, level, parent_name, polygon, streets_total, streets_done,
+              streets_partial, streets_excluded, meters_total, meters_driven, reported_at)
+           VALUES ($11,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())
+           ON CONFLICT (user_id, name) DO UPDATE SET
              level=EXCLUDED.level, parent_name=EXCLUDED.parent_name, polygon=EXCLUDED.polygon,
              streets_total=EXCLUDED.streets_total, streets_done=EXCLUDED.streets_done,
              streets_partial=EXCLUDED.streets_partial, streets_excluded=EXCLUDED.streets_excluded,
@@ -428,13 +491,17 @@ async function applySync(body) {
              reported_at=now()`,
           [name, normaliseLevel(a.level), a.parent || null, JSON.stringify(points),
            num(st.total, 0), num(st.done, 0), num(st.partial, 0), num(st.excluded, 0),
-           num(st.metersTotal, 0), num(st.metersDriven, 0)],
+           num(st.metersTotal, 0), num(st.metersDriven, 0), by.userId],
         );
         result.areas++;
       }
     }
 
-    if (body.resetEdges) await client.query("DELETE FROM driven_edges");
+    // "Send everything again" is about this phone's own contribution. Dropping the whole
+    // table would throw away every other driver's coverage as well.
+    if (body.resetEdges) {
+      await client.query("DELETE FROM driven_edges WHERE user_id=$1", [by.userId]);
+    }
 
     if (Array.isArray(body.edges)) {
       for (const e of body.edges) {
@@ -444,33 +511,46 @@ async function applySync(body) {
         const box = bbox(points);
         await client.query(
           `INSERT INTO driven_edges
-             (key, way_id, name, road_class, length_m, driven_at, shape, min_lat, min_lng, max_lat, max_lng)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+             (key, way_id, name, road_class, length_m, driven_at, shape,
+              min_lat, min_lng, max_lat, max_lng, user_id, vehicle_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
            ON CONFLICT (key) DO UPDATE SET
              name=EXCLUDED.name, road_class=EXCLUDED.road_class, length_m=EXCLUDED.length_m,
-             driven_at=LEAST(driven_edges.driven_at, EXCLUDED.driven_at), shape=EXCLUDED.shape`,
+             driven_at=LEAST(driven_edges.driven_at, EXCLUDED.driven_at), shape=EXCLUDED.shape,
+             -- Coverage is shared, so a street stays credited to whoever swept it first.
+             -- Only a later pass that predates the one on record changes that.
+             user_id=CASE WHEN EXCLUDED.driven_at < driven_edges.driven_at
+                          THEN EXCLUDED.user_id ELSE driven_edges.user_id END,
+             vehicle_id=CASE WHEN EXCLUDED.driven_at < driven_edges.driven_at
+                          THEN EXCLUDED.vehicle_id ELSE driven_edges.vehicle_id END`,
           [key, num(e.wayId, null), e.name || null, e.roadClass || null, num(e.lengthMeters, 0),
-           num(e.drivenAt, 0), JSON.stringify(points), box[0], box[1], box[2], box[3]],
+           num(e.drivenAt, 0), JSON.stringify(points), box[0], box[1], box[2], box[3],
+           by.userId, by.vehicleId],
         );
         result.edges++;
       }
     }
 
     if (Array.isArray(body.drives)) {
-      await client.query("DELETE FROM drives");
+      // This phone sends its whole history each time, so its own rows are replaced —
+      // but only its own. Unscoped, the second driver to sync erased the first one's
+      // drives entirely, which is what the test caught.
+      await client.query("DELETE FROM drives WHERE user_id=$1", [by.userId]);
       for (const d of body.drives) {
         const startedAt = num(d.startedAt, 0);
         if (!startedAt) { result.skipped++; continue; }
         await client.query(
-          `INSERT INTO drives (started_at, ended_at, trigger, point_count, distance_m,
-                               new_segments, new_meters, paused_ms)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-           ON CONFLICT (started_at) DO UPDATE SET
+          `INSERT INTO drives (user_id, vehicle_id, started_at, ended_at, trigger, point_count,
+                               distance_m, new_segments, new_meters, paused_ms)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           ON CONFLICT (user_id, started_at) DO UPDATE SET
+             vehicle_id=EXCLUDED.vehicle_id,
              ended_at=EXCLUDED.ended_at, trigger=EXCLUDED.trigger, point_count=EXCLUDED.point_count,
              distance_m=EXCLUDED.distance_m, new_segments=EXCLUDED.new_segments,
              new_meters=EXCLUDED.new_meters, paused_ms=EXCLUDED.paused_ms`,
-          [startedAt, num(d.endedAt, null), d.trigger || null, num(d.pointCount, 0),
-           num(d.distanceMeters, 0), num(d.newSegments, 0), num(d.newMeters, 0), num(d.pausedMs, 0)],
+          [by.userId, by.vehicleId, startedAt, num(d.endedAt, null), d.trigger || null,
+           num(d.pointCount, 0), num(d.distanceMeters, 0), num(d.newSegments, 0),
+           num(d.newMeters, 0), num(d.pausedMs, 0)],
         );
         result.drives++;
       }
@@ -491,22 +571,29 @@ async function applySync(body) {
         const id = at + ":" + lat.toFixed(6) + ":" + lng.toFixed(6);
         keep.push(id);
         await client.query(
-          `INSERT INTO pois (id, lat, lng, note, name, photo_key, at, updated_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+          `INSERT INTO pois (id, lat, lng, note, name, photo_key, at, updated_at, user_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
            ON CONFLICT (id) DO UPDATE SET
+             -- A place keeps the person who first marked it.
+             user_id = COALESCE(pois.user_id, EXCLUDED.user_id),
              lat = EXCLUDED.lat,
              lng = EXCLUDED.lng,
              note = CASE WHEN EXCLUDED.updated_at >= pois.updated_at THEN EXCLUDED.note ELSE pois.note END,
              name = CASE WHEN EXCLUDED.updated_at >= pois.updated_at THEN EXCLUDED.name ELSE pois.name END,
              photo_key = COALESCE(EXCLUDED.photo_key, pois.photo_key),
              updated_at = GREATEST(EXCLUDED.updated_at, pois.updated_at)`,
-          [id, lat, lng, p.note || null, p.name || null, p.photoKey || null, at, num(p.updatedAt, at)],
+          [id, lat, lng, p.note || null, p.name || null, p.photoKey || null, at,
+           num(p.updatedAt, at), by.userId],
         );
         result.pois++;
       }
+      // Places this phone no longer has, and only this person's: another driver's
+      // marks are not this phone's to forget.
       await client.query(
-        keep.length ? "DELETE FROM pois WHERE NOT (id = ANY($1))" : "DELETE FROM pois",
-        keep.length ? [keep] : [],
+        keep.length
+          ? "DELETE FROM pois WHERE user_id=$2 AND NOT (id = ANY($1))"
+          : "DELETE FROM pois WHERE user_id=$1",
+        keep.length ? [keep, by.userId] : [by.userId],
       );
     }
 
@@ -1046,7 +1133,12 @@ async function handle(req, res) {
   }
 
   if (route === "/api/sync" && req.method === "POST") {
-    return sendJson(res, 200, await applySync(await readBody(req)));
+    // Everything a phone pushes is stamped with whose phone it is, and which vehicle
+    // that phone was issued for, so a drive can be told from anyone else's later.
+    return sendJson(res, 200, await applySync(await readBody(req), {
+      userId: who.user.id,
+      vehicleId: who.vehicleId || null,
+    }));
   }
 
   if (route === "/api/coverage" && req.method === "GET") {
@@ -1155,6 +1247,7 @@ waitForDatabase()
   .then(ensureSchema)
   .then(() => identity.ensureSchema(pool))
   .then(() => identity.ensureFirstAdmin(pool, (line) => console.log(line)))
+  .then(ensureAttribution)
   .then(readyPhotos)
   .then(() => {
     // Expired rows are dead weight; clear them at boot and once a day after.
