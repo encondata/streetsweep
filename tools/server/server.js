@@ -22,6 +22,8 @@ const LOGIN_PAGE = path.join(PUBLIC, "login.html");
 // so a crafted route can never walk out of the folder.
 const ASSET_TYPES = {
   ".png": "image/png",
+  ".webp": "image/webp",
+  ".jpg": "image/jpeg",
   ".ico": "image/x-icon",
   ".webmanifest": "application/manifest+json",
 };

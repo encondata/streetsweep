@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -106,10 +107,32 @@ fun SignInScreen(
     val focus = LocalFocusManager.current
 
     Surface(Modifier.fillMaxSize(), color = Navy950) {
+        // The supplied photograph, with the drawn map still underneath it: that is what
+        // fills the screen for the moment before a 300 KB JPEG is decoded.
+        Box(Modifier.fillMaxSize().nightMap()) {
+            Image(
+                painter = painterResource(R.drawable.signin_photo),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            // Nothing in the photograph is dark enough on its own to read white text on.
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0.00f to Navy950.copy(alpha = 0.55f),
+                            0.28f to Navy950.copy(alpha = 0.82f),
+                            0.72f to Navy950.copy(alpha = 0.82f),
+                            1.00f to Navy950.copy(alpha = 0.60f),
+                        ),
+                    ),
+            )
+        }
         Column(
             Modifier
                 .fillMaxSize()
-                .nightMap()
                 .verticalScroll(rememberScrollState())
                 .statusBarsPadding()
                 .navigationBarsPadding()
@@ -331,9 +354,9 @@ fun SignInScreen(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
-                Use(R.drawable.ic_use_areas, "Draw & Plan\nYour Areas")
-                Use(R.drawable.ic_use_progress, "Track\nYour Progress")
-                Use(R.drawable.ic_use_explore, "Explore\nNew Places")
+                Use(R.drawable.use_track, "Track\nYour Drives")
+                Use(R.drawable.use_progress, "See Your\nProgress")
+                Use(R.drawable.use_complete, "Complete\nEvery Street")
             }
             Spacer(Modifier.height(16.dp))
         }
@@ -343,7 +366,13 @@ fun SignInScreen(
 @Composable
 private fun Use(icon: Int, label: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(painterResource(icon), null, tint = GreenBright, modifier = Modifier.size(21.dp))
+        // Image rather than Icon: these are the brand's own artwork and carry their
+        // colour, which a tint would flatten.
+        Image(
+            painterResource(icon),
+            contentDescription = null,
+            modifier = Modifier.height(22.dp),
+        )
         Spacer(Modifier.height(6.dp))
         Text(
             label,

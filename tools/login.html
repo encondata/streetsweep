@@ -42,10 +42,10 @@
   }
 
   /* ---- the map side ------------------------------------------------------
-     The mockup uses an aerial photograph. A photo would have to ship as a
-     megabyte of JPEG and would still be somebody else's neighbourhood, so this
-     is drawn instead: the same idea, a night map with the streets you have
-     finished glowing green, and it costs nothing to load. */
+     The supplied photograph, over the drawn map. The drawing stays underneath
+     rather than being deleted: it is what shows for the moment before 217 KB
+     of WebP arrives, and if the image ever fails to load the panel still looks
+     deliberate instead of empty. */
   #art {
     position: relative; overflow: hidden;
     background:
@@ -56,6 +56,12 @@
     clip-path: polygon(0 0, 100% 0, calc(100% - 90px) 100%, 0 100%);
   }
   #art svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #photo {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; object-position: 62% 50%;
+    opacity: 0; transition: opacity .5s ease;
+  }
+  #photo.ready { opacity: 1; }
   .roads   { stroke: #2b4a68; stroke-width: 2.2; fill: none; stroke-linecap: round; }
   .roads-2 { stroke: #223e59; stroke-width: 1.4; fill: none; stroke-linecap: round; }
   .swept {
@@ -68,7 +74,7 @@
 
   #artcopy {
     position: absolute; left: 0; right: 90px; bottom: 0; padding: 40px 46px 44px;
-    background: linear-gradient(0deg, rgba(2,20,42,.92) 30%, transparent 100%);
+    background: linear-gradient(0deg, rgba(2,20,42,.95) 26%, rgba(2,20,42,.55) 62%, transparent 100%);
   }
   #artcopy h2 { margin: 0 0 8px; font-size: 25px; line-height: 1.25; letter-spacing: -.02em; }
   #artcopy p { margin: 0; color: var(--ink-soft); font-size: 14px; line-height: 1.6; max-width: 42ch; }
@@ -173,10 +179,7 @@
     justify-content: space-between; text-align: center;
   }
   #uses div { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 7px; }
-  #uses svg {
-    width: 21px; height: 21px; fill: none; stroke: var(--green-400);
-    stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
-  }
+  #uses img { height: 22px; width: auto; display: block; }
   #uses span { font-size: 11.5px; line-height: 1.35; color: var(--ink-soft); font-weight: 600; }
 
   /* ---- narrow: the art becomes a header band, as in the phone mockups ---- */
@@ -199,6 +202,8 @@
 <body>
 
 <div id="art" aria-hidden="true">
+  <img id="photo" src="/login-art.webp" alt="" decoding="async" fetchpriority="low"
+       onload="this.classList.add('ready')">
   <svg viewBox="0 0 700 1000" preserveAspectRatio="xMidYMid slice">
     <path class="water" d="M0 706c96-34 168-16 236 14 76 34 140 52 214 32 62-17 128-58 250-76v324H0Z"/>
     <g class="block">
@@ -296,16 +301,16 @@
 
   <div id="uses">
     <div>
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Z"/><circle cx="12" cy="10" r="2.6"/></svg>
-      <span>Draw &amp; Plan<br>Your Areas</span>
+      <img src="/use_track.png" alt="" width="26" height="22">
+      <span>Track<br>Your Drives</span>
     </div>
     <div>
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V11M12 19V5M19 19v-6"/></svg>
-      <span>Track<br>Your Progress</span>
+      <img src="/use_progress.png" alt="" width="26" height="18">
+      <span>See Your<br>Progress</span>
     </div>
     <div>
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 4-6 2.6v13L9 17l6 3 6-2.6v-13L15 7Z"/><path d="M9 4v13M15 7v13"/></svg>
-      <span>Explore<br>New Places</span>
+      <img src="/use_complete.png" alt="" width="24" height="22">
+      <span>Complete<br>Every Street</span>
     </div>
   </div>
 </main>
