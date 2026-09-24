@@ -8,8 +8,8 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { Pool } = require("pg");
-const Minio = require("minio");
 const identity = require("./identity");
+const photos = require("./photos");
 
 const PORT = Number(process.env.PORT || 80);
 // Set SYNC_TOKEN to require a shared secret on every /api call. Leave it empty only on a
@@ -38,41 +38,15 @@ const LEVELS = new Set(LEVEL_ORDER);
 
 // ---------------------------------------------------------------- photos
 //
-// Photos go to object storage rather than the database: they are large, read rarely,
-// and nothing joins against them. Only this service holds the credentials, and it
-// streams them out itself, so the bucket stays private and one token still guards
-// everything.
+// Photos live on a volume rather than in the database: they are large, read rarely, and
+// nothing joins against them. They are streamed out through the routes below, so they
+// stay behind the same sign-in as everything else. See photos.js for why this is a
+// directory and not MinIO any more.
 
-const S3_BUCKET = process.env.S3_BUCKET || "streetsweep-photos";
 const PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const PHOTO_MAX_BYTES = 12 * 1024 * 1024;
 
-const photos = process.env.S3_ENDPOINT
-  ? new Minio.Client({
-      endPoint: process.env.S3_ENDPOINT,
-      port: Number(process.env.S3_PORT || 9000),
-      useSSL: String(process.env.S3_SSL || "") === "true",
-      accessKey: process.env.S3_KEY || "",
-      secretKey: process.env.S3_SECRET || "",
-    })
-  : null;
-
-async function readyPhotos() {
-  if (!photos) {
-    console.log("No S3_ENDPOINT set, so photos are turned off.");
-    return;
-  }
-  for (let attempt = 0; attempt < 30; attempt++) {
-    try {
-      if (!(await photos.bucketExists(S3_BUCKET))) await photos.makeBucket(S3_BUCKET);
-      console.log(`Photos going to ${S3_BUCKET}.`);
-      return;
-    } catch (err) {
-      if (attempt === 29) { console.error("Photo storage never came up:", err.message); return; }
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-  }
-}
+const readyPhotos = () => photos.ready();
 // A segment stamped longer than this after its drive began is not from that drive.
 const DRIVE_EDGE_SLACK_MS = 12 * 60 * 60 * 1000;
 
@@ -1098,7 +1072,7 @@ async function handle(req, res) {
     }
 
     if (isPhoto && (req.method === "POST" || req.method === "PUT")) {
-      if (!photos) return sendJson(res, 503, { error: "Photo storage is not configured on this server" });
+      if (!photos.on()) return sendJson(res, 503, { error: "Photo storage is not working on this server" });
       const type = String(req.headers["content-type"] || "").split(";")[0].trim();
       if (!PHOTO_TYPES.has(type)) {
         return sendJson(res, 400, { error: "Send a JPEG, PNG or WebP" });
@@ -1109,31 +1083,32 @@ async function handle(req, res) {
       const bytes = await readBytes(req, PHOTO_MAX_BYTES);
       if (!bytes.length) return sendJson(res, 400, { error: "That upload was empty" });
       const key = "pois/" + crypto.createHash("sha1").update(id).digest("hex") + extensionFor(type);
-      await photos.putObject(S3_BUCKET, key, bytes, bytes.length, { "Content-Type": type });
+      await photos.put(key, bytes);
       await pool.query("UPDATE pois SET photo_key=$1, updated_at=$2 WHERE id=$3", [key, Date.now(), id]);
       return sendJson(res, 200, { ok: true, bytes: bytes.length });
     }
 
     if (isPhoto && req.method === "GET") {
-      if (!photos) return sendJson(res, 503, { error: "Photo storage is not configured on this server" });
+      if (!photos.on()) return sendJson(res, 503, { error: "Photo storage is not working on this server" });
       const { rows } = await pool.query("SELECT photo_key FROM pois WHERE id=$1", [id]);
       if (!rows.length || !rows[0].photo_key) return sendJson(res, 404, { error: "No photo for that place" });
       const key = rows[0].photo_key;
-      const stat = await photos.statObject(S3_BUCKET, key).catch(() => null);
+      const stat = await photos.stat(key);
       if (!stat) return sendJson(res, 404, { error: "That photo is no longer in storage" });
-      const stream = await photos.getObject(S3_BUCKET, key);
+      const stream = photos.readStream(key);
       res.writeHead(200, {
-        "Content-Type": (stat.metaData && stat.metaData["content-type"]) || "image/jpeg",
+        "Content-Type": stat.type,
         "Content-Length": stat.size,
         "Cache-Control": "private, max-age=86400",
       });
+      stream.on("error", () => res.destroy());
       return stream.pipe(res);
     }
 
     if (isPhoto && req.method === "DELETE") {
       const { rows } = await pool.query("SELECT photo_key FROM pois WHERE id=$1", [id]);
-      if (rows.length && rows[0].photo_key && photos) {
-        await photos.removeObject(S3_BUCKET, rows[0].photo_key).catch(() => {});
+      if (rows.length && rows[0].photo_key) {
+        await photos.remove(rows[0].photo_key).catch(() => {});
       }
       await pool.query("UPDATE pois SET photo_key=NULL, updated_at=$1 WHERE id=$2", [Date.now(), id]);
       return sendJson(res, 200, { ok: true });
