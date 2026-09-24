@@ -9,6 +9,7 @@ const fs = require("fs");
 const path = require("path");
 const { Pool } = require("pg");
 const Minio = require("minio");
+const identity = require("./identity");
 
 const PORT = Number(process.env.PORT || 80);
 // Set SYNC_TOKEN to require a shared secret on every /api call. Leave it empty only on a
@@ -707,30 +708,74 @@ function readBody(req) {
   });
 }
 
-/** Constant-time compare so a wrong token cannot be guessed a character at a time. */
-function tokenMatches(given) {
-  const a = Buffer.from(given || "", "utf8");
-  const b = Buffer.from(SYNC_TOKEN, "utf8");
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
+/** True when switching this person off or down would leave nobody able to manage users. */
+async function lastAdmin(id) {
+  const { rows } = await pool.query(
+    "SELECT count(*)::int AS n FROM users WHERE role='admin' AND active AND id <> $1", [id]);
+  return rows[0].n === 0;
 }
 
-function authorised(req) {
-  if (!SYNC_TOKEN) return true;
-  const header = String(req.headers.authorization || "");
-  const bearer = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
-  return tokenMatches(bearer || String(req.headers["x-streetsweep-token"] || "").trim());
+function cleanVehicle(body) {
+  const name = String(body.name || "").trim();
+  if (!name) throw new BadRequest("A vehicle needs a name");
+  if (name.length > 80) throw new BadRequest("That name is too long");
+  return {
+    name,
+    plate: body.plate ? String(body.plate).trim().slice(0, 32) : null,
+    note: body.note ? String(body.note).trim().slice(0, 500) : null,
+  };
+}
+
+function rowToVehicle(row) {
+  return {
+    id: Number(row.id), name: row.name, plate: row.plate, note: row.note,
+    active: row.active !== false, createdAt: row.created_at,
+  };
+}
+
+/** Routes anyone may reach without proving who they are. */
+const OPEN_ROUTES = new Set(["/api/config", "/api/health", "/api/auth/login"]);
+
+/** Which right a route needs. Anything not listed here needs only "read". */
+function rightFor(route, method) {
+  if (route.startsWith("/api/users") || route.startsWith("/api/vehicles") ||
+      route.startsWith("/api/devices")) return "admin";
+  if (route.startsWith("/api/areas") && method !== "GET") return "areas";
+  if (route === "/api/sync") return "record";
+  if (route.startsWith("/api/pois") && method !== "GET") return "record";
+  return "read";
+}
+
+function setCookie(res, value, maxAgeSeconds, req) {
+  // Secure only when the request really came over https, or a plain-http install on a
+  // LAN would set a cookie the browser then refuses to send back.
+  const https = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim() === "https";
+  res.setHeader("Set-Cookie",
+    `${identity.COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}` +
+    (https ? "; Secure" : ""));
 }
 
 async function handle(req, res) {
   const url = new URL(req.url, "http://localhost");
   const route = url.pathname;
 
-  // The page itself stays open so a browser can load it and ask for the token; everything
-  // that reads or writes data does not.
-  if (route.startsWith("/api/") && route !== "/api/config" && !authorised(req)) {
-    res.writeHead(401, { "Content-Type": "application/json", "WWW-Authenticate": "Bearer" });
-    return res.end(JSON.stringify({ error: "A token is required", needsToken: true }));
+  // The page itself stays open so a browser can load it and offer a sign-in form;
+  // everything that reads or writes data does not.
+  let who = null;
+  if (route.startsWith("/api/") && !OPEN_ROUTES.has(route)) {
+    who = await identity.identify(pool, req, { legacyToken: SYNC_TOKEN });
+    if (!who) {
+      res.writeHead(401, { "Content-Type": "application/json", "WWW-Authenticate": "Bearer" });
+      return res.end(JSON.stringify({ error: "Please sign in", needsAuth: true }));
+    }
+    const right = rightFor(route, req.method);
+    if (!identity.can(who.user, right)) {
+      return sendJson(res, 403, {
+        error: right === "admin"
+          ? "That is an administrator's job."
+          : `A ${who.user.role} account cannot do that.`,
+      });
+    }
   }
 
   if (route.length > 1 && ASSETS.has(route.slice(1))) {
@@ -749,7 +794,207 @@ async function handle(req, res) {
   }
 
   if (route === "/api/config") {
-    return sendJson(res, 200, { needsToken: Boolean(SYNC_TOKEN) });
+    return sendJson(res, 200, { needsAuth: true, signIn: "password" });
+  }
+
+  // ---------------------------------------------------------------- signing in
+
+  if (route === "/api/auth/login" && req.method === "POST") {
+    const body = await readBody(req);
+    const result = await identity.signIn(pool, body.email, body.password);
+    if (result.error) return sendJson(res, result.status, { error: result.error });
+    const token = await identity.startSession(pool, result.user.id, req.headers["user-agent"]);
+    setCookie(res, token, 30 * 24 * 60 * 60, req);
+    return sendJson(res, 200, { user: result.user });
+  }
+
+  if (route === "/api/auth/logout" && req.method === "POST") {
+    const raw = String(req.headers.cookie || "");
+    const at = raw.indexOf(identity.COOKIE + "=");
+    if (at >= 0) {
+      const rest = raw.slice(at + identity.COOKIE.length + 1);
+      await identity.endSession(pool, rest.split(";")[0].trim());
+    }
+    setCookie(res, "", 0, req);
+    return sendJson(res, 200, { ok: true });
+  }
+
+  if (route === "/api/auth/me" && req.method === "GET") {
+    return sendJson(res, 200, { user: who.user, via: who.via, vehicleId: who.vehicleId || null });
+  }
+
+  // Changing your own password. Knowing the current one is required even for an admin,
+  // because a session left open on someone else's screen should not be enough.
+  if (route === "/api/auth/password" && req.method === "POST") {
+    const body = await readBody(req);
+    const next = String(body.password || "");
+    if (next.length < 10) throw new BadRequest("Use at least 10 characters");
+    const { rows } = await pool.query("SELECT password_hash FROM users WHERE id=$1", [who.user.id]);
+    const ok = await identity.passwordMatches(String(body.current || ""), rows[0].password_hash);
+    if (!ok) return sendJson(res, 403, { error: "That is not your current password." });
+    await pool.query("UPDATE users SET password_hash=$1, updated_at=now() WHERE id=$2",
+      [await identity.hashPassword(next), who.user.id]);
+    return sendJson(res, 200, { ok: true });
+  }
+
+  // ---------------------------------------------------------------- people
+
+  if (route === "/api/users" && req.method === "GET") {
+    const { rows } = await pool.query(
+      `SELECT u.*, (SELECT count(*)::int FROM device_tokens d
+                     WHERE d.user_id = u.id AND d.revoked_at IS NULL) AS devices
+         FROM users u ORDER BY u.active DESC, lower(u.name)`);
+    return sendJson(res, 200, {
+      users: rows.map((r) => Object.assign(identity.publicUser(r), { devices: r.devices })),
+    });
+  }
+
+  if (route === "/api/users" && req.method === "POST") {
+    const body = await readBody(req);
+    const email = String(body.email || "").trim().toLowerCase();
+    const name = String(body.name || "").trim();
+    const role = String(body.role || "driver").toLowerCase();
+    const password = String(body.password || "");
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new BadRequest("That is not an email address");
+    if (!name) throw new BadRequest("A name is required");
+    if (!identity.ROLES.includes(role)) throw new BadRequest(`Role must be one of ${identity.ROLES.join(", ")}`);
+    if (password.length < 10) throw new BadRequest("Use at least 10 characters");
+    const { rows: clash } = await pool.query("SELECT 1 FROM users WHERE email=$1", [email]);
+    if (clash[0]) throw new BadRequest("Someone already has that email address");
+    const { rows } = await pool.query(
+      `INSERT INTO users (email, name, role, password_hash) VALUES ($1,$2,$3,$4) RETURNING *`,
+      [email, name, role, await identity.hashPassword(password)]);
+    return sendJson(res, 201, { user: identity.publicUser(rows[0]) });
+  }
+
+  const userMatch = route.match(/^\/api\/users\/(\d+)$/);
+  if (userMatch) {
+    const id = Number(userMatch[1]);
+    if (req.method === "PATCH") {
+      const body = await readBody(req);
+      const sets = [], vals = [];
+      if (body.name !== undefined) {
+        const name = String(body.name).trim();
+        if (!name) throw new BadRequest("A name is required");
+        sets.push(`name=$${sets.length + 1}`); vals.push(name);
+      }
+      if (body.role !== undefined) {
+        const role = String(body.role).toLowerCase();
+        if (!identity.ROLES.includes(role)) throw new BadRequest("Unknown role");
+        // Losing the last administrator would lock everyone out of user management.
+        if (id === who.user.id && role !== "admin") {
+          throw new BadRequest("You cannot take away your own administrator role");
+        }
+        if (role !== "admin" && await lastAdmin(id)) {
+          throw new BadRequest("This is the only administrator left");
+        }
+        sets.push(`role=$${sets.length + 1}`); vals.push(role);
+      }
+      if (body.active !== undefined) {
+        const active = Boolean(body.active);
+        if (!active && id === who.user.id) throw new BadRequest("You cannot switch off your own account");
+        if (!active && await lastAdmin(id)) throw new BadRequest("This is the only administrator left");
+        sets.push(`active=$${sets.length + 1}`); vals.push(active);
+      }
+      if (body.password !== undefined) {
+        const next = String(body.password);
+        if (next.length < 10) throw new BadRequest("Use at least 10 characters");
+        sets.push(`password_hash=$${sets.length + 1}`); vals.push(await identity.hashPassword(next));
+      }
+      if (!sets.length) throw new BadRequest("Nothing to change");
+      vals.push(id);
+      const { rows } = await pool.query(
+        `UPDATE users SET ${sets.join(", ")}, updated_at=now() WHERE id=$${vals.length} RETURNING *`, vals);
+      if (!rows[0]) return sendJson(res, 404, { error: "No such person" });
+      // A new password or a switched-off account must not leave old logins working.
+      if (body.password !== undefined || body.active === false) {
+        await identity.endAllSessions(pool, id);
+      }
+      return sendJson(res, 200, { user: identity.publicUser(rows[0]) });
+    }
+    if (req.method === "DELETE") {
+      if (id === who.user.id) throw new BadRequest("You cannot delete your own account");
+      if (await lastAdmin(id)) throw new BadRequest("This is the only administrator left");
+      const { rowCount } = await pool.query("DELETE FROM users WHERE id=$1", [id]);
+      return rowCount ? sendJson(res, 204, {}) : sendJson(res, 404, { error: "No such person" });
+    }
+  }
+
+  // ---------------------------------------------------------------- vehicles
+
+  if (route === "/api/vehicles" && req.method === "GET") {
+    const { rows } = await pool.query(
+      "SELECT * FROM vehicles ORDER BY active DESC, lower(name)");
+    return sendJson(res, 200, { vehicles: rows.map(rowToVehicle) });
+  }
+
+  if (route === "/api/vehicles" && req.method === "POST") {
+    const v = cleanVehicle(await readBody(req));
+    const { rows } = await pool.query(
+      "INSERT INTO vehicles (name, plate, note) VALUES ($1,$2,$3) RETURNING *",
+      [v.name, v.plate, v.note]);
+    return sendJson(res, 201, { vehicle: rowToVehicle(rows[0]) });
+  }
+
+  const vehicleMatch = route.match(/^\/api\/vehicles\/(\d+)$/);
+  if (vehicleMatch) {
+    const id = Number(vehicleMatch[1]);
+    if (req.method === "PATCH") {
+      const body = await readBody(req);
+      const v = cleanVehicle(body);
+      const { rows } = await pool.query(
+        `UPDATE vehicles SET name=$1, plate=$2, note=$3,
+                active=COALESCE($4, active), updated_at=now() WHERE id=$5 RETURNING *`,
+        [v.name, v.plate, v.note, body.active === undefined ? null : Boolean(body.active), id]);
+      return rows[0] ? sendJson(res, 200, { vehicle: rowToVehicle(rows[0]) })
+                     : sendJson(res, 404, { error: "No such vehicle" });
+    }
+    if (req.method === "DELETE") {
+      const { rowCount } = await pool.query("DELETE FROM vehicles WHERE id=$1", [id]);
+      return rowCount ? sendJson(res, 204, {}) : sendJson(res, 404, { error: "No such vehicle" });
+    }
+  }
+
+  // ---------------------------------------------------------------- phones
+
+  if (route === "/api/devices" && req.method === "GET") {
+    const { rows } = await pool.query(
+      `SELECT d.token_hash, d.label, d.vehicle_id, d.created_at, d.last_seen_at, d.revoked_at,
+              u.name AS user_name, u.id AS user_id, v.name AS vehicle_name
+         FROM device_tokens d
+         JOIN users u ON u.id = d.user_id
+         LEFT JOIN vehicles v ON v.id = d.vehicle_id
+        ORDER BY d.revoked_at NULLS FIRST, d.created_at DESC`);
+    return sendJson(res, 200, {
+      devices: rows.map((r) => ({
+        // The hash is the handle; the token itself was shown once and is not kept.
+        id: r.token_hash, label: r.label,
+        userId: Number(r.user_id), userName: r.user_name,
+        vehicleId: r.vehicle_id ? Number(r.vehicle_id) : null, vehicleName: r.vehicle_name || null,
+        createdAt: r.created_at, lastSeenAt: r.last_seen_at, revokedAt: r.revoked_at,
+      })),
+    });
+  }
+
+  if (route === "/api/devices" && req.method === "POST") {
+    const body = await readBody(req);
+    const userId = Number(body.userId);
+    if (!userId) throw new BadRequest("Say whose phone it is");
+    const { rows: person } = await pool.query("SELECT 1 FROM users WHERE id=$1 AND active", [userId]);
+    if (!person[0]) throw new BadRequest("No such person");
+    const token = await identity.createDeviceToken(pool, {
+      userId, label: body.label, vehicleId: body.vehicleId ? Number(body.vehicleId) : null,
+    });
+    // The one and only time this is readable. Losing it means issuing another.
+    return sendJson(res, 201, { token, id: identity.hashToken(token) });
+  }
+
+  const deviceMatch = route.match(/^\/api\/devices\/([a-f0-9]{64})$/);
+  if (deviceMatch && req.method === "DELETE") {
+    const { rowCount } = await pool.query(
+      "UPDATE device_tokens SET revoked_at=now() WHERE token_hash=$1 AND revoked_at IS NULL",
+      [deviceMatch[1]]);
+    return rowCount ? sendJson(res, 204, {}) : sendJson(res, 404, { error: "No such phone" });
   }
 
   if (route === "/api/health") {
@@ -888,6 +1133,13 @@ const server = http.createServer((req, res) => {
 
 waitForDatabase()
   .then(ensureSchema)
+  .then(() => identity.ensureSchema(pool))
+  .then(() => identity.ensureFirstAdmin(pool, (line) => console.log(line)))
   .then(readyPhotos)
-  .then(() => server.listen(PORT, () => console.log(`area builder listening on ${PORT}`)))
+  .then(() => {
+    // Expired rows are dead weight; clear them at boot and once a day after.
+    identity.sweepSessions(pool).catch(() => {});
+    setInterval(() => identity.sweepSessions(pool).catch(() => {}), 24 * 60 * 60 * 1000).unref();
+    server.listen(PORT, () => console.log(`area builder listening on ${PORT}`));
+  })
   .catch((err) => { console.error("could not start", err); process.exit(1); });
