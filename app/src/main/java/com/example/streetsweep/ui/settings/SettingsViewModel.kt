@@ -109,7 +109,7 @@ class SettingsViewModel(private val container: AppContainer, private val context
     /** Flips once when a sign-in lands, so the screen knows to close itself. */
     val signedIn: StateFlow<Boolean> = _signedIn
 
-    fun clearSignIn() { _signInError.value = null; _signedIn.value = false }
+    fun clearSignIn() { _signInError.value = null; _signInNotice.value = null; _signedIn.value = false }
 
     /**
      * Swaps an email and password for a token belonging to this phone. The server refuses
@@ -120,6 +120,7 @@ class SettingsViewModel(private val container: AppContainer, private val context
         if (_busy.value) return@launch
         _busy.value = true
         _signInError.value = null
+        _signInNotice.value = null
         try {
             val label = android.os.Build.MODEL?.takeIf { it.isNotBlank() } ?: "Phone"
             val result = container.portalClient.signInDevice(email, password, label)
@@ -131,6 +132,15 @@ class SettingsViewModel(private val container: AppContainer, private val context
         } finally {
             _busy.value = false
         }
+    }
+
+    private val _signInNotice = MutableStateFlow<String?>(null)
+    val signInNotice: StateFlow<String?> = _signInNotice
+
+    /** For the parts of the sign-in design that are drawn but have nowhere to go yet. */
+    fun notBuiltYet(what: String) {
+        _signInError.value = null
+        _signInNotice.value = "$what is not set up yet. An administrator can do it for you in the meantime."
     }
 
     fun signOutOfPortal() = viewModelScope.launch {

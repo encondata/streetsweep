@@ -2,6 +2,7 @@ package com.example.streetsweep.ui.auth
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -89,9 +90,13 @@ private val LineSoft = Color(0x1FFFFFFF)
 fun SignInScreen(
     busy: Boolean,
     error: String?,
+    /** A remark, not a failure — shown in the same place but not dressed as an error. */
+    notice: String?,
     serverLabel: String,
     onSignIn: (email: String, password: String) -> Unit,
     onChangeServer: () -> Unit,
+    /** Shown on the parts of the design that are drawn but not built yet. */
+    onPlaceholder: (String) -> Unit,
     onSkip: (() -> Unit)? = null,
 ) {
     var email by rememberSaveable { mutableStateOf("") }
@@ -147,17 +152,22 @@ fun SignInScreen(
                         fontSize = 13.sp,
                     )
 
-                    if (error != null) {
+                    val banner = error ?: notice
+                    if (banner != null) {
+                        val bad = error != null
                         Spacer(Modifier.height(14.dp))
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = Color(0x22FF8579),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x55FF8579)),
+                            color = if (bad) Color(0x22FF8579) else Color(0x1A57C7FF),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (bad) Color(0x55FF8579) else Color(0x4D57C7FF),
+                            ),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text(
-                                error,
-                                color = Color(0xFFFF9C92),
+                                banner,
+                                color = if (bad) Color(0xFFFF9C92) else Color(0xFF9BD9F7),
                                 fontSize = 12.5.sp,
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
                             )
@@ -233,8 +243,8 @@ fun SignInScreen(
                             )
                             Text("Stay signed in", color = Ink, fontSize = 13.sp)
                         }
-                        TextButton(onClick = onChangeServer) {
-                            Text("Server", color = Color(0xFF57C7FF), fontSize = 13.sp)
+                        TextButton(onClick = { onPlaceholder("Resetting your own password") }) {
+                            Text("Forgot password?", color = Color(0xFF57C7FF), fontSize = 13.sp)
                         }
                     }
 
@@ -278,20 +288,33 @@ fun SignInScreen(
                         }
                     }
 
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("New to StreetSweep? ", color = InkSoft, fontSize = 12.5.sp)
+                        Text(
+                            "Create an account",
+                            color = Color(0xFF57C7FF),
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clickable { onPlaceholder("Signing yourself up") },
+                        )
+                    }
+
+                    Spacer(Modifier.height(10.dp))
+                    // The server this is signing in to is worth stating, and it is the
+                    // natural place to go and change it.
                     Text(
-                        "Signing in to $serverLabel",
+                        "Signing in to $serverLabel  ·  Change",
                         color = InkSoft,
                         fontSize = 11.5.sp,
                         textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        "Accounts are created by an administrator.",
-                        color = InkSoft,
-                        fontSize = 11.5.sp,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onChangeServer() },
                     )
                 }
             }

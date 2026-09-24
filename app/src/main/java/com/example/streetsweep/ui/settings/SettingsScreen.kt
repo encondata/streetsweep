@@ -518,6 +518,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
     if (showSignIn) {
         val busy by viewModel.busy.collectAsStateWithLifecycle()
         val signInError by viewModel.signInError.collectAsStateWithLifecycle()
+        val signInNotice by viewModel.signInNotice.collectAsStateWithLifecycle()
         val signedIn by viewModel.signedIn.collectAsStateWithLifecycle()
         LaunchedEffect(signedIn) {
             if (signedIn) { showSignIn = false; viewModel.clearSignIn() }
@@ -536,9 +537,11 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
         SignInScreen(
             busy = busy,
             error = signInError,
+            notice = signInNotice,
             serverLabel = settings.portalUrl.orEmpty().removePrefix("https://").removePrefix("http://"),
             onSignIn = { email, password -> viewModel.signInToPortal(email, password) },
             onChangeServer = dismiss,
+            onPlaceholder = { what -> viewModel.notBuiltYet(what) },
             onSkip = dismiss,
         )
         }

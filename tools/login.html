@@ -163,6 +163,9 @@
     background: rgba(255,133,121,.12); border: 1px solid rgba(255,133,121,.34); color: var(--danger);
   }
   #msg[hidden] { display: none; }
+  #msg.info {
+    background: rgba(87,199,255,.10); border-color: rgba(87,199,255,.30); color: #9bd9f7;
+  }
 
   /* ---- the three things it does, along the bottom ------------------------ */
   #uses {
@@ -288,7 +291,7 @@
     </button>
     <p class="ssonote">Google sign-in is not set up on this server yet.</p>
 
-    <p class="foot">Need an account? <a href="#" id="noaccount">Ask your administrator</a></p>
+    <p class="foot">New to StreetSweep? <a href="#" id="noaccount">Create an account</a></p>
   </form>
 
   <div id="uses">
@@ -315,9 +318,10 @@
   var pw = document.getElementById("password");
   var email = document.getElementById("email");
 
-  function say(text) {
+  function say(text, tone) {
     msg.textContent = text;
     msg.hidden = !text;
+    msg.className = tone === "info" ? "info" : "";
   }
 
   // The address is worth remembering; the password is the browser's business, not ours.
@@ -334,14 +338,17 @@
     pw.focus();
   });
 
-  document.getElementById("forgot").addEventListener("click", function (ev) {
-    ev.preventDefault();
-    say("Passwords are reset by an administrator — there is no email server here to send a link.");
-  });
-  document.getElementById("noaccount").addEventListener("click", function (ev) {
-    ev.preventDefault();
-    say("Accounts are created by an administrator from the Admin page.");
-  });
+  // Both of these are placeholders until there is somewhere for them to go. They are
+  // drawn as the design has them; clicking one says it is not built rather than doing
+  // nothing at all, which would read as a broken link.
+  function notYet(id, what) {
+    document.getElementById(id).addEventListener("click", function (ev) {
+      ev.preventDefault();
+      say(what + " is not set up yet. An administrator can do it for you in the meantime.", "info");
+    });
+  }
+  notYet("forgot", "Resetting your own password");
+  notYet("noaccount", "Signing yourself up");
 
   form.addEventListener("submit", async function (ev) {
     ev.preventDefault();
