@@ -45,6 +45,9 @@ class ValhallaClient(private val baseUrl: suspend () -> String) : RoadMatchClien
         val body = JSONObject().apply {
             put("shape", JSONArray().apply { points.forEach { put(JSONObject().put("lat", it.latitude).put("lon", it.longitude)) } })
             put("costing", "auto")
+            // Only edge_walk, map_snap and walk_or_snap are accepted here; anything else
+            // comes back as a 445. Timestamps on the points were tried and made no
+            // difference to what map_snap returns, so they are not sent.
             put("shape_match", "map_snap")
             put("units", "kilometers")
             put("filters", JSONObject().put("action", "include").put("attributes", JSONArray(ATTRIBUTES)))

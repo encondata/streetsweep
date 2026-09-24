@@ -45,8 +45,8 @@ data class TrackingSettings(
     val gpsIntervalMs: Long get() = gpsIntervalSeconds * 1000L
 
     companion object {
-        const val DEFAULT_GPS_INTERVAL_SECONDS = 15
-        val GPS_INTERVAL_CHOICES = listOf(5, 10, 15, 30)
+        const val DEFAULT_GPS_INTERVAL_SECONDS = 2
+        val GPS_INTERVAL_CHOICES = listOf(1, 2, 5, 15)
         val BACKUP_DAY_CHOICES = listOf(0, 1, 7)
         val IDLE_STOP_CHOICES = listOf(0, 15, 30, 60)
         const val DEFAULT_VALHALLA_URL = "https://valhalla1.openstreetmap.de"

@@ -184,9 +184,12 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
                 }
             }
             Text(
-                "How often a fix is requested while recording. Shorter intervals follow neighbourhood streets more tightly " +
-                    "and use a little more battery; the ${PointFilter.MIN_SPACING_FEET.toInt()} ft spacing rule still applies. " +
-                    "Changes take effect immediately, even mid-drive.",
+                "How often a fix is asked for while recording. It is not how often one is kept: the " +
+                    "${PointFilter.MIN_SPACING_FEET.toInt()} ft spacing rule still throws away anything closer than that, " +
+                    "so a short interval costs battery rather than storage. At 5 seconds a car at residential speed " +
+                    "moves about 180 ft between fixes, which is further than a cul-de-sac is wide, and the matcher has " +
+                    "nothing to go on inside one. 2 seconds is enough to get round one. Changes take effect " +
+                    "immediately, even mid-drive.",
                 Modifier.padding(16.dp),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
