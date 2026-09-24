@@ -29,7 +29,13 @@ services:
       # ever a second container holding files this one already streams out itself.
       PHOTO_DIR: /data/photos
     volumes:
-      - photo-data:/data/photos
+      # Deliberately not photo-data. That volume holds MinIO's own layout —
+      # .minio.sys and the bucket directory — and mounting it here would leave the
+      # photos tangled up with the thing they were moved out of: no way to reclaim
+      # the old space without deleting the new files, and a storage count that
+      # includes MinIO's bookkeeping. photo-data is kept below, untouched, so it can
+      # be dropped in one go once migrate-photos.js has run.
+      - photo-files:/data/photos
     # Plain HTTP for a reverse proxy in front to forward to. Set BIND_ADDRESS to
     # 127.0.0.1 in .env when that proxy runs on this same host.
     ports:
@@ -41,4 +47,8 @@ services:
 
 volumes:
   areas-data:
+  photo-files:
+  # The old MinIO data. Nothing mounts it any more; it is declared so Compose does
+  # not treat it as an orphan, and so removing it stays a deliberate act:
+  #   docker compose down && docker volume rm tools_photo-data
   photo-data:

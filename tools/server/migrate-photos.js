@@ -10,6 +10,18 @@
  *
  * If you never attached a photo to a marked place there is nothing to do here, and this
  * will say so. Once it has run, minio and the S3_* settings can go for good.
+ *
+ * If the minio container has already been taken away, the photos are still in its volume,
+ * but only MinIO can read that layout — and its images are no longer pullable, so this
+ * only works while the old image is still cached on the host. Bring it back with:
+ *
+ *   docker run -d --name streetsweep-photos --network tools_default \
+ *     --network-alias minio \
+ *     -e MINIO_ROOT_USER=streetsweep -e MINIO_ROOT_PASSWORD=streetsweep-photos \
+ *     -v tools_photo-data:/data quay.io/minio/minio:latest server /data
+ *
+ * The alias is the part that is easy to miss: this script looks for a host called "minio",
+ * which is the name the old compose service had, not the container's name.
  */
 
 const { Pool } = require("pg");
