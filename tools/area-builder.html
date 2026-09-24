@@ -469,6 +469,39 @@
   #dashCols > div > .eyebrow:first-child,
   #peopleCols > div > .eyebrow:first-child { margin-top: 6px; }
 
+  /* ---- a table of areas ---------------------------------------------------- */
+  :root[data-view="areas"][data-areas="table"] #stage { grid-template-columns: 1fr; }
+  :root[data-view="areas"][data-areas="table"] #mapwrap { display: none; }
+  :root[data-view="areas"][data-areas="table"] #side { border-left: none; padding: 24px 28px 48px; }
+  :root[data-view="areas"][data-areas="table"] .view[data-view="areas"] { max-width: 1280px; margin: 0 auto; }
+  :root[data-view="areas"][data-areas="table"] #citySelect,
+  :root[data-view="areas"][data-areas="table"] #basemap { display: none; }
+
+  table.grid { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.grid th {
+    text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--ink-soft); font-weight: 700; padding: 0 12px 9px; line-height: 1.8;
+    border-bottom: 1px solid var(--line);
+  }
+  table.grid td { padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  table.grid tbody tr:hover { background: var(--surface-2); }
+  table.grid .nm { font-weight: 700; display: flex; align-items: center; gap: 9px; }
+  table.grid .nm .swatch { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
+  table.grid .pct { display: flex; align-items: center; gap: 9px; }
+  table.grid .pct .bar {
+    flex: 1 1 auto; height: 7px; border-radius: 999px; background: var(--surface-2); overflow: hidden;
+  }
+  table.grid .pct .bar i { display: block; height: 100%; background: var(--grad-accent); }
+  table.grid .pct b { font-size: 12px; min-width: 34px; text-align: right; }
+  table.grid .muted { color: var(--ink-soft); }
+  table.grid button { padding: 4px 9px; font-size: 11px; box-shadow: none; }
+  .pager { display: flex; align-items: center; gap: 6px; margin-top: 14px; flex-wrap: wrap; }
+  .pager button { padding: 5px 11px; font-size: 12px; box-shadow: none; }
+  .pager button[aria-current="true"] {
+    background: var(--grad-accent); color: var(--accent-ink); border-color: transparent;
+  }
+  .pager .count { margin-left: auto; font-size: 11.5px; color: var(--ink-soft); }
+
   /* ---- one person ---------------------------------------------------------- */
   .backlink {
     border: none; background: none; box-shadow: none; padding: 4px 0; margin-bottom: 10px;
@@ -958,6 +991,32 @@
       </section>
 
       <section class="view" data-view="areas" hidden>
+        <div id="areasTable">
+          <div class="viewhead">
+            <h2>Areas</h2>
+            <p>Every area, how far through it everyone is, and when it was last driven.</p>
+          </div>
+          <div class="chips" id="areaChips" style="border:1px solid var(--line);border-radius:var(--r);margin-bottom:12px">
+            <button type="button" data-filter="all" aria-pressed="true">All</button>
+            <button type="button" data-filter="going" aria-pressed="false">In progress</button>
+            <button type="button" data-filter="near" aria-pressed="false">Near completion</button>
+            <button type="button" data-filter="done" aria-pressed="false">Completed</button>
+            <button type="button" data-filter="none" aria-pressed="false">Not started</button>
+            <span class="grow"></span>
+            <button type="button" id="btnDrawMode" class="primary">Draw a new area</button>
+          </div>
+          <table class="grid" id="areaGrid">
+            <thead><tr>
+              <th>Name</th><th style="width:200px">Completion</th><th>Streets</th>
+              <th>Level</th><th>Last driven</th><th></th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+          <p class="hint" id="areaGridEmpty" hidden>No area matches that filter.</p>
+          <div class="pager" id="areaPager"></div>
+        </div>
+
+        <div id="areasDraw" hidden>
         <div class="viewhead">
           <h2>Areas</h2>
           <p>Draw a neighbourhood, a city or any shape you want to finish. Corners drag, and the dot between two of them adds another.</p>
@@ -1023,6 +1082,7 @@
           <p class="eyebrow">Your areas</p>
           <ul class="areas" id="areaList"></ul>
           <p class="hint" id="emptyNote">Nothing drawn yet.</p>
+        </div>
         </div>
       </section>
 
@@ -1291,6 +1351,7 @@
       if ((view === "admin" || view === "people" || view === "board") && window.__ssLoadAdmin) {
         window.__ssLoadAdmin(view);
       }
+      if (view === "areas" && window.__ssAreasOpened) window.__ssAreasOpened();
     }
   });
 
@@ -2669,6 +2730,125 @@ window.StreetSweepBases = {
       }).join("");
     });
   }
+
+  // ---- the areas table ------------------------------------------------------
+
+  var areaFilter = "all", areaPage = 1, AREA_PER_PAGE = 12, areaProgress = {};
+
+  function setAreasMode(mode) {
+    document.documentElement.setAttribute("data-areas", mode);
+    el("areasTable").hidden = mode !== "table";
+    el("areasDraw").hidden = mode === "table";
+    if (mode === "table") loadAreaTable();
+    else setTimeout(function () { map.invalidateSize(); }, 60);
+  }
+
+  function areaPct(name) {
+    var p = areaProgress[name];
+    if (!p || !p.total) return null;
+    return Math.round((p.done / p.total) * 100);
+  }
+
+  function areaMatches(a) {
+    var pct = areaPct(a.name);
+    if (areaFilter === "all") return true;
+    if (areaFilter === "none") return pct === null || pct === 0;
+    if (areaFilter === "done") return pct === 100;
+    if (areaFilter === "near") return pct !== null && pct >= 75 && pct < 100;
+    return pct !== null && pct > 0 && pct < 100;          // going
+  }
+
+  function renderAreaTable() {
+    var rows = areas.filter(areaMatches);
+    var pages = Math.max(1, Math.ceil(rows.length / AREA_PER_PAGE));
+    if (areaPage > pages) areaPage = pages;
+    var slice = rows.slice((areaPage - 1) * AREA_PER_PAGE, areaPage * AREA_PER_PAGE);
+
+    el("areaGridEmpty").hidden = rows.length > 0;
+    el("areaGrid").hidden = rows.length === 0;
+    el("areaGrid").querySelector("tbody").innerHTML = slice.map(function (a) {
+      var pct = areaPct(a.name), p = areaProgress[a.name];
+      return "<tr data-area='" + a.id + "'>" +
+        "<td><span class='nm'><span class='swatch' style='background:" +
+          (a.color || LEVEL_COLOR[a.level]) + "'></span>" + escapeHtml(a.name) + "</span></td>" +
+        "<td><span class='pct'><span class='bar'><i style='width:" + (pct || 0) +
+          "%'></i></span><b>" + (pct === null ? "—" : pct + "%") + "</b></span></td>" +
+        "<td class='muted'>" + (p && p.total
+          ? p.done.toLocaleString() + " / " + p.total.toLocaleString()
+          : "not reported") + "</td>" +
+        "<td class='muted'>" + escapeHtml(LEVELS[a.level] || a.level) + "</td>" +
+        "<td class='muted'>" + (p && p.reportedAt
+          ? new Date(p.reportedAt).toLocaleDateString() : "—") + "</td>" +
+        "<td style='text-align:right'><button type='button' data-open='" + a.id +
+          "'>Open</button></td></tr>";
+    }).join("");
+
+    var pager = el("areaPager");
+    pager.innerHTML = "";
+    if (pages > 1) {
+      for (var i = 1; i <= pages; i++) {
+        var b = document.createElement("button");
+        b.type = "button"; b.textContent = String(i);
+        if (i === areaPage) b.setAttribute("aria-current", "true");
+        b.setAttribute("data-page", String(i));
+        pager.appendChild(b);
+      }
+    }
+    var count = document.createElement("span");
+    count.className = "count";
+    count.textContent = rows.length
+      ? "Showing " + ((areaPage - 1) * AREA_PER_PAGE + 1) + "–" +
+        Math.min(areaPage * AREA_PER_PAGE, rows.length) + " of " + rows.length
+      : "";
+    pager.appendChild(count);
+  }
+
+  function loadAreaTable() {
+    // Progress is an administrator's figure; a driver still gets the table without it.
+    var wait = me && me.role === "admin"
+      ? apiJson("/api/admin/area-progress").then(function (d) {
+          areaProgress = {};
+          d.areas.forEach(function (a) { areaProgress[a.name] = a; });
+        }).catch(function () { areaProgress = {}; })
+      : Promise.resolve();
+    return wait.then(renderAreaTable);
+  }
+
+  el("areaChips").addEventListener("click", function (ev) {
+    var b = ev.target.closest && ev.target.closest("button[data-filter]");
+    if (!b) return;
+    areaFilter = b.getAttribute("data-filter");
+    areaPage = 1;
+    Array.prototype.forEach.call(el("areaChips").querySelectorAll("button[data-filter]"), function (x) {
+      x.setAttribute("aria-pressed", String(x === b));
+    });
+    renderAreaTable();
+  });
+
+  el("areaPager").addEventListener("click", function (ev) {
+    var b = ev.target.closest && ev.target.closest("button[data-page]");
+    if (!b) return;
+    areaPage = Number(b.getAttribute("data-page"));
+    renderAreaTable();
+  });
+
+  el("btnDrawMode").addEventListener("click", function () { setAreasMode("draw"); });
+
+  // Arriving at Areas shows the table; drawing is a deliberate step from it.
+  window.__ssAreasOpened = function () {
+    if (!document.documentElement.getAttribute("data-areas")) setAreasMode("table");
+    else if (document.documentElement.getAttribute("data-areas") === "table") loadAreaTable();
+  };
+
+  el("areaGrid").addEventListener("click", function (ev) {
+    var b = ev.target.closest && ev.target.closest("button[data-open]");
+    if (!b) return;
+    var area = byId(Number(b.getAttribute("data-open")));
+    if (!area) return;
+    setAreasMode("draw");
+    select(area.id);
+    setTimeout(function () { zoomTo(area); }, 120);
+  });
 
   // ---- one person -----------------------------------------------------------
 
