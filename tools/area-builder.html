@@ -380,6 +380,9 @@
     border: 2px solid transparent;
   }
   .swatches button[aria-pressed="true"] { border-color: var(--ink); box-shadow: 0 0 0 3px var(--accent-ring); }
+  /* The one that means "leave it to the level" is marked out from the actual colours. */
+  .swatches button.bylevel { border-style: dashed; border-color: var(--line-strong); }
+  .swatches button.bylevel[aria-pressed="true"] { border-style: solid; border-color: var(--ink); }
 
   .tools { display: flex; flex-direction: column; gap: 6px; }
   .tools button { text-align: left; display: flex; align-items: center; gap: 9px; }
@@ -1144,27 +1147,69 @@ window.StreetSweepBases = {
     a.notes = el("fNotes").value; persist(a);
   });
 
-  var SWATCHES = ["#2f6fb5", "#1e8a28", "#d9a520", "#e2721f", "#a855c7", "#c2344b"];
+  /**
+   * Colours an area can be told apart by.
+   *
+   * All mid-toned on purpose. An outline has to hold its own against a pale street map
+   * and, as a fill, against dark aerial photography, so nothing here is pastel enough to
+   * wash out on one or dark enough to disappear into the other. Named rather than listed
+   * as hex, because "Teal" is what you are choosing.
+   */
+  var SWATCHES = [
+    ["#2f6fb5", "Blue"],
+    ["#1c9fd6", "Sky"],
+    ["#0f9b8e", "Teal"],
+    ["#1e8a28", "Green"],
+    ["#6aa621", "Olive"],
+    ["#d9a520", "Amber"],
+    ["#e2721f", "Orange"],
+    ["#d4452f", "Vermilion"],
+    ["#c2344b", "Crimson"],
+    ["#d4459b", "Pink"],
+    ["#a855c7", "Purple"],
+    ["#5b5bd6", "Indigo"],
+    ["#8a5a2b", "Brown"],
+    ["#5b7285", "Slate"],
+  ];
 
   function paintSwatches(area) {
     var box = el("fColor");
     box.innerHTML = "";
-    SWATCHES.forEach(function (hex) {
+    var chosen = (area.color || "").toLowerCase();
+
+    // Left as it was, the colour says what kind of place it is rather than which one.
+    var byLevel = document.createElement("button");
+    byLevel.type = "button";
+    byLevel.className = "bylevel";
+    byLevel.style.background = LEVEL_COLOR[area.level];
+    byLevel.title = "By level";
+    byLevel.setAttribute("aria-label", "Colour it by level");
+    byLevel.setAttribute("aria-pressed", chosen ? "false" : "true");
+    byLevel.addEventListener("click", function () { choose(null); });
+    box.appendChild(byLevel);
+
+    SWATCHES.forEach(function (swatch) {
+      var hex = swatch[0];
       var b = document.createElement("button");
       b.type = "button";
       b.style.background = hex;
-      b.title = hex;
-      b.setAttribute("aria-label", "Colour " + hex);
-      b.setAttribute("aria-pressed", (area.color || LEVEL_COLOR[area.level]).toLowerCase() === hex ? "true" : "false");
-      b.addEventListener("click", function () {
-        area.color = hex;
-        area.poly.setStyle({ color: hex, fillColor: hex });
-        paintSwatches(area);
-        renderList();
-        persist(area);
-      });
+      b.title = swatch[1];
+      b.setAttribute("aria-label", swatch[1]);
+      b.setAttribute("aria-pressed", chosen === hex ? "true" : "false");
+      b.addEventListener("click", function () { choose(hex); });
       box.appendChild(b);
     });
+
+    function choose(hex) {
+      area.color = hex;
+      var shade = hex || LEVEL_COLOR[area.level];
+      area.poly.setStyle(onImagery
+        ? { color: "#ffffff", fillColor: shade }
+        : { color: shade, fillColor: shade });
+      paintSwatches(area);
+      renderList();
+      persist(area);
+    }
   }
 
   el("fParent").addEventListener("change", function () {
