@@ -219,7 +219,7 @@
     background: var(--grad-accent); color: var(--accent-ink);
   }
   #showPanel {
-    position: absolute; z-index: 900; top: calc(100% + 8px); right: 0; width: 290px;
+    position: absolute; z-index: 900; top: calc(100% + 8px); right: 0; width: 332px;
     max-height: min(60vh, 460px); overflow-y: auto;
     background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
     box-shadow: var(--shadow-2); padding: 12px 14px 14px;
@@ -235,12 +235,37 @@
   .showrow:hover { background: var(--surface-2); }
   .showrow input { flex: 0 0 auto; width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
   .showrow .swatch { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
-  .showrow .lbl { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .showrow .n { font-size: 11px; color: var(--ink-soft); flex: 0 0 auto; }
+  .showrow .lbl { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .showrow .n {
+    font-size: 10.5px; color: var(--ink-soft); white-space: nowrap;
+    flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  }
   /* An area whose whole level is switched off cannot be turned on by itself. */
   .showrow.muted { opacity: .45; }
   .showrow.muted input { cursor: not-allowed; }
-  #showSearch { width: 100%; margin: 8px 0 6px; }
+  .searchwrap { position: relative; margin: 9px 0 7px; }
+  .searchwrap .mag {
+    position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+    width: 13px; height: 13px; fill: none; stroke: var(--ink-soft);
+    stroke-width: 2; stroke-linecap: round; pointer-events: none;
+  }
+  #showSearch {
+    width: 100%; border-radius: 999px; background: var(--surface-2);
+    border-color: var(--line); padding: 7px 30px 7px 31px; font-size: 12.5px;
+    /* Safari draws its own magnifier and clear button inside a search field. */
+    -webkit-appearance: none; appearance: none;
+  }
+  #showSearch::-webkit-search-decoration,
+  #showSearch::-webkit-search-cancel-button { -webkit-appearance: none; display: none; }
+  #showSearch::placeholder { color: var(--ink-soft); }
+  /* Our own clear, since taking the native appearance away removes Safari's. */
+  #showClear {
+    position: absolute; right: 5px; top: 50%; transform: translateY(-50%);
+    width: 20px; height: 20px; padding: 0; border: none; border-radius: 50%;
+    background: none; box-shadow: none; color: var(--ink-soft);
+    font-size: 15px; line-height: 1; display: flex; align-items: center; justify-content: center;
+  }
+  #showClear:hover { background: var(--surface); color: var(--ink); box-shadow: none; }
   #showSort { width: auto; font-size: 11px; padding: 4px 8px; flex: 0 0 auto; }
   .showrow.master { border-bottom: 1px solid var(--line); border-radius: 0; padding-bottom: 9px; }
   .showrow .only {
@@ -331,7 +356,7 @@
   .row { display: flex; gap: 8px; flex-wrap: wrap; }
   .row > button { flex: 1 1 auto; }
   label { display: block; font-size: 11px; color: var(--ink-soft); margin-bottom: 4px; font-weight: 600; }
-  input[type=text], input[type=password], select, textarea {
+  input[type=text], input[type=password], input[type=search], select, textarea {
     width: 100%; font-family: var(--ui); font-size: 13px; color: var(--ink);
     background: var(--surface); border: 1px solid var(--line-strong);
     border-radius: var(--r); padding: 9px 10px; transition: border-color .15s, box-shadow .15s;
@@ -512,8 +537,12 @@
             <option value="za">Name Z–A</option>
           </select>
         </div>
-        <input type="search" id="showSearch" placeholder="Search areas…" autocomplete="off"
-               aria-label="Search the list">
+        <div class="searchwrap">
+          <svg class="mag" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.6"/><path d="m16.2 16.2 4.3 4.3"/></svg>
+          <input type="search" id="showSearch" placeholder="Search areas…" autocomplete="off"
+                 aria-label="Search the list">
+          <button type="button" id="showClear" hidden aria-label="Clear the search">&times;</button>
+        </div>
         <label class="showrow master">
           <input type="checkbox" id="showMaster">
           <span class="lbl"><strong id="showMasterLabel">Select all</strong></span>
@@ -1464,6 +1493,7 @@ window.StreetSweepBases = {
     var lbl = document.createElement("span");
     lbl.className = "lbl";
     lbl.innerHTML = highlight(opts.label, showQuery);
+    lbl.title = opts.label;   // a long name has to ellipsis somewhere in a dropdown
     row.appendChild(lbl);
     if (opts.note) {
       var n = document.createElement("span");
@@ -1578,13 +1608,22 @@ window.StreetSweepBases = {
 
   el("showSearch").addEventListener("input", function () {
     showQuery = el("showSearch").value.trim().toLowerCase();
+    el("showClear").hidden = el("showSearch").value === "";
     renderShowMenu();
+  });
+  el("showClear").addEventListener("click", function () {
+    el("showSearch").value = ""; showQuery = "";
+    el("showClear").hidden = true;
+    renderShowMenu();
+    el("showSearch").focus();
   });
   // Escape clears the box first and only closes the panel once it is empty.
   el("showSearch").addEventListener("keydown", function (ev) {
     if (ev.key === "Escape" && el("showSearch").value) {
       ev.stopPropagation();
-      el("showSearch").value = ""; showQuery = ""; renderShowMenu();
+      el("showSearch").value = ""; showQuery = "";
+      el("showClear").hidden = true;
+      renderShowMenu();
     }
   });
   el("showSort").addEventListener("change", function () {
@@ -1608,6 +1647,7 @@ window.StreetSweepBases = {
     if (!panel.hidden) {
       showQuery = "";
       el("showSearch").value = "";
+      el("showClear").hidden = true;
       el("showSort").value = showSort;
       renderShowMenu();
       el("showSearch").focus();
