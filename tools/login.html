@@ -42,10 +42,10 @@
   }
 
   /* ---- the map side ------------------------------------------------------
-     The supplied photograph, over the drawn map. The drawing stays underneath
-     rather than being deleted: it is what shows for the moment before 217 KB
-     of WebP arrives, and if the image ever fails to load the panel still looks
-     deliberate instead of empty. */
+     The supplied photograph. There was a drawn map under it for a moment, as a
+     placeholder; it painted straight over the photograph instead, because both
+     were absolutely positioned and the drawing came second in the document. The
+     gradient below does that job with nothing to get out of order. */
   #art {
     position: relative; overflow: hidden;
     background:
@@ -55,22 +55,12 @@
     /* The diagonal seam from the mockup. */
     clip-path: polygon(0 0, 100% 0, calc(100% - 90px) 100%, 0 100%);
   }
-  #art svg { position: absolute; inset: 0; width: 100%; height: 100%; }
   #photo {
     position: absolute; inset: 0; width: 100%; height: 100%;
-    object-fit: cover; object-position: 62% 50%;
-    opacity: 0; transition: opacity .5s ease;
+    object-fit: cover; object-position: 58% 52%;
+    opacity: 0; transition: opacity .4s ease;
   }
   #photo.ready { opacity: 1; }
-  .roads   { stroke: #2b4a68; stroke-width: 2.2; fill: none; stroke-linecap: round; }
-  .roads-2 { stroke: #223e59; stroke-width: 1.4; fill: none; stroke-linecap: round; }
-  .swept {
-    stroke: var(--green-400); stroke-width: 3.4; fill: none;
-    stroke-linecap: round; stroke-linejoin: round;
-    filter: drop-shadow(0 0 7px rgba(69,189,35,.85));
-  }
-  .water { fill: #0d3350; opacity: .85; }
-  .block { fill: rgba(255,255,255,.022); }
 
   #artcopy {
     position: absolute; left: 0; right: 90px; bottom: 0; padding: 40px 46px 44px;
@@ -85,8 +75,9 @@
     padding: 40px 34px; gap: 22px; min-width: 0;
   }
   #brand { text-align: center; }
-  #brand .mark { width: 108px; height: 108px; display: block; margin: 0 auto 14px; }
-  #brand .lockup { width: 232px; max-width: 74vw; height: auto; display: block; margin: 0 auto; }
+  /* Width only: the mark is not square, and fixing both dimensions squashed it. */
+  #brand .mark { width: 118px; height: auto; display: block; margin: 0 auto 16px; }
+  #brand .lockup { width: 286px; max-width: 76vw; height: auto; display: block; margin: 0 auto; }
 
   form {
     width: 100%; max-width: 396px;
@@ -190,11 +181,11 @@
     #artcopy h2 { font-size: 19px; }
     #artcopy p { display: none; }
     #panel { padding: 26px 20px 34px; gap: 18px; }
-    #brand .mark { width: 84px; height: 84px; }
-    #brand .lockup { width: 200px; }
+    #brand .mark { width: 92px; }
+    #brand .lockup { width: 246px; }
   }
   @media (max-height: 720px) and (min-width: 901px) {
-    #brand .mark { width: 76px; height: 76px; margin-bottom: 10px; }
+    #brand .mark { width: 84px; margin-bottom: 10px; }
     #uses { display: none; }
   }
 </style>
@@ -204,38 +195,6 @@
 <div id="art" aria-hidden="true">
   <img id="photo" src="/login-art.webp" alt="" decoding="async" fetchpriority="low"
        onload="this.classList.add('ready')">
-  <svg viewBox="0 0 700 1000" preserveAspectRatio="xMidYMid slice">
-    <path class="water" d="M0 706c96-34 168-16 236 14 76 34 140 52 214 32 62-17 128-58 250-76v324H0Z"/>
-    <g class="block">
-      <rect x="64" y="96" width="132" height="92" rx="7"/><rect x="232" y="76" width="150" height="112" rx="7"/>
-      <rect x="418" y="112" width="120" height="84" rx="7"/><rect x="92" y="236" width="118" height="128" rx="7"/>
-      <rect x="250" y="248" width="162" height="108" rx="7"/><rect x="452" y="244" width="140" height="126" rx="7"/>
-      <rect x="76" y="418" width="150" height="104" rx="7"/><rect x="268" y="404" width="128" height="134" rx="7"/>
-      <rect x="440" y="424" width="152" height="96" rx="7"/>
-    </g>
-    <g class="roads-2">
-      <path d="M0 140h700M0 300h700M0 460h700M0 620h700"/>
-      <path d="M130 0v700M330 0v700M520 0v700"/>
-    </g>
-    <g class="roads">
-      <path d="M0 214c120 0 210 22 330 22s250-30 370-30"/>
-      <path d="M0 540c150 8 250-24 380-24s230 34 320 34"/>
-      <path d="M214 0c0 160 26 250 26 380s-40 230-40 320"/>
-      <path d="M612 0c0 150-22 240-22 372s18 220 18 328"/>
-    </g>
-    <g class="swept">
-      <path d="M0 214c120 0 210 22 330 22s250-30 370-30"/>
-      <path d="M214 0c0 160 26 250 26 380"/>
-      <path d="M240 380c90 0 160 18 250 18"/>
-      <path d="M0 540c150 8 250-24 380-24"/>
-    </g>
-    <g>
-      <circle cx="240" cy="380" r="9" fill="#45bd23"/><circle cx="240" cy="380" r="17" fill="#45bd23" opacity=".2"/>
-      <circle cx="490" cy="398" r="9" fill="#45bd23"/><circle cx="490" cy="398" r="17" fill="#45bd23" opacity=".2"/>
-      <circle cx="380" cy="516" r="9" fill="#45bd23"/><circle cx="380" cy="516" r="17" fill="#45bd23" opacity=".2"/>
-      <circle cx="560" cy="206" r="9" fill="#45bd23"/><circle cx="560" cy="206" r="17" fill="#45bd23" opacity=".2"/>
-    </g>
-  </svg>
   <div id="artcopy">
     <h2>Every street, once.</h2>
     <p>Draw the area, drive it, and watch it fill in. StreetSweep keeps the map of what
@@ -245,8 +204,8 @@
 
 <main id="panel">
   <div id="brand">
-    <img class="mark" src="/logo-mark.png" alt="">
-    <img class="lockup" src="/lockup-wordmark-light.png" alt="StreetSweep — drive, explore, complete">
+    <img class="mark" src="/login-mark.png" alt="" width="384" height="433">
+    <img class="lockup" src="/login-lockup.png" width="810" height="165" alt="StreetSweep — drive, explore, complete">
   </div>
 
   <form id="signin" novalidate>
