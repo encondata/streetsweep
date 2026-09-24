@@ -91,6 +91,9 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
     private var pois: List<LatLngPoint> = emptyList()
     private var nearest: NearestStreet? = null
     private var guidanceFrom: LatLngPoint? = null
+    /** True while the action strip is showing the three guidance choices. */
+    private var pickingGuidance = false
+    private var guidanceMode: GuidanceMode = GuidanceMode.OFF
     private var guidanceJob: Job? = null
 
     /** Roads leaving this spot, while the driver says which one the gate is on. */
@@ -256,6 +259,15 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
                 addAction(cancel)
             }.build()
 
+            // Three choices and a way out: the same two-step the Gate button uses, so
+            // there is nothing new to learn while driving.
+            pickingGuidance -> ActionStrip.Builder()
+                .addAction(guidanceChoice("Off", GuidanceMode.OFF))
+                .addAction(guidanceChoice("Nearest", GuidanceMode.NEAREST))
+                .addAction(guidanceChoice("Route", GuidanceMode.ROUTE))
+                .addAction(cancel)
+                .build()
+
             else -> {
                 val recording = TrackingStateHolder.isRecording
                 ActionStrip.Builder()
@@ -283,12 +295,34 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
                             .build(),
                     )
                     .apply {
+                        // A strip holds four. Undo only matters for a few seconds after a
+                        // gate, and it matters a lot then, so it borrows the last slot;
+                        // the rest of the time that slot is the guidance control.
                         if (System.currentTimeMillis() < undoUntil && lastGateIds.isNotEmpty()) {
                             addAction(
                                 Action.Builder()
                                     .setTitle("Undo")
                                     .setIcon(icon(R.drawable.ic_car_undo))
                                     .setOnClickListener { undoGate() }
+                                    .build(),
+                            )
+                        } else {
+                            addAction(
+                                Action.Builder()
+                                    .setTitle(
+                                        when (guidanceMode) {
+                                            GuidanceMode.OFF -> "Guide"
+                                            GuidanceMode.NEAREST -> "Nearest"
+                                            GuidanceMode.ROUTE -> "Route"
+                                        },
+                                    )
+                                    .setIcon(
+                                        icon(
+                                            if (guidanceMode == GuidanceMode.OFF) R.drawable.ic_car_guide_off
+                                            else R.drawable.ic_car_guide,
+                                        ),
+                                    )
+                                    .setOnClickListener { pickingGuidance = true; invalidate() }
                                     .build(),
                             )
                         }
@@ -470,6 +504,7 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
         guidanceFrom = p
         guidanceJob = lifecycleScope.launch {
             val mode = container.settings.current().guidanceMode
+            if (guidanceMode != mode) { guidanceMode = mode; invalidate() }
             if (mode == GuidanceMode.OFF) {
                 nearest = null
                 requestRender()
@@ -481,6 +516,64 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
                 ?.let { container.coverageRepository.nextOnRoute(it.route, p)?.street }
                 ?: container.coverageRepository.nearestUndriven(p, areaId)
             requestRender()
+        }
+    }
+
+    private fun toastCar(text: String) =
+        carContext.getCarService(AppManager::class.java).showToast(text, CarToast.LENGTH_LONG)
+
+    private fun guidanceChoice(title: String, mode: GuidanceMode): Action =
+        Action.Builder()
+            .setTitle(if (mode == guidanceMode) "$title ✓" else title)
+            .setOnClickListener { chooseGuidance(mode) }
+            .build()
+
+    /**
+     * Picking a mode has to recompute straight away rather than wait for the car to move
+     * far enough: someone who has just asked where to go next should not have to drive
+     * before being told.
+     */
+    private fun chooseGuidance(mode: GuidanceMode) {
+        pickingGuidance = false
+        lifecycleScope.launch {
+            container.settings.setGuidanceMode(mode)
+            guidanceMode = mode
+            guidanceFrom = null
+
+            if (mode == GuidanceMode.ROUTE) {
+                // Without a plan, ROUTE quietly falls back to "nearest" further down, which
+                // looks like it worked and is not what was asked for. Work one out here.
+                val here = position
+                val area = here?.let { CoverageRepository.deepestContaining(areas, it)?.area }
+                if (here == null || area == null) {
+                    toastCar("No area here to plan a route for")
+                } else if (container.route.plan.value?.areaId != area.id) {
+                    toastCar("Working out a route for ${area.name}…")
+                    val plan = runCatching { container.coverageRepository.planRoute(here, area.id) }.getOrNull()
+                    when {
+                        plan == null -> toastCar("Could not work out a route")
+                        plan.isEmpty -> { container.route.clear(); toastCar("Nothing left to drive in ${area.name}") }
+                        else -> {
+                            container.route.set(area.id, area.name, plan)
+                            toastCar(
+                                "${plan.requiredCount} streets, " +
+                                    Geo.formatDistance(plan.totalMeters) + " with " +
+                                    Geo.formatDistance(plan.deadheadMeters) + " of backtracking",
+                            )
+                        }
+                    }
+                } else {
+                    toastCar("Following the route for ${area.name}")
+                }
+            } else {
+                toastCar(
+                    if (mode == GuidanceMode.OFF) "Guidance off"
+                    else "Heading for the nearest street still owing",
+                )
+            }
+
+            updateGuidance()
+            invalidate()
         }
     }
 
