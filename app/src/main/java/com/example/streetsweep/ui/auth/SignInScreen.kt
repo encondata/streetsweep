@@ -95,7 +95,9 @@ fun SignInScreen(
     notice: String?,
     serverLabel: String,
     onSignIn: (email: String, password: String) -> Unit,
-    onChangeServer: () -> Unit,
+    /** Saves a new server address. The gate is in front of Settings, so it has to be
+     *  changeable from here or a self-hosted server cannot be reached on a fresh phone. */
+    onChangeServer: (String) -> Unit,
     /** Shown on the parts of the design that are drawn but not built yet. */
     onPlaceholder: (String) -> Unit,
     onSkip: (() -> Unit)? = null,
@@ -104,6 +106,8 @@ fun SignInScreen(
     var password by rememberSaveable { mutableStateOf("") }
     var reveal by rememberSaveable { mutableStateOf(false) }
     var remember by rememberSaveable { mutableStateOf(true) }
+    var editingServer by rememberSaveable { mutableStateOf(false) }
+    var serverField by rememberSaveable(serverLabel) { mutableStateOf(serverLabel) }
     val focus = LocalFocusManager.current
 
     Surface(Modifier.fillMaxSize(), color = Navy950) {
@@ -328,17 +332,49 @@ fun SignInScreen(
                     }
 
                     Spacer(Modifier.height(10.dp))
-                    // The server this is signing in to is worth stating, and it is the
-                    // natural place to go and change it.
-                    Text(
-                        "Signing in to $serverLabel  ·  Change",
-                        color = InkSoft,
-                        fontSize = 11.5.sp,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onChangeServer() },
-                    )
+                    if (editingServer) {
+                        OutlinedTextField(
+                            value = serverField,
+                            onValueChange = { serverField = it },
+                            placeholder = { Text("streetsweep.example.com", color = InkSoft) },
+                            singleLine = true,
+                            enabled = !busy,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = fieldColours(),
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Uri,
+                                imeAction = ImeAction.Done,
+                            ),
+                            keyboardActions = KeyboardActions(onDone = {
+                                focus.clearFocus(); onChangeServer(serverField); editingServer = false
+                            }),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            TextButton(onClick = { serverField = serverLabel; editingServer = false }) {
+                                Text("Cancel", color = InkSoft, fontSize = 12.5.sp)
+                            }
+                            TextButton(onClick = {
+                                focus.clearFocus(); onChangeServer(serverField); editingServer = false
+                            }) {
+                                Text("Use this server", color = Color(0xFF57C7FF), fontSize = 12.5.sp)
+                            }
+                        }
+                    } else {
+                        // Worth stating which server this is, and the natural place to change it.
+                        Text(
+                            "Signing in to $serverLabel  ·  Change",
+                            color = InkSoft,
+                            fontSize = 11.5.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { editingServer = true },
+                        )
+                    }
                 }
             }
 

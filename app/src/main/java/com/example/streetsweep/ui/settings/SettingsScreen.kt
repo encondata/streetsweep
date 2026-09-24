@@ -116,8 +116,6 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
     val multiLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { refresh() }
     val singleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { refresh() }
     var showPicker by remember { mutableStateOf(false) }
-    var showSignIn by remember { mutableStateOf(false) }
-    val onSignIn = { showSignIn = true }
     val message by viewModel.message.collectAsStateWithLifecycle()
     val busy by viewModel.busy.collectAsStateWithLifecycle()
     val restartNeeded by viewModel.restartNeeded.collectAsStateWithLifecycle()
@@ -348,8 +346,10 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
             // Signing in replaces pasting a token by hand: the server issues this phone one
             // of its own, so a drive can be attributed to the person who made it.
             if (settings.portalToken.isNullOrBlank()) {
+                // Only reachable by someone who chose to go without an account: signing
+                // in is the gate in front of the app, so this puts the gate back.
                 ListItem(
-                    modifier = Modifier.clickable(enabled = !settings.portalUrl.isNullOrBlank()) { onSignIn() },
+                    modifier = Modifier.clickable { viewModel.signInAgain() },
                     leadingContent = { Icon(Icons.Default.AccountCircle, contentDescription = null) },
                     headlineContent = { Text("Sign in") },
                     supportingContent = { Text("With the email and password an administrator gave you") },
@@ -515,37 +515,6 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
         )
     }
 
-    if (showSignIn) {
-        val busy by viewModel.busy.collectAsStateWithLifecycle()
-        val signInError by viewModel.signInError.collectAsStateWithLifecycle()
-        val signInNotice by viewModel.signInNotice.collectAsStateWithLifecycle()
-        val signedIn by viewModel.signedIn.collectAsStateWithLifecycle()
-        LaunchedEffect(signedIn) {
-            if (signedIn) { showSignIn = false; viewModel.clearSignIn() }
-        }
-        val dismiss = { showSignIn = false; viewModel.clearSignIn() }
-        // A Dialog rather than a Box, so it covers the bottom navigation as well. Inside
-        // the Settings screen it would otherwise sit above the bar and read as a panel.
-        Dialog(
-            onDismissRequest = dismiss,
-            properties = DialogProperties(
-                usePlatformDefaultWidth = false,
-                dismissOnClickOutside = false,
-                decorFitsSystemWindows = false,
-            ),
-        ) {
-        SignInScreen(
-            busy = busy,
-            error = signInError,
-            notice = signInNotice,
-            serverLabel = settings.portalUrl.orEmpty().removePrefix("https://").removePrefix("http://"),
-            onSignIn = { email, password -> viewModel.signInToPortal(email, password) },
-            onChangeServer = dismiss,
-            onPlaceholder = { what -> viewModel.notBuiltYet(what) },
-            onSkip = dismiss,
-        )
-        }
-    }
 }
 
 @Composable

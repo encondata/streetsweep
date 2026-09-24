@@ -33,7 +33,12 @@ import com.example.streetsweep.ui.stats.StatsScreen
 import com.example.streetsweep.ui.streets.StreetsScreen
 import com.example.streetsweep.ui.sessions.SessionDetailScreen
 import com.example.streetsweep.ui.sessions.SessionsScreen
+import com.example.streetsweep.ui.auth.SignInScreen
+import com.example.streetsweep.ui.auth.SignInViewModel
+import com.example.streetsweep.ui.common.containerViewModel
 import com.example.streetsweep.ui.settings.SettingsScreen
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 private enum class Destination(val route: String, val label: String, val icon: ImageVector) {
     Home("home", "Map", Icons.Default.Map),
@@ -47,9 +52,43 @@ private const val SESSION_ROUTE = "session/{id}"
 /** Screens that hang off Progress, so its tab stays lit while you are in them. */
 private val DRIVE_ROUTES = setOf("drives", SESSION_ROUTE, "places")
 
-/** Root of the app's UI: bottom navigation between the map, the drive list and settings. */
+/**
+ * The gate in front of everything. With no token and no decision to go without one, the
+ * sign-in screen is the whole screen — not a dialog reached through Settings — and it
+ * comes straight back the moment someone signs out.
+ *
+ * It can be stepped past, because the app records drives perfectly well on its own and
+ * a phone with no server to talk to should not be bricked by a login screen.
+ */
 @Composable
 fun StreetSweepApp() {
+    val auth: SignInViewModel = containerViewModel { c, _ -> SignInViewModel(c) }
+    val settings by auth.settings.collectAsStateWithLifecycle()
+    val busy by auth.busy.collectAsStateWithLifecycle()
+    val error by auth.error.collectAsStateWithLifecycle()
+    val notice by auth.notice.collectAsStateWithLifecycle()
+
+    if (settings.portalToken.isNullOrBlank() && !settings.standalone) {
+        SignInScreen(
+            busy = busy,
+            error = error,
+            notice = notice,
+            serverLabel = settings.portalUrl.orEmpty()
+                .removePrefix("https://").removePrefix("http://"),
+            onSignIn = auth::signIn,
+            onChangeServer = auth::setServer,
+            onPlaceholder = auth::notBuiltYet,
+            onSkip = auth::useWithoutAnAccount,
+        )
+        return
+    }
+
+    MainShell()
+}
+
+/** Bottom navigation between the map, the drive list and settings. */
+@Composable
+private fun MainShell() {
     val navController = rememberNavController()
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route

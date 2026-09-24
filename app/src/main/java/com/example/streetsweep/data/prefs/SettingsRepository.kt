@@ -42,6 +42,11 @@ data class TrackingSettings(
     /** Who the token belongs to, kept only so the app can say whose account it is signed into. */
     val portalUserName: String? = null,
     val portalUserEmail: String? = null,
+    /**
+     * Set when someone chooses to use the app without an account. Without it the
+     * sign-in screen would come back at every launch, which is nagging, not gating.
+     */
+    val standalone: Boolean = false,
     val autoPushEnabled: Boolean = false,
     val lastPortalPushAt: Long = 0,
 ) {
@@ -85,6 +90,7 @@ class SettingsRepository(context: Context) {
         val PORTAL_TOKEN = stringPreferencesKey("portal_token")
         val PORTAL_USER_NAME = stringPreferencesKey("portal_user_name")
         val PORTAL_USER_EMAIL = stringPreferencesKey("portal_user_email")
+        val STANDALONE = booleanPreferencesKey("standalone")
         val AUTO_PUSH = booleanPreferencesKey("portal_auto_push")
         val LAST_PUSH = androidx.datastore.preferences.core.longPreferencesKey("portal_last_push_at")
     }
@@ -111,6 +117,7 @@ class SettingsRepository(context: Context) {
             portalToken = p[Keys.PORTAL_TOKEN]?.takeIf { it.isNotBlank() },
             portalUserName = p[Keys.PORTAL_USER_NAME]?.takeIf { it.isNotBlank() },
             portalUserEmail = p[Keys.PORTAL_USER_EMAIL]?.takeIf { it.isNotBlank() },
+            standalone = p[Keys.STANDALONE] ?: false,
             autoPushEnabled = p[Keys.AUTO_PUSH] ?: false,
             lastPortalPushAt = p[Keys.LAST_PUSH] ?: 0L,
         )
@@ -166,9 +173,12 @@ class SettingsRepository(context: Context) {
         if (clean.isEmpty()) p.remove(Keys.PORTAL_TOKEN) else p[Keys.PORTAL_TOKEN] = clean
     }
 
+    suspend fun setStandalone(on: Boolean) = store.edit { p -> p[Keys.STANDALONE] = on }
+
     /** Signing in: the device token the server issued, and whose account it is. */
     suspend fun setPortalIdentity(token: String, name: String?, email: String?) = store.edit { p ->
         p[Keys.PORTAL_TOKEN] = token.trim()
+        p.remove(Keys.STANDALONE)
         if (name.isNullOrBlank()) p.remove(Keys.PORTAL_USER_NAME) else p[Keys.PORTAL_USER_NAME] = name
         if (email.isNullOrBlank()) p.remove(Keys.PORTAL_USER_EMAIL) else p[Keys.PORTAL_USER_EMAIL] = email
     }
@@ -181,6 +191,9 @@ class SettingsRepository(context: Context) {
         p.remove(Keys.PORTAL_TOKEN)
         p.remove(Keys.PORTAL_USER_NAME)
         p.remove(Keys.PORTAL_USER_EMAIL)
+        // Forget the choice to go without an account too, so signing out lands on the
+        // sign-in screen rather than straight back into the app.
+        p.remove(Keys.STANDALONE)
     }
 
     suspend fun setAutoPush(on: Boolean) = store.edit { it[Keys.AUTO_PUSH] = on }
