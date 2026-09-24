@@ -9,6 +9,14 @@ import java.net.URL
 
 class PortalException(message: String) : IOException(message)
 
+/** What the server hands back when a phone signs in. */
+data class DeviceSignIn(
+    val token: String,
+    val name: String?,
+    val email: String?,
+    val role: String?,
+)
+
 /**
  * Talks to the area builder's API (see `tools/`). Plain HTTP on your own network: there is no
  * authentication, so the base URL is the only thing pointing it at your server.
@@ -50,6 +58,38 @@ class PortalClient(
             conn.disconnect()
         }
     }
+
+    /**
+     * Signs this phone in and comes back with a token of its own. The browser gets a
+     * cookie; a phone gets a token it keeps, because it syncs in the background long
+     * after anyone last looked at it. The server refuses an account that may not record.
+     */
+    suspend fun signInDevice(email: String, password: String, label: String): DeviceSignIn =
+        withContext(Dispatchers.IO) {
+            val conn = open("/api/auth/device")
+            try {
+                conn.requestMethod = "POST"
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json")
+                val body = JSONObject()
+                    .put("email", email.trim())
+                    .put("password", password)
+                    .put("label", label)
+                conn.outputStream.use { it.write(body.toString().toByteArray()) }
+                val json = JSONObject(readResponse(conn))
+                val token = json.optString("token").takeIf { it.isNotBlank() }
+                    ?: throw PortalException("The server did not send a token back")
+                val user = json.optJSONObject("user")
+                DeviceSignIn(
+                    token = token,
+                    name = user?.optString("name")?.takeIf { it.isNotBlank() },
+                    email = user?.optString("email")?.takeIf { it.isNotBlank() },
+                    role = user?.optString("role")?.takeIf { it.isNotBlank() },
+                )
+            } finally {
+                conn.disconnect()
+            }
+        }
 
     suspend fun getJson(path: String): String = get(path)
 
@@ -93,10 +133,15 @@ class PortalClient(
         val code = conn.responseCode
         val stream = if (code in 200..299) conn.inputStream else conn.errorStream
         val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-        if (code == 401) throw PortalException("The server rejected the token")
         if (code !in 200..299) {
+            // The server explains itself; say what it said. A 401 only means "rejected the
+            // token" when a token was sent — on a sign-in it means the password was wrong,
+            // and the old blanket wording made that impossible to tell.
             val message = runCatching { JSONObject(text).optString("error") }.getOrNull()
-            throw PortalException(message?.takeIf { it.isNotBlank() } ?: "Server returned HTTP $code")
+            throw PortalException(
+                message?.takeIf { it.isNotBlank() }
+                    ?: if (code == 401) "The server rejected the token" else "Server returned HTTP $code",
+            )
         }
         return text
     }

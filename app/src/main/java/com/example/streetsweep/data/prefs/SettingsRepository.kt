@@ -39,6 +39,9 @@ data class TrackingSettings(
     /** Address of the area builder's server. Defaults to the hosted one. */
     val portalUrl: String? = DEFAULT_PORTAL_URL,
     val portalToken: String? = null,
+    /** Who the token belongs to, kept only so the app can say whose account it is signed into. */
+    val portalUserName: String? = null,
+    val portalUserEmail: String? = null,
     val autoPushEnabled: Boolean = false,
     val lastPortalPushAt: Long = 0,
 ) {
@@ -80,6 +83,8 @@ class SettingsRepository(context: Context) {
         val IN_VEHICLE = booleanPreferencesKey("in_vehicle_trigger")
         val PORTAL_URL = stringPreferencesKey("portal_url")
         val PORTAL_TOKEN = stringPreferencesKey("portal_token")
+        val PORTAL_USER_NAME = stringPreferencesKey("portal_user_name")
+        val PORTAL_USER_EMAIL = stringPreferencesKey("portal_user_email")
         val AUTO_PUSH = booleanPreferencesKey("portal_auto_push")
         val LAST_PUSH = androidx.datastore.preferences.core.longPreferencesKey("portal_last_push_at")
     }
@@ -104,6 +109,8 @@ class SettingsRepository(context: Context) {
             inVehicleTriggerEnabled = p[Keys.IN_VEHICLE] ?: false,
             portalUrl = p[Keys.PORTAL_URL]?.takeIf { it.isNotBlank() } ?: TrackingSettings.DEFAULT_PORTAL_URL,
             portalToken = p[Keys.PORTAL_TOKEN]?.takeIf { it.isNotBlank() },
+            portalUserName = p[Keys.PORTAL_USER_NAME]?.takeIf { it.isNotBlank() },
+            portalUserEmail = p[Keys.PORTAL_USER_EMAIL]?.takeIf { it.isNotBlank() },
             autoPushEnabled = p[Keys.AUTO_PUSH] ?: false,
             lastPortalPushAt = p[Keys.LAST_PUSH] ?: 0L,
         )
@@ -157,6 +164,23 @@ class SettingsRepository(context: Context) {
     suspend fun setPortalToken(value: String?) = store.edit { p ->
         val clean = value?.trim().orEmpty()
         if (clean.isEmpty()) p.remove(Keys.PORTAL_TOKEN) else p[Keys.PORTAL_TOKEN] = clean
+    }
+
+    /** Signing in: the device token the server issued, and whose account it is. */
+    suspend fun setPortalIdentity(token: String, name: String?, email: String?) = store.edit { p ->
+        p[Keys.PORTAL_TOKEN] = token.trim()
+        if (name.isNullOrBlank()) p.remove(Keys.PORTAL_USER_NAME) else p[Keys.PORTAL_USER_NAME] = name
+        if (email.isNullOrBlank()) p.remove(Keys.PORTAL_USER_EMAIL) else p[Keys.PORTAL_USER_EMAIL] = email
+    }
+
+    /**
+     * Signing out forgets the token and the name. Drives already recorded stay on the
+     * phone: they are this device's own history, not the portal's copy of it.
+     */
+    suspend fun clearPortalIdentity() = store.edit { p ->
+        p.remove(Keys.PORTAL_TOKEN)
+        p.remove(Keys.PORTAL_USER_NAME)
+        p.remove(Keys.PORTAL_USER_EMAIL)
     }
 
     suspend fun setAutoPush(on: Boolean) = store.edit { it[Keys.AUTO_PUSH] = on }

@@ -735,10 +735,13 @@ function rowToVehicle(row) {
 }
 
 /** Routes anyone may reach without proving who they are. */
-const OPEN_ROUTES = new Set(["/api/config", "/api/health", "/api/auth/login"]);
+const OPEN_ROUTES = new Set([
+  "/api/config", "/api/health", "/api/auth/login", "/api/auth/device",
+]);
 
 /** Which right a route needs. Anything not listed here needs only "read". */
 function rightFor(route, method) {
+  if (route === "/api/vehicles/mine") return "read";
   if (route.startsWith("/api/users") || route.startsWith("/api/vehicles") ||
       route.startsWith("/api/devices")) return "admin";
   if (route.startsWith("/api/areas") && method !== "GET") return "areas";
@@ -818,6 +821,26 @@ async function handle(req, res) {
     const token = await identity.startSession(pool, result.user.id, req.headers["user-agent"]);
     setCookie(res, token, 30 * 24 * 60 * 60, req);
     return sendJson(res, 200, { user: result.user });
+  }
+
+  /**
+   * How a phone signs in. The browser gets a cookie; a phone gets a device token it
+   * keeps, because it syncs in the background long after anyone last looked at it.
+   * Same password check and the same lockout as the browser path.
+   */
+  if (route === "/api/auth/device" && req.method === "POST") {
+    const body = await readBody(req);
+    const result = await identity.signIn(pool, body.email, body.password);
+    if (result.error) return sendJson(res, result.status, { error: result.error });
+    if (!identity.can(result.user, "record")) {
+      return sendJson(res, 403, { error: "This account cannot record drives." });
+    }
+    const token = await identity.createDeviceToken(pool, {
+      userId: result.user.id,
+      label: String(body.label || "Phone").slice(0, 80),
+      vehicleId: body.vehicleId ? Number(body.vehicleId) : null,
+    });
+    return sendJson(res, 201, { token, user: result.user });
   }
 
   if (route === "/api/auth/logout" && req.method === "POST") {
@@ -933,6 +956,14 @@ async function handle(req, res) {
   }
 
   // ---------------------------------------------------------------- vehicles
+
+  // A driver choosing which vehicle they are in needs the list, so this one read is
+  // open to any signed-in account rather than admins only.
+  if (route === "/api/vehicles/mine" && req.method === "GET") {
+    const { rows } = await pool.query(
+      "SELECT * FROM vehicles WHERE active ORDER BY lower(name)");
+    return sendJson(res, 200, { vehicles: rows.map(rowToVehicle) });
+  }
 
   if (route === "/api/vehicles" && req.method === "GET") {
     const { rows } = await pool.query(

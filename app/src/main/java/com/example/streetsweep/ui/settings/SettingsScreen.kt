@@ -63,7 +63,12 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
+import com.example.streetsweep.ui.auth.SignInScreen
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -111,6 +116,8 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
     val multiLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { refresh() }
     val singleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { refresh() }
     var showPicker by remember { mutableStateOf(false) }
+    var showSignIn by remember { mutableStateOf(false) }
+    val onSignIn = { showSignIn = true }
     val message by viewModel.message.collectAsStateWithLifecycle()
     val busy by viewModel.busy.collectAsStateWithLifecycle()
     val restartNeeded by viewModel.restartNeeded.collectAsStateWithLifecycle()
@@ -338,7 +345,36 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
 
             SectionHeader("Area builder server")
             UrlField(label = "Server address", value = settings.portalUrl.orEmpty(), onCommit = viewModel::setPortalUrl)
-            UrlField(label = "Access token", value = settings.portalToken.orEmpty(), onCommit = viewModel::setPortalToken)
+            // Signing in replaces pasting a token by hand: the server issues this phone one
+            // of its own, so a drive can be attributed to the person who made it.
+            if (settings.portalToken.isNullOrBlank()) {
+                ListItem(
+                    modifier = Modifier.clickable(enabled = !settings.portalUrl.isNullOrBlank()) { onSignIn() },
+                    leadingContent = { Icon(Icons.Default.AccountCircle, contentDescription = null) },
+                    headlineContent = { Text("Sign in") },
+                    supportingContent = { Text("With the email and password an administrator gave you") },
+                )
+            } else {
+                ListItem(
+                    leadingContent = { Icon(Icons.Default.AccountCircle, contentDescription = null) },
+                    headlineContent = {
+                        Text(settings.portalUserName ?: settings.portalUserEmail ?: "Signed in")
+                    },
+                    supportingContent = {
+                        Text(
+                            when {
+                                settings.portalUserName != null && settings.portalUserEmail != null ->
+                                    settings.portalUserEmail!!
+                                // A token typed in by hand, from before accounts existed.
+                                else -> "Signed in with a token"
+                            },
+                        )
+                    },
+                    trailingContent = {
+                        TextButton(onClick = viewModel::signOutOfPortal) { Text("Sign out") }
+                    },
+                )
+            }
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = viewModel::testPortal, enabled = !settings.portalUrl.isNullOrBlank()) { Text("Test") }
                 TextButton(onClick = viewModel::pullAreasFromPortal, enabled = !settings.portalUrl.isNullOrBlank()) { Text("Get areas") }
@@ -369,7 +405,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
             )
             Text(
                 if (settings.lastPortalPushAt > 0) "Last sent ${Format.dateTime(settings.lastPortalPushAt)}."
-                else "Nothing sent yet. Give the server's address and the token it was started with.",
+                else "Nothing sent yet. Give the server's address, then sign in.",
                 Modifier.padding(16.dp),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -477,6 +513,35 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
             onSelect = { viewModel.selectBluetoothDevice(it); showPicker = false },
             onDismiss = { showPicker = false },
         )
+    }
+
+    if (showSignIn) {
+        val busy by viewModel.busy.collectAsStateWithLifecycle()
+        val signInError by viewModel.signInError.collectAsStateWithLifecycle()
+        val signedIn by viewModel.signedIn.collectAsStateWithLifecycle()
+        LaunchedEffect(signedIn) {
+            if (signedIn) { showSignIn = false; viewModel.clearSignIn() }
+        }
+        val dismiss = { showSignIn = false; viewModel.clearSignIn() }
+        // A Dialog rather than a Box, so it covers the bottom navigation as well. Inside
+        // the Settings screen it would otherwise sit above the bar and read as a panel.
+        Dialog(
+            onDismissRequest = dismiss,
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                dismissOnClickOutside = false,
+                decorFitsSystemWindows = false,
+            ),
+        ) {
+        SignInScreen(
+            busy = busy,
+            error = signInError,
+            serverLabel = settings.portalUrl.orEmpty().removePrefix("https://").removePrefix("http://"),
+            onSignIn = { email, password -> viewModel.signInToPortal(email, password) },
+            onChangeServer = dismiss,
+            onSkip = dismiss,
+        )
+        }
     }
 }
 

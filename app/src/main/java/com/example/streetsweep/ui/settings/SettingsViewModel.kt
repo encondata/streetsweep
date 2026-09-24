@@ -103,6 +103,41 @@ class SettingsViewModel(private val container: AppContainer, private val context
 
     fun testPortal() = work { "Reached " + container.portalClient.ping() }
 
+    private val _signInError = MutableStateFlow<String?>(null)
+    val signInError: StateFlow<String?> = _signInError
+    private val _signedIn = MutableStateFlow(false)
+    /** Flips once when a sign-in lands, so the screen knows to close itself. */
+    val signedIn: StateFlow<Boolean> = _signedIn
+
+    fun clearSignIn() { _signInError.value = null; _signedIn.value = false }
+
+    /**
+     * Swaps an email and password for a token belonging to this phone. The server refuses
+     * an account that may not record, so a viewer is turned away here rather than being
+     * let in and failing at the first sync.
+     */
+    fun signInToPortal(email: String, password: String) = viewModelScope.launch {
+        if (_busy.value) return@launch
+        _busy.value = true
+        _signInError.value = null
+        try {
+            val label = android.os.Build.MODEL?.takeIf { it.isNotBlank() } ?: "Phone"
+            val result = container.portalClient.signInDevice(email, password, label)
+            container.settings.setPortalIdentity(result.token, result.name, result.email)
+            _signedIn.value = true
+            _message.value = "Signed in as " + (result.name ?: result.email ?: "this account")
+        } catch (e: Exception) {
+            _signInError.value = e.message ?: "Could not sign in"
+        } finally {
+            _busy.value = false
+        }
+    }
+
+    fun signOutOfPortal() = viewModelScope.launch {
+        container.settings.clearPortalIdentity()
+        _message.value = "Signed out. Drives already on this phone are untouched."
+    }
+
     fun pullAreasFromPortal() = work {
         val added = container.portalSync.pullAreas()
         if (added == 0) {
