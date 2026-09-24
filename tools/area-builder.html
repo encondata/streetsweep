@@ -469,6 +469,12 @@
   #dashCols > div > .eyebrow:first-child,
   #peopleCols > div > .eyebrow:first-child { margin-top: 6px; }
 
+  .viewhead.withaction {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  }
+  .viewhead.withaction > div { min-width: 0; }
+  .viewhead.withaction select { width: auto; flex: 0 0 auto; }
+
   /* ---- a table of areas ---------------------------------------------------- */
   :root[data-view="areas"][data-areas="table"] #stage { grid-template-columns: 1fr; }
   :root[data-view="areas"][data-areas="table"] #mapwrap { display: none; }
@@ -1163,9 +1169,17 @@
       </section>
 
       <section class="view" data-view="admin" hidden>
-        <div class="viewhead">
-          <h2>Dashboard</h2>
-          <p>How the sweeping is going, and how this server is holding up.</p>
+        <div class="viewhead withaction">
+          <div>
+            <h2>Dashboard</h2>
+            <p>How the sweeping is going, and how this server is holding up.</p>
+          </div>
+          <select id="dashRange" title="Over what period">
+            <option value="7">Last 7 days</option>
+            <option value="30" selected>Last 30 days</option>
+            <option value="90">Last 90 days</option>
+            <option value="365">Last year</option>
+          </select>
         </div>
 
         <div class="kpis" id="kpiRow"></div>
@@ -2592,6 +2606,13 @@ window.StreetSweepBases = {
     }, 60);
   }
 
+  el("dashRange").addEventListener("change", function () {
+    dashDays = Number(el("dashRange").value) || 30;
+    loadDashboard().catch(function (err) {
+      adminSay(err && err.message ? err.message : "Could not load.", true);
+    });
+  });
+
   el("dashChips").addEventListener("click", function (ev) {
     var b = ev.target.closest && ev.target.closest("button[data-filter]");
     if (!b) return;
@@ -2616,6 +2637,9 @@ window.StreetSweepBases = {
     return apiJson("/api/admin/dashboard?from=" + from + "&to=" + to).then(function (d) {
       var n = d.now, p = d.previous, cov = d.coverage;
 
+      var periodWord = dashDays === 7 ? "in the last 7 days"
+        : dashDays === 90 ? "in the last 90 days"
+        : dashDays === 365 ? "in the last year" : "in the last 30 days";
       el("kpiRow").innerHTML =
         kpi(ICON.users, "Active drivers", n.activeUsers.toLocaleString(),
             cov.areas + (cov.areas === 1 ? " area reported" : " areas reported"),
@@ -2627,9 +2651,7 @@ window.StreetSweepBases = {
             Math.round(n.meters), Math.round(p.meters)) +
         kpi(ICON.area, "Areas finished", cov.finished.toLocaleString(),
             "of " + cov.areas.toLocaleString() + " total", cov.finished, cov.finished) +
-        kpi(ICON.drive, "Drives", n.drives.toLocaleString(),
-            n.activeUsers + (n.activeUsers === 1 ? " driver active" : " drivers active"),
-            n.drives, p.drives);
+        kpi(ICON.drive, "Drives", n.drives.toLocaleString(), periodWord, n.drives, p.drives);
 
       var pct = cov.total ? Math.round((cov.done / cov.total) * 100) : 0;
       el("donutCard").innerHTML = donut(pct) +
@@ -4075,7 +4097,9 @@ window.StreetSweepBases = {
         '<div style="flex:1 1 auto;min-width:0">' +
           '<div class="name">' + when.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
             ", " + when.getFullYear() + "</div>" +
-          '<div class="meta">' + (d.area ? escapeHtml(d.area) : "outside your areas") + "</div>" +
+          '<div class="meta">' + (d.driver ? escapeHtml(d.driver) + " · " : "") +
+            (d.area ? escapeHtml(d.area) : "outside your areas") +
+            (d.vehicle ? " · " + escapeHtml(d.vehicle) : "") + "</div>" +
         "</div>" +
         '<div style="text-align:right">' +
           '<div class="name">' + fmtDistance(d.distanceMeters || 0) + "</div>" +
@@ -4102,17 +4126,28 @@ window.StreetSweepBases = {
     var share = d.distanceMeters ? Math.round(((d.newMeters || 0) / d.distanceMeters) * 100) : 0;
     var box = el("driveDetail");
     box.hidden = false;
+    var ended = d.endedAt ? new Date(d.endedAt) : null;
     box.innerHTML =
-      '<p class="eyebrow">' + new Date(d.startedAt).toLocaleString() + "</p>" +
+      '<p class="eyebrow">This drive</p>' +
       '<div class="card"><div class="figures">' +
         figure2(fmtDistance(d.distanceMeters || 0), "Distance") +
-        figure2(fmtDuration(minutes), "Drive time") +
-        figure2(share + "%", "New streets") +
-      "</div>" +
-      '<p class="hint">' + (d.area ? escapeHtml(d.area) + " · " : "") + d.segments +
-        " street segments" + ((d.newMeters || 0) > 0 ? " · " + fmtDistance(d.newMeters) + " of it new" : "") +
-        ((d.pausedMs || 0) > 60000 ? " · paused for " + fmtDuration(d.pausedMs) : "") +
-      "</p></div>";
+        figure2(fmtDuration(minutes), "Duration") +
+        figure2(String(d.newSegments || 0), "New streets") +
+        figure2(fmtDistance(d.newMeters || 0), "New mileage") +
+        figure2(share + "%", "Of this drive new") +
+      "</div></div>" +
+      '<p class="eyebrow">Drive information</p>' +
+      '<div class="card"><dl class="kv">' +
+        (d.driver ? kv("Driver", d.driver) : "") +
+        (d.vehicle ? kv("Vehicle", d.vehicle) : "") +
+        kv("Area", d.area || "outside your areas") +
+        kv("Start", new Date(d.startedAt).toLocaleString()) +
+        (ended ? kv("End", ended.toLocaleString()) : "") +
+        kv("Street segments", String(d.segments)) +
+        (d.points ? kv("GPS points", d.points.toLocaleString()) : "") +
+        ((d.pausedMs || 0) > 60000 ? kv("Paused", fmtDuration(d.pausedMs)) : "") +
+        (d.trigger ? kv("Started by", d.trigger) : "") +
+      "</dl></div>";
   }
 
   function figure2(value, label) {

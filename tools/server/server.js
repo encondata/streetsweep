@@ -617,8 +617,13 @@ async function applySync(body, by) {
  */
 async function drives(limit, withShapes) {
   const { rows } = await pool.query(
-    `SELECT started_at, ended_at, trigger, point_count, distance_m, new_segments, new_meters, paused_ms
-     FROM drives ORDER BY started_at DESC LIMIT $1`,
+    `SELECT d.started_at, d.ended_at, d.trigger, d.point_count, d.distance_m,
+            d.new_segments, d.new_meters, d.paused_ms,
+            u.name AS driver, u.id AS driver_id, v.name AS vehicle
+       FROM drives d
+       JOIN users u ON u.id = d.user_id
+       LEFT JOIN vehicles v ON v.id = d.vehicle_id
+      ORDER BY d.started_at DESC LIMIT $1`,
     [Math.min(Math.max(1, limit || 50), 500)],
   );
   if (rows.length === 0) return [];
@@ -679,6 +684,9 @@ async function drives(limit, withShapes) {
       area,
       bounds: box,
       segments: mine.length,
+      driver: d.driver || null,
+      driverId: d.driver_id != null ? Number(d.driver_id) : null,
+      vehicle: d.vehicle || null,
     };
     if (withShapes) out.shape = mine.map((e) => e.shape);
     else out.shape = mine.map((e) => [e.shape[0], e.shape[e.shape.length - 1]]);
