@@ -28,7 +28,9 @@ const ASSETS = new Set(
     ? fs.readdirSync(PUBLIC).filter((f) => f !== "index.html" && ASSET_TYPES[path.extname(f)])
     : []
 );
-const LEVELS = new Set(["NEIGHBORHOOD", "CITY", "METRO"]);
+// Smallest first; the phone's AreaLevel enum is this same ladder in this same order.
+const LEVEL_ORDER = ["NEIGHBORHOOD", "CITY", "COUNTY", "METRO", "REGION", "STATE"];
+const LEVELS = new Set(LEVEL_ORDER);
 
 // ---------------------------------------------------------------- photos
 //
@@ -193,7 +195,10 @@ function cleanArea(body) {
 
   const polygon = body.polygon;
   if (!Array.isArray(polygon) || polygon.length < 3) throw new BadRequest("An outline needs at least three corners");
-  if (polygon.length > 5000) throw new BadRequest("That outline has too many corners");
+  // Generous on purpose: a county as OpenStreetMap draws it runs to several thousand
+  // corners and there is no reason to round it off. This is only here so a runaway
+  // request cannot ask Postgres to hold something absurd.
+  if (polygon.length > 50000) throw new BadRequest("That outline has too many corners");
 
   const points = polygon.map((p) => {
     if (!Array.isArray(p) || p.length < 2) throw new BadRequest("Each corner must be [lat, lng]");
@@ -276,7 +281,9 @@ const COLUMNS = "id, name, level, parent_name, city, notes, color, polygon, crea
 
 // level is text, so an alphabetical sort would put NEIGHBORHOOD above CITY. Rank it instead,
 // largest place first, the way the phone lists them.
-const LEVEL_RANK = "CASE level WHEN 'METRO' THEN 0 WHEN 'CITY' THEN 1 ELSE 2 END";
+const LEVEL_RANK = `CASE level ${
+  LEVEL_ORDER.map((name, i) => `WHEN '${name}' THEN ${LEVEL_ORDER.length - 1 - i}`).join(" ")
+} ELSE ${LEVEL_ORDER.length} END`;
 
 async function listAreas() {
   const { rows } = await pool.query(`SELECT ${COLUMNS} FROM areas ORDER BY ${LEVEL_RANK}, name`);
@@ -311,6 +318,16 @@ async function deleteArea(id) {
   return rowCount > 0;
 }
 
+/**
+ * The phone's own ladder stops at METRO, and anything it does not recognise it reads as a
+ * NEIGHBORHOOD — the smallest rung, which is the worst possible guess for a county. So on
+ * the way out, the three rungs the phone has never heard of become the biggest one it has.
+ */
+const PHONE_LEVELS = new Set(["NEIGHBORHOOD", "CITY", "METRO"]);
+function levelForPhone(level) {
+  return PHONE_LEVELS.has(level) ? level : "METRO";
+}
+
 /** The same shape tools/area-builder.html exports and the Android app imports. */
 function toGeoJson(areas) {
   return {
@@ -318,7 +335,7 @@ function toGeoJson(areas) {
     features: areas.map((a) => {
       const ring = a.polygon.map(([lat, lng]) => [round(lng), round(lat)]);
       ring.push(ring[0]);
-      const properties = { kind: "area", name: a.name, level: a.level };
+      const properties = { kind: "area", name: a.name, level: levelForPhone(a.level) };
       if (a.parentName) properties.parent = a.parentName;
       if (a.city) properties.city = a.city;
       if (a.notes) properties.notes = a.notes;
@@ -367,7 +384,9 @@ async function importGeoJson(doc) {
 }
 
 function normaliseLevel(level) {
-  if (typeof level === "number") return ["NEIGHBORHOOD", "CITY", "METRO"][level] || "NEIGHBORHOOD";
+  if (typeof level === "number") {
+    return LEVEL_ORDER[level] || "NEIGHBORHOOD";
+  }
   const up = String(level || "").toUpperCase();
   return LEVELS.has(up) ? up : "NEIGHBORHOOD";
 }
