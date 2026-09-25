@@ -9,6 +9,7 @@ const fs = require("fs");
 const path = require("path");
 const { Pool } = require("pg");
 const identity = require("./identity");
+const achievements = require("./achievements");
 const photos = require("./photos");
 
 const PORT = Number(process.env.PORT || 80);
@@ -818,6 +819,8 @@ const OPEN_ROUTES = new Set([
 function rightFor(route, method) {
   if (route === "/api/vehicles/mine") return "read";
   if (route === "/api/auth/avatar") return "read";          // your own picture
+  if (route.startsWith("/api/achievements")) return "read"; // guarded inside
+
   if (/^\/api\/users\/\d+\/avatar$/.test(route)) return "read";
   if (route.startsWith("/api/admin/")) return "admin";
   if (route.startsWith("/api/admin/")) return "admin";
@@ -974,6 +977,16 @@ async function handle(req, res) {
       "Cache-Control": "private, max-age=86400",
     });
     return photos.readStream(key).pipe(res);
+  }
+
+  /** Your own, or anyone's if you are an administrator. */
+  const achMatch = route.match(/^\/api\/achievements(?:\/(\d+))?$/);
+  if (achMatch && req.method === "GET") {
+    const wanted = achMatch[1] ? Number(achMatch[1]) : who.user.id;
+    if (wanted !== who.user.id && !identity.can(who.user, "admin")) {
+      return sendJson(res, 403, { error: "That is an administrator's job." });
+    }
+    return sendJson(res, 200, await achievements.forUser(pool, wanted));
   }
 
   if (route === "/api/auth/me" && req.method === "GET") {
@@ -1573,10 +1586,17 @@ async function handle(req, res) {
   if (route === "/api/sync" && req.method === "POST") {
     // Everything a phone pushes is stamped with whose phone it is, and which vehicle
     // that phone was issued for, so a drive can be told from anyone else's later.
-    return sendJson(res, 200, await applySync(await readBody(req), {
+    const result = await applySync(await readBody(req), {
       userId: who.user.id,
       vehicleId: who.vehicleId || null,
-    }));
+    });
+    // The only moment the figures can have moved. Failing here must not fail the sync:
+    // a badge is not worth losing a drive over.
+    result.awarded = await achievements.evaluate(pool, who.user.id).catch((err) => {
+      console.error("could not work out achievements", err.message);
+      return 0;
+    });
+    return sendJson(res, 200, result);
   }
 
   if (route === "/api/coverage" && req.method === "GET") {
@@ -1686,6 +1706,7 @@ waitForDatabase()
   .then(() => identity.ensureSchema(pool))
   .then(() => identity.ensureFirstAdmin(pool, (line) => console.log(line)))
   .then(ensureAttribution)
+  .then(() => achievements.ensureSchema(pool))
   .then(readyPhotos)
   .then(() => {
     // Expired rows are dead weight; clear them at boot and once a day after.

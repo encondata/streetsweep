@@ -4,8 +4,8 @@ WORKDIR /app
 COPY server/package.json ./
 RUN npm install --omit=dev && npm cache clean --force
 
-COPY server/server.js server/identity.js server/photos.js \
-     server/reset-password.js server/migrate-photos.js ./
+# Every .js in server/, so a new module cannot be left out of the image again.
+COPY server/*.js ./
 COPY public/ ./public/
 COPY area-builder.html ./public/index.html
 COPY login.html ./public/login.html

@@ -475,6 +475,47 @@
   .viewhead.withaction > div { min-width: 0; }
   .viewhead.withaction select { width: auto; flex: 0 0 auto; }
 
+  /* ---- achievements -------------------------------------------------------- */
+  .ladders { display: flex; flex-direction: column; gap: 9px; }
+  .ladder {
+    display: flex; align-items: center; gap: 12px; padding: 11px 13px;
+    border: 1px solid var(--line); border-radius: var(--r); background: var(--surface);
+  }
+  .ladder .medal {
+    width: 40px; height: 40px; border-radius: 11px; flex: 0 0 auto; position: relative;
+    display: grid; place-items: center; background: var(--surface-2);
+  }
+  .ladder.has .medal { background: var(--grad-accent); }
+  .ladder .medal svg { width: 21px; height: 21px; fill: none; stroke: var(--ink-soft); stroke-width: 1.8; }
+  .ladder.has .medal svg { stroke: var(--accent-ink); }
+  .ladder .medal .lv {
+    position: absolute; right: -4px; bottom: -4px; min-width: 18px; height: 18px; padding: 0 4px;
+    border-radius: 999px; background: var(--navy-800); color: #fff;
+    font-size: 9.5px; font-weight: 800; display: grid; place-items: center;
+    border: 2px solid var(--surface);
+  }
+  .ladder .body { flex: 1 1 auto; min-width: 0; }
+  .ladder .body b { display: block; font-size: 13px; }
+  .ladder .body span { font-size: 11px; color: var(--ink-soft); }
+  .ladder .bar { height: 6px; border-radius: 999px; background: var(--surface-2); margin-top: 6px; overflow: hidden; }
+  .ladder .bar i { display: block; height: 100%; background: var(--grad-accent); }
+
+  .badges { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 9px; margin-top: 12px; }
+  .badge2 {
+    border: 1px solid var(--line); border-radius: var(--r); background: var(--surface);
+    padding: 12px 8px; text-align: center; min-width: 0;
+  }
+  .badge2 .disc {
+    width: 40px; height: 40px; border-radius: 50%; margin: 0 auto 7px;
+    display: grid; place-items: center; background: var(--surface-2);
+  }
+  .badge2.has .disc { background: var(--grad-accent); }
+  .badge2 .disc svg { width: 20px; height: 20px; fill: none; stroke: var(--ink-soft); stroke-width: 1.8; }
+  .badge2.has .disc svg { stroke: var(--accent-ink); }
+  .badge2 b { display: block; font-size: 11px; line-height: 1.3; }
+  .badge2 span { display: block; font-size: 10px; color: var(--ink-soft); margin-top: 3px; }
+  .badge2:not(.has) { opacity: .55; }
+
   /* ---- charts -------------------------------------------------------------- */
   .chart { height: 168px; display: flex; align-items: flex-end; gap: 5px; }
   .chart .col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column;
@@ -921,6 +962,9 @@
         </div>
       </div>
 
+      <p class="eyebrow">Achievements <span id="meAchCount" class="tag"></span></p>
+      <div id="meAch"></div>
+
       <div class="meacts">
         <button type="button" id="meAvatarPick">Change picture</button>
         <button type="button" id="meAvatarClear" hidden>Use my initials instead</button>
@@ -1363,6 +1407,9 @@
           <p class="eyebrow">Recent drives</p>
           <ul class="board plain" id="udDrives"></ul>
           <p class="hint" id="udDrivesEmpty" hidden>No drive has been recorded for them.</p>
+
+          <p class="eyebrow">Achievements <span id="udAchCount" class="tag"></span></p>
+          <div id="udAch"></div>
         </div>
 
         <div id="peopleMain">
@@ -2429,6 +2476,7 @@ window.StreetSweepBases = {
     el("meModal").hidden = false;
     hidePassword();
     meSay("");
+    loadAchievements(null, el("meAch"), el("meAchCount"));
     el("mePassword").focus();
   }
 
@@ -2847,6 +2895,66 @@ window.StreetSweepBases = {
     });
   }
 
+  // ---- achievements ----------------------------------------------------------
+
+  var ACH_ICON = {
+    broom: "<svg viewBox='0 0 24 24'><path d='M14 3 9 8'/><path d='m7 10 7-7 4 4-7 7Z'/><path d='M7 10 4 21l11-3Z'/></svg>",
+    road: "<svg viewBox='0 0 24 24'><path d='M7 3v18M17 3v18M12 4v3M12 10.5v3M12 17v3'/></svg>",
+    map: "<svg viewBox='0 0 24 24'><path d='m9 4-6 2.6v13L9 17l6 3 6-2.6v-13L15 7Z'/><path d='M9 4v13M15 7v13'/></svg>",
+    trophy: "<svg viewBox='0 0 24 24'><path d='M7 4h10v5a5 5 0 0 1-10 0Z'/><path d='M7 5.5H4.5a3 3 0 0 0 3 3M17 5.5h2.5a3 3 0 0 1-3 3'/><path d='M10 14h4l.6 5H9.4Z'/><path d='M8 21h8'/></svg>",
+    pie: "<svg viewBox='0 0 24 24'><circle cx='12' cy='12' r='8.5'/><path d='M12 3.5v8.5h8.5'/></svg>",
+    compass: "<svg viewBox='0 0 24 24'><circle cx='12' cy='12' r='8.5'/><path d='m15.5 8.5-2 5-5 2 2-5Z'/></svg>",
+    bolt: "<svg viewBox='0 0 24 24'><path d='M13 3 5 13.5h6L10.5 21 19 10.5h-6Z'/></svg>",
+    sun: "<svg viewBox='0 0 24 24'><circle cx='12' cy='12' r='4'/><path d='M12 2.5v2.6M12 18.9v2.6M2.5 12h2.6M18.9 12h2.6M5.2 5.2l1.9 1.9M16.9 16.9l1.9 1.9M18.8 5.2l-1.9 1.9M7.1 16.9l-1.9 1.9'/></svg>",
+    calendar: "<svg viewBox='0 0 24 24'><rect x='3.5' y='5' width='17' height='15.5' rx='2.5'/><path d='M3.5 10h17M8 3v4M16 3v4'/></svg>",
+  };
+
+  var ROMAN = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
+
+  function rarityWord(pct) {
+    if (pct == null) return "";
+    if (pct <= 5) return "Legendary · " + pct + "%";
+    if (pct <= 20) return "Rare · " + pct + "%";
+    if (pct <= 50) return "Uncommon · " + pct + "%";
+    return "Common · " + pct + "%";
+  }
+
+  function renderAchievements(node, countNode, d) {
+    countNode.textContent = d.earnedCount + " / " + d.total;
+    var ladders = d.ladders.map(function (l) {
+      var has = l.level > 0;
+      var value = l.unit === "miles" ? l.value.toLocaleString() + " mi" : l.value.toLocaleString();
+      return "<div class='ladder" + (has ? " has" : "") + "'>" +
+        "<span class='medal'>" + (ACH_ICON[l.icon] || ACH_ICON.trophy) +
+          (has ? "<span class='lv'>" + ROMAN[l.level] + "</span>" : "") + "</span>" +
+        "<span class='body'><b>" + escapeHtml(l.name) +
+          (has ? " " + ROMAN[l.level] : "") + "</b>" +
+        "<span>" + (l.next
+          ? value + " of " + (l.unit === "miles"
+              ? l.next.toLocaleString() + " mi" : l.next.toLocaleString()) +
+            " to " + ROMAN[l.level + 1]
+          : value + " · every level") + "</span>" +
+        "<span class='bar'><i style='width:" + l.progress + "%'></i></span></span></div>";
+    }).join("");
+
+    var badges = d.badges.map(function (b) {
+      return "<div class='badge2" + (b.earned ? " has" : "") + "' title='" +
+          escapeHtml(b.blurb) + (b.earned ? " — " + rarityWord(b.rarity) : "") + "'>" +
+        "<span class='disc'>" + (ACH_ICON[b.icon] || ACH_ICON.trophy) + "</span>" +
+        "<b>" + escapeHtml(b.name) + "</b>" +
+        "<span>" + (b.earned ? rarityWord(b.rarity) : "Not yet") + "</span></div>";
+    }).join("");
+
+    node.innerHTML = "<div class='ladders'>" + ladders + "</div>" +
+      "<div class='badges'>" + badges + "</div>";
+  }
+
+  function loadAchievements(userId, node, countNode) {
+    return apiJson("/api/achievements" + (userId ? "/" + userId : ""))
+      .then(function (d) { renderAchievements(node, countNode, d); })
+      .catch(function () { node.innerHTML = ""; countNode.textContent = ""; });
+  }
+
   // ---- analytics and data ----------------------------------------------------
 
   /**
@@ -3115,6 +3223,7 @@ window.StreetSweepBases = {
           (dr.vehicle ? " · " + escapeHtml(dr.vehicle) : "") + "</span></span>" +
           "<span class='fig'><b>" + fmtDistance(dr.meters) + "</b><span>driven</span></span></li>";
       }).join("");
+      loadAchievements(u.id, el("udAch"), el("udAchCount"));
     }).catch(function (err) { adminSay(err.message || "Could not open that person.", true); });
   }
 
