@@ -89,11 +89,31 @@ class StreetDownloadWorker(context: Context, params: WorkerParameters) : Corouti
         return Result.success()
     }
 
+    /**
+     * One cell's streets. With a server to ask, from the server — never OpenStreetMap —
+     * so each cell is downloaded once, by the server, for every phone and the web map.
+     * Only a phone with no server at all goes to OpenStreetMap itself.
+     *
+     * A server that cannot reach OpenStreetMap is retried like any other failure, not
+     * worked around by going there directly: the whole point is that phones do not.
+     */
+    private suspend fun fetchCell(cell: ChunkGrid.Cell): List<OsmStreet> {
+        val container = applicationContext.appContainer
+        val s = container.settings.current()
+        // Signed in: the server fetches each cell from OpenStreetMap once and every phone
+        // shares it. Only a server too old to have the street store sends us to Overpass.
+        if (!s.portalUrl.isNullOrBlank() && !s.portalToken.isNullOrBlank()) {
+            container.portalClient.streetCell(cell.key)?.let { return OverpassClient.parse(it) }
+            Log.w(TAG, "Server has no street store yet; asking OpenStreetMap for ${cell.key}")
+        }
+        return container.overpass.streetsIn(cell.bounds)
+    }
+
     private suspend fun fetchWithRetry(cell: ChunkGrid.Cell): List<OsmStreet> {
         var last: Exception? = null
         repeat(ATTEMPTS) { attempt ->
             try {
-                return applicationContext.appContainer.overpass.streetsIn(cell.bounds)
+                return fetchCell(cell)
             } catch (e: Exception) {
                 last = e
                 Log.w(TAG, "Cell ${cell.key} attempt ${attempt + 1} failed: ${e.message}")

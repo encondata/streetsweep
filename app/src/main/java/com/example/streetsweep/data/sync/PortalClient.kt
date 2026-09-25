@@ -93,6 +93,27 @@ class PortalClient(
 
     suspend fun getJson(path: String): String = get(path)
 
+    /**
+     * The streets in one map cell, from the server's shared copy, as Overpass's own JSON —
+     * so [com.example.streetsweep.data.osm.OverpassClient.parse] reads it exactly as it
+     * would an answer from OpenStreetMap. A cell nobody has asked for yet makes the server
+     * fetch it first, on its own queue, so this waits longer than an ordinary call.
+     */
+    /**
+     * Overpass's answer for one map cell, as the server holds it. Null when the server is
+     * older than the street store and has no such endpoint, so the caller can go without.
+     */
+    suspend fun streetCell(key: String): String? = withContext(Dispatchers.IO) {
+        val conn = open("/api/streets/cell/" + java.net.URLEncoder.encode(key, "UTF-8"))
+        try {
+            conn.readTimeout = 120_000
+            conn.requestMethod = "GET"
+            if (conn.responseCode == 404) null else readResponse(conn)
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     /** Sends a photo for a marked place. The server keys it by the place's own id. */
     suspend fun putPhoto(poiKey: String, bytes: ByteArray, contentType: String): Unit =
         withContext(Dispatchers.IO) {

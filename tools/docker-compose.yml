@@ -24,6 +24,9 @@ services:
       SYNC_TOKEN: ${SYNC_TOKEN:-}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # Where the server fetches streets from. Empty uses the public Overpass servers;
+      # set it to your own instance, or several separated by commas.
+      OVERPASS_URL: ${OVERPASS_URL:-}
       # Photos attached to marked places. A directory on the volume below: they are
       # large, read rarely, and nothing joins against them, so object storage was only
       # ever a second container holding files this one already streams out itself.

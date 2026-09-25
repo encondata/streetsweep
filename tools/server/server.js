@@ -11,6 +11,7 @@ const { Pool } = require("pg");
 const identity = require("./identity");
 const achievements = require("./achievements");
 const networks = require("./networks");
+const streets = require("./streets");
 const photos = require("./photos");
 
 const PORT = Number(process.env.PORT || 80);
@@ -1638,6 +1639,24 @@ async function handle(req, res) {
   }
 
   /**
+   * The streets in one map cell, in Overpass's own JSON, for a phone to store exactly as
+   * if it had asked OpenStreetMap itself — which, with a server to ask, it no longer does.
+   */
+  const cellMatch = route.match(/^\/api\/streets\/cell\/(-?\d{1,4}_-?\d{1,4})$/);
+  if (cellMatch && req.method === "GET") {
+    try {
+      const c = await streets.cell(pool, cellMatch[1]);
+      return sendJson(res, 200, {
+        key: c.key, fetchedAt: c.fetchedAt, cached: c.cached, stale: Boolean(c.stale),
+        elements: c.elements,
+      });
+    } catch (err) {
+      return sendJson(res, err.status || 502,
+        { error: err.message || "OpenStreetMap could not be reached" });
+    }
+  }
+
+  /**
    * Every street to sweep in an area, fetched from OpenStreetMap once and kept. The first
    * person to click an area waits for Overpass; everyone after that does not.
    */
@@ -1767,6 +1786,7 @@ waitForDatabase()
   .then(ensureAttribution)
   .then(() => achievements.ensureSchema(pool))
   .then(() => networks.ensureSchema(pool))
+  .then(() => streets.ensureSchema(pool))
   .then(readyPhotos)
   .then(() => {
     // Expired rows are dead weight; clear them at boot and once a day after.
