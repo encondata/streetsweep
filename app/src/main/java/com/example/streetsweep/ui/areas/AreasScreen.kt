@@ -39,6 +39,16 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.MutableStateFlow
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -76,6 +86,37 @@ class AreasViewModel(private val container: AppContainer, private val context: C
         container.coverageRepository.setProgress(id, 0, 0, error = null, loadedAt = null)
         StreetDownloadWorker.enqueue(context, id)
     }
+
+    /** Whether there is a server to download from at all. */
+    val canDownload: StateFlow<Boolean> = container.settings.settings
+        .map { !it.portalUrl.isNullOrBlank() && !it.portalToken.isNullOrBlank() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    private val _downloading = MutableStateFlow(false)
+    val downloading: StateFlow<Boolean> = _downloading
+
+    private val _message = MutableStateFlow<String?>(null)
+    val message: StateFlow<String?> = _message
+    fun clearMessage() { _message.value = null }
+
+    /**
+     * Brings this phone's areas into line with the portal's. Lives here as well as in
+     * Settings because the Areas screen is where anyone looking for "download my areas"
+     * goes first; buried halfway down Settings as plain text, it went unfound.
+     */
+    fun downloadFromWeb() = viewModelScope.launch {
+        if (_downloading.value) return@launch
+        _downloading.value = true
+        _message.value = try {
+            val pull = container.portalSync.pullAreas()
+            pull.needStreets.forEach { StreetDownloadWorker.enqueue(context, it) }
+            pull.summary() ?: "Already up to date — this phone has every area on the server"
+        } catch (e: Exception) {
+            "Could not download areas: ${e.message ?: "no answer from the server"}"
+        } finally {
+            _downloading.value = false
+        }
+    }
 }
 
 /** An area and its children, in display order with an indent level. */
@@ -103,18 +144,70 @@ fun AreasScreen(
 ) {
     val areas by viewModel.areas.collectAsStateWithLifecycle()
     val wayCount by viewModel.wayCount.collectAsStateWithLifecycle()
+    val canDownload by viewModel.canDownload.collectAsStateWithLifecycle()
+    val downloading by viewModel.downloading.collectAsStateWithLifecycle()
+    val message by viewModel.message.collectAsStateWithLifecycle()
     var pendingDelete by remember { mutableStateOf<AreaWithStats?>(null) }
+    val snackbar = remember { SnackbarHostState() }
+    LaunchedEffect(message) { message?.let { snackbar.showSnackbar(it); viewModel.clearMessage() } }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("Areas") }) }) { padding ->
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Areas") },
+                actions = {
+                    if (canDownload) {
+                        if (downloading) {
+                            CircularProgressIndicator(
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.padding(end = 16.dp).size(22.dp),
+                            )
+                        } else {
+                            TextButton(onClick = viewModel::downloadFromWeb) {
+                                Icon(Icons.Default.CloudDownload, contentDescription = null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Download from web")
+                            }
+                        }
+                    }
+                },
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbar) },
+    ) { padding ->
         if (areas.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+            Column(
+                Modifier.fillMaxSize().padding(padding).padding(32.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
                 Text(
-                    "No areas yet.\n\nOn the Map tab, frame a neighbourhood, city or metro and tap \"Add area\". " +
-                        "Nest neighbourhoods inside cities and cities inside a metro to see progress at every level.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(32.dp),
+                    "No areas yet.",
+                    style = MaterialTheme.typography.titleMedium,
                 )
+                Spacer(Modifier.height(10.dp))
+                if (canDownload) {
+                    Text(
+                        "Download the ones drawn on the web, or frame one on the Map tab and tap \"Add area\".",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(18.dp))
+                    Button(onClick = viewModel::downloadFromWeb, enabled = !downloading) {
+                        Icon(Icons.Default.CloudDownload, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (downloading) "Downloading…" else "Download areas from the web")
+                    }
+                } else {
+                    Text(
+                        "On the Map tab, frame a neighbourhood, city or metro and tap \"Add area\". " +
+                            "Nest neighbourhoods inside cities and cities inside a metro to see progress at every level.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
             }
             return@Scaffold
         }

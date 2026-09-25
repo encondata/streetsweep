@@ -8,6 +8,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.LaunchedEffect
 import com.example.streetsweep.data.backup.BackupFiles
@@ -375,10 +379,39 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
                     },
                 )
             }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = viewModel::testPortal, enabled = !settings.portalUrl.isNullOrBlank()) { Text("Test") }
-                TextButton(onClick = viewModel::pullAreasFromPortal, enabled = !settings.portalUrl.isNullOrBlank()) { Text("Get areas") }
-                TextButton(onClick = { viewModel.pushToPortal(false) }, enabled = !settings.portalUrl.isNullOrBlank()) { Text("Send coverage") }
+            // These were three lines of green text in a row — "Test", "Get areas", "Send
+            // coverage" — and read as labels rather than things to press. Syncing is the one
+            // most people want, so it is the filled button; it sends coverage and then takes
+            // the web's areas back down, which is everything "Get areas" did and more.
+            val serverReady = !settings.portalUrl.isNullOrBlank()
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = { viewModel.pushToPortal(false) },
+                    enabled = serverReady,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.Sync, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Sync now")
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = viewModel::pullAreasFromPortal,
+                        enabled = serverReady,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Default.CloudDownload, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Download areas")
+                    }
+                    OutlinedButton(
+                        onClick = viewModel::testPortal,
+                        enabled = serverReady,
+                    ) { Text("Test") }
+                }
             }
             if (settings.portalUrl != TrackingSettings.DEFAULT_PORTAL_URL) {
                 ListItem(
@@ -404,7 +437,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
                 supportingContent = { Text("Clears what the server holds and re-sends every segment. Use after restoring a backup.") },
             )
             Text(
-                if (settings.lastPortalPushAt > 0) "Last sent ${Format.dateTime(settings.lastPortalPushAt)}."
+                if (settings.lastPortalPushAt > 0) "Last synced ${Format.dateTime(settings.lastPortalPushAt)}."
                 else "Nothing sent yet. Give the server's address, then sign in.",
                 Modifier.padding(16.dp),
                 style = MaterialTheme.typography.bodySmall,

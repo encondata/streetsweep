@@ -29,6 +29,21 @@ data class AreaPull(
 ) {
     val needStreets: List<Long> get() = added + updated
     val changedAnything: Boolean get() = added.isNotEmpty() || updated.isNotEmpty()
+
+    /** What happened, in a sentence, or null when nothing did. Shared so every screen says it the same way. */
+    fun summary(): String? {
+        val bits = buildList {
+            if (added.isNotEmpty()) add("added ${added.size} ${if (added.size == 1) "area" else "areas"}")
+            if (updated.isNotEmpty()) add("reshaped ${updated.size} to match the web")
+            if (keptLocal.isNotEmpty()) {
+                add("kept your own outline for ${keptLocal.joinToString()} " +
+                    "because ${if (keptLocal.size == 1) "it was" else "they were"} redrawn on this phone")
+            }
+        }
+        if (bits.isEmpty()) return null
+        return bits.joinToString(", ").replaceFirstChar { it.uppercase() } +
+            if (needStreets.isNotEmpty()) " — downloading their streets" else ""
+    }
 }
 
 /**
