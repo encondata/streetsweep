@@ -437,23 +437,28 @@
   /* Controls that only steer the map have no business on a dashboard. */
   :root[data-view="admin"] #citySelect, :root[data-view="people"] #citySelect, :root[data-view="board"] #citySelect,
   :root[data-view="admin"] #showMenu,   :root[data-view="people"] #showMenu,   :root[data-view="board"] #showMenu,
-  :root[data-view="admin"] #basemap,    :root[data-view="people"] #basemap,    :root[data-view="board"] #basemap {
+  :root[data-view="admin"] #basemap,    :root[data-view="people"] #basemap,    :root[data-view="board"] #basemap,
+  :root[data-view="ach"] #citySelect,   :root[data-view="ach"] #showMenu,      :root[data-view="ach"] #basemap {
     display: none;
   }
 
   /* The three admin pages are dashboards, not panels beside a map. */
   :root[data-view="admin"] #stage,
   :root[data-view="people"] #stage,
-  :root[data-view="board"] #stage { grid-template-columns: 1fr; }
+  :root[data-view="board"] #stage,
+  :root[data-view="ach"] #stage { grid-template-columns: 1fr; }
   :root[data-view="admin"] #mapwrap,
   :root[data-view="people"] #mapwrap,
-  :root[data-view="board"] #mapwrap { display: none; }
+  :root[data-view="board"] #mapwrap,
+  :root[data-view="ach"] #mapwrap { display: none; }
   :root[data-view="admin"] #side,
   :root[data-view="people"] #side,
-  :root[data-view="board"] #side { border-left: none; padding: 24px 28px 48px; }
+  :root[data-view="board"] #side,
+  :root[data-view="ach"] #side { border-left: none; padding: 24px 28px 48px; }
   :root[data-view="admin"] .view[data-view="admin"],
   :root[data-view="people"] .view[data-view="people"],
-  :root[data-view="board"] .view[data-view="board"] { max-width: 1280px; margin: 0 auto; }
+  :root[data-view="board"] .view[data-view="board"],
+  :root[data-view="ach"] .view[data-view="ach"] { max-width: 1280px; margin: 0 auto; }
 
   @media (min-width: 1120px) {
     #dashCols, #peopleCols {
@@ -465,7 +470,8 @@
   :root[data-view="admin"] .grid3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   :root[data-view="admin"] .eyebrow,
   :root[data-view="people"] .eyebrow,
-  :root[data-view="board"] .eyebrow { margin: 26px 0 11px; }
+  :root[data-view="board"] .eyebrow,
+  :root[data-view="ach"] .eyebrow { margin: 26px 0 11px; }
   #dashCols > div > .eyebrow:first-child,
   #peopleCols > div > .eyebrow:first-child { margin-top: 6px; }
 
@@ -515,6 +521,41 @@
   .badge2 b { display: block; font-size: 11px; line-height: 1.3; }
   .badge2 span { display: block; font-size: 10px; color: var(--ink-soft); margin-top: 3px; }
   .badge2:not(.has) { opacity: .55; }
+
+  /* The Achievements page: the same pieces, with room to read them. */
+  .achLadders { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .achLadders .ladder { padding: 16px; align-items: flex-start; box-shadow: var(--shadow-1); }
+  .achLadders .ladder .medal { width: 52px; height: 52px; border-radius: 14px; }
+  .achLadders .ladder .medal svg { width: 26px; height: 26px; }
+  .achLadders .ladder .body b { font-size: 14px; }
+  .achLadders .ladder .blurb { display: block; font-size: 11.5px; color: var(--ink-soft); margin: 2px 0 8px; line-height: 1.5; }
+  .achLadders .ladder .bar { display: block; }
+  .achLadders .ladder .steps { display: flex; gap: 4px; margin-top: 9px; flex-wrap: wrap; }
+  .achLadders .ladder .steps i {
+    font-style: normal; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 999px;
+    background: var(--surface-2); color: var(--ink-soft);
+  }
+  .achLadders .ladder .steps i.got { background: var(--accent-soft); color: var(--green-700); }
+  :root[data-theme="dark"] .achLadders .ladder .steps i.got { background: rgba(69,189,35,.16); color: var(--green-400); }
+  .achBadges { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+  .achBadge {
+    display: flex; gap: 12px; align-items: flex-start; padding: 13px 14px;
+    border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); min-width: 0;
+  }
+  .achBadge .disc {
+    width: 42px; height: 42px; border-radius: 50%; flex: 0 0 auto;
+    display: grid; place-items: center; background: var(--surface-2);
+  }
+  .achBadge.has .disc { background: var(--grad-accent); }
+  .achBadge .disc svg { width: 21px; height: 21px; fill: none; stroke: var(--ink-soft); stroke-width: 1.8; }
+  .achBadge.has .disc svg { stroke: var(--accent-ink); }
+  .achBadge b { display: block; font-size: 13px; line-height: 1.35; }
+  .achBadge .what { display: block; font-size: 11.5px; color: var(--ink-soft); line-height: 1.5; margin-top: 2px; }
+  .achBadge .when { display: block; font-size: 10.5px; font-weight: 700; color: var(--ink-soft); margin-top: 6px; }
+  .achBadge:not(.has) .disc { opacity: .7; }
+  .achEmpty { font-size: 12px; color: var(--ink-soft); padding: 6px 0; }
+  /* A name, not a number: smaller, and allowed to wrap rather than being cut off. */
+  .kpi .n.word { font-size: 17px; letter-spacing: -.01em; line-height: 1.3; white-space: normal; padding-top: 3px; }
 
   /* ---- charts -------------------------------------------------------------- */
   .chart { height: 168px; display: flex; align-items: flex-end; gap: 5px; }
@@ -781,6 +822,11 @@
     body { grid-template-columns: 56px 1fr; }
     #stage { grid-template-columns: 1fr; grid-template-rows: 44vh 1fr; }
     #side { border-left: none; border-top: 1px solid var(--line); }
+    /* The full pages have no map to stack the panel under, so they get all the height. */
+    :root[data-view="admin"] #stage, :root[data-view="people"] #stage,
+    :root[data-view="board"] #stage, :root[data-view="ach"] #stage { grid-template-rows: 1fr; }
+    :root[data-view="admin"] #side, :root[data-view="people"] #side,
+    :root[data-view="board"] #side, :root[data-view="ach"] #side { border-top: none; }
   }
   /* ---- shared pieces ------------------------------------------------------ */
   /*
@@ -982,6 +1028,9 @@
   <button class="railbtn" data-view="pois">
     <svg viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Z"/><circle cx="12" cy="10" r="2.6"/></svg>Places
   </button>
+  <button class="railbtn" data-view="ach">
+    <svg viewBox="0 0 24 24"><path d="M8 4h8v5a4 4 0 0 1-8 0V4Z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4"/><path d="M12 13v4M9 20h6M10 17h4"/></svg>Achievements
+  </button>
   <button class="railbtn" data-view="stats">
     <svg viewBox="0 0 24 24"><path d="M5 19V11M12 19V5M19 19v-6"/></svg>Analytics
   </button>
@@ -1011,9 +1060,6 @@
           <span class="role" id="meRole"></span>
         </div>
       </div>
-
-      <p class="eyebrow">Achievements <span id="meAchCount" class="tag"></span></p>
-      <div id="meAch"></div>
 
       <div class="meacts">
         <button type="button" id="meAvatarPick">Change picture</button>
@@ -1438,6 +1484,21 @@
         <p class="hint" id="adminMsg" hidden></p>
       </section>
 
+      <section class="view" data-view="ach" hidden>
+        <div class="viewhead">
+          <h2>Achievements</h2>
+          <p>What sweeping has earned you so far, and what is closest to come next.</p>
+        </div>
+        <div class="kpis" id="achKpis"></div>
+        <p class="eyebrow">Ladders <span class="tag" id="achLadderCount"></span></p>
+        <div class="achLadders" id="achLadders"></div>
+        <p class="eyebrow">Earned <span class="tag" id="achEarnedCount"></span></p>
+        <div class="achBadges" id="achEarned"></div>
+        <p class="eyebrow">Still to earn <span class="tag" id="achTodoCount"></span></p>
+        <div class="achBadges" id="achTodo"></div>
+        <p class="hint" id="achNote"></p>
+      </section>
+
       <section class="view" data-view="board" hidden>
         <div class="viewhead">
           <h2>Leaderboard</h2>
@@ -1581,6 +1642,7 @@
       }
       if (view === "areas" && window.__ssAreasOpened) window.__ssAreasOpened();
       if (view === "stats" && window.__ssAnalyticsOpened) window.__ssAnalyticsOpened();
+      if (view === "ach" && window.__ssAchOpened) window.__ssAchOpened();
       if (view === "export" && window.__ssDataOpened) window.__ssDataOpened();
     }
   });
@@ -2552,7 +2614,6 @@ window.StreetSweepBases = {
     el("meModal").hidden = false;
     hidePassword();
     meSay("");
-    loadAchievements(null, el("meAch"), el("meAchCount"));
     el("mePassword").focus();
   }
 
@@ -3024,6 +3085,90 @@ window.StreetSweepBases = {
     node.innerHTML = "<div class='ladders'>" + ladders + "</div>" +
       "<div class='badges'>" + badges + "</div>";
   }
+
+  // ---- the Achievements page ----
+
+  function achValue(l, v) {
+    return l.unit === "miles" ? Number(v).toLocaleString() + " mi" : Number(v).toLocaleString();
+  }
+
+  /** Rounded down, so 498 of 500 reads 99% rather than claiming it is done. */
+  function achPercent(l) {
+    return l.next ? Math.min(99, Math.floor((l.value / l.next) * 100)) : 100;
+  }
+
+  function achKpi(icon, k, n, sub, word) {
+    return '<div class="kpi"><span class="ico">' + (ACH_ICON[icon] || ACH_ICON.trophy) + "</span>" +
+      '<div class="body"><div class="k">' + k + '</div><div class="n' + (word ? " word" : "") + '">' + n + "</div>" +
+      (sub ? '<div class="sub">' + sub + "</div>" : "") + "</div></div>";
+  }
+
+  function renderAchievementsPage(d) {
+    var earned = d.badges.filter(function (b) { return b.earned; })
+      .sort(function (a, b) { return (b.earnedAt || 0) - (a.earnedAt || 0); });
+    var todo = d.badges.filter(function (b) { return !b.earned; });
+
+    // The rarest thing held, ladder levels included, and whatever is nearest to done next.
+    var held = earned.map(function (b) { return { name: b.name, rarity: b.rarity }; })
+      .concat(d.ladders.filter(function (l) { return l.level > 0; })
+        .map(function (l) { return { name: l.name + " " + ROMAN[l.level], rarity: l.rarity }; }));
+    var rarest = held.filter(function (h) { return h.rarity != null; })
+      .sort(function (a, b) { return a.rarity - b.rarity; })[0];
+    var nearest = d.ladders.filter(function (l) { return l.next; })
+      .sort(function (a, b) { return b.progress - a.progress; })[0];
+
+    el("achKpis").innerHTML =
+      achKpi("trophy", "Earned", d.earnedCount + " <span style='font-size:15px;color:var(--ink-soft)'>of " + d.total + "</span>",
+        Math.round((d.earnedCount / Math.max(1, d.total)) * 100) + "% of everything there is") +
+      achKpi("compass", "Rarest you hold", rarest ? escapeHtml(rarest.name) : "—",
+        rarest ? rarityWord(rarest.rarity) + " of drivers have it" : "Nothing earned yet", true) +
+      achKpi("road", "Closest next", nearest ? escapeHtml(nearest.name) + " " + ROMAN[nearest.level + 1] : "—",
+        nearest ? achPercent(nearest) + "% there · " + achValue(nearest, nearest.value) + " of " + achValue(nearest, nearest.next) : "Every ladder finished", true);
+
+    el("achLadderCount").textContent = d.ladders.filter(function (l) { return l.level > 0; }).length + " / " + d.ladders.length;
+    el("achLadders").innerHTML = d.ladders.map(function (l) {
+      var has = l.level > 0;
+      var steps = l.levels.map(function (need, i) {
+        return "<i class='" + (i < l.level ? "got" : "") + "' title='" + achValue(l, need) + "'>" + ROMAN[i + 1] + "</i>";
+      }).join("");
+      return "<div class='ladder" + (has ? " has" : "") + "'>" +
+        "<span class='medal'>" + (ACH_ICON[l.icon] || ACH_ICON.trophy) +
+          (has ? "<span class='lv'>" + ROMAN[l.level] + "</span>" : "") + "</span>" +
+        "<span class='body'><b>" + escapeHtml(l.name) + (has ? " " + ROMAN[l.level] : "") + "</b>" +
+          "<span class='blurb'>" + escapeHtml(l.blurb || "") + "</span>" +
+          "<span>" + (l.next
+            ? achValue(l, l.value) + " of " + achValue(l, l.next) + " to reach " + ROMAN[l.level + 1]
+            : achValue(l, l.value) + " · every level reached") + "</span>" +
+          "<span class='bar'><i style='width:" + l.progress + "%'></i></span>" +
+          "<span class='steps'>" + steps + "</span></span></div>";
+    }).join("");
+
+    function badge(b) {
+      return "<div class='achBadge" + (b.earned ? " has" : "") + "'>" +
+        "<span class='disc'>" + (ACH_ICON[b.icon] || ACH_ICON.trophy) + "</span>" +
+        "<span style='min-width:0'><b>" + escapeHtml(b.name) + "</b>" +
+          "<span class='what'>" + escapeHtml(b.blurb || "") + "</span>" +
+          "<span class='when'>" + (b.earned
+            ? (b.earnedAt ? "Earned " + new Date(b.earnedAt).toLocaleDateString() + " · " : "") + rarityWord(b.rarity)
+            : !b.rarity ? "Nobody has this yet" : b.rarity + "% of drivers have it") + "</span></span></div>";
+    }
+    el("achEarnedCount").textContent = earned.length;
+    el("achEarned").innerHTML = earned.length ? earned.map(badge).join("")
+      : "<p class='achEmpty'>None yet. Your first drive earns the first one.</p>";
+    el("achTodoCount").textContent = todo.length;
+    el("achTodo").innerHTML = todo.length ? todo.map(badge).join("")
+      : "<p class='achEmpty'>Every badge earned.</p>";
+    el("achNote").textContent = "Rarity is the share of the " + d.eligible +
+      (d.eligible === 1 ? " driver" : " drivers") + " on this server who have driven at least once. " +
+      "Achievements are worked out from what was actually driven, so marking a street complete by hand does not count toward them.";
+  }
+
+  window.__ssAchOpened = function () {
+    apiJson("/api/achievements").then(renderAchievementsPage).catch(function (err) {
+      el("achKpis").innerHTML = "";
+      el("achNote").textContent = "Could not load achievements: " + err.message;
+    });
+  };
 
   function loadAchievements(userId, node, countNode) {
     return apiJson("/api/achievements" + (userId ? "/" + userId : ""))
