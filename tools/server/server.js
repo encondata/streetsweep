@@ -12,6 +12,7 @@ const identity = require("./identity");
 const achievements = require("./achievements");
 const networks = require("./networks");
 const streets = require("./streets");
+const completions = require("./completions");
 const photos = require("./photos");
 
 const PORT = Number(process.env.PORT || 80);
@@ -467,7 +468,7 @@ function bbox(points) {
  * whole push: losing one segment beats losing the sync.
  */
 async function applySync(body, by) {
-  const result = { areas: 0, edges: 0, drives: 0, pois: 0, skipped: 0 };
+  const result = { areas: 0, edges: 0, drives: 0, pois: 0, completions: 0, skipped: 0 };
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -598,6 +599,12 @@ async function applySync(body, by) {
           : "DELETE FROM pois WHERE user_id=$1",
         keep.length ? [keep, by.userId] : [by.userId],
       );
+    }
+
+    if (Array.isArray(body.completions)) {
+      // Streets marked complete on the phone. Not scoped to the sender like the rest:
+      // a street is finished for everyone, and the newer edit wins whoever made it.
+      result.completions = await completions.apply(client, body.completions, by.userId);
     }
 
     await client.query("COMMIT");
@@ -831,6 +838,7 @@ function rightFor(route, method) {
   if (route.startsWith("/api/areas") && method !== "GET") return "areas";
   if (route === "/api/sync") return "record";
   if (route.startsWith("/api/pois") && method !== "GET") return "record";
+  if (route.startsWith("/api/street-completions") && method !== "GET") return "record";
   return "read";
 }
 
@@ -1668,13 +1676,36 @@ async function handle(req, res) {
     if (!rows[0]) return sendJson(res, 404, { error: "No such area" });
     try {
       const got = await networks.forArea(pool, rows[0]);
+      const marked = await completions.markedAmong(pool, got.lines.map((l) => l.id));
       return sendJson(res, 200, {
         streets: got.lines.length, lines: got.lines.map((l) => l.shape),
+        // Parallel to lines, so the page can say which street was clicked and match
+        // driven segments to it.
+        ids: got.lines.map((l) => l.id), names: got.lines.map((l) => l.name),
+        completed: marked,
         fetchedAt: got.fetchedAt, cached: got.cached, stale: Boolean(got.stale),
       });
     } catch (err) {
       return sendJson(res, 502, { error: err.message || "OpenStreetMap could not be reached" });
     }
+  }
+
+  /**
+   * Streets marked complete by hand. A phone reads the whole list, unmarks included, to
+   * bring itself up to date; the web map marks and unmarks here.
+   */
+  if (route === "/api/street-completions" && req.method === "GET") {
+    return sendJson(res, 200, { completions: await completions.list(pool) });
+  }
+  if (route === "/api/street-completions" && req.method === "POST") {
+    const body = await readBody(req);
+    const ids = (Array.isArray(body.wayIds) ? body.wayIds : [body.wayId]).map(Number)
+      .filter((n) => Number.isSafeInteger(n) && n > 0).slice(0, 5000);
+    if (!ids.length) return sendJson(res, 400, { error: "Which street?" });
+    const at = Date.now();
+    const taken = await completions.apply(pool,
+      ids.map((wayId) => ({ wayId, marked: body.marked !== false, updatedAt: at })), who.user.id);
+    return sendJson(res, 200, { marked: body.marked !== false, streets: taken });
   }
 
   if (route === "/api/coverage" && req.method === "GET") {
@@ -1787,6 +1818,7 @@ waitForDatabase()
   .then(() => achievements.ensureSchema(pool))
   .then(() => networks.ensureSchema(pool))
   .then(() => streets.ensureSchema(pool))
+  .then(() => completions.ensureSchema(pool))
   .then(readyPhotos)
   .then(() => {
     // Expired rows are dead weight; clear them at boot and once a day after.

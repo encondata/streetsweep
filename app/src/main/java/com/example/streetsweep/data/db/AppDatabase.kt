@@ -14,9 +14,9 @@ import com.example.streetsweep.domain.RoadShape
     entities = [
         TrackSession::class, TrackPoint::class, SnappedPoint::class,
         CoverageArea::class, AreaWay::class, OsmWay::class, StreetChunk::class, DrivenEdge::class,
-        Poi::class, StreetExclusion::class,
+        Poi::class, StreetExclusion::class, StreetCompletion::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -131,10 +131,22 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v11: streets marked complete by hand, shared with the server. A new table only. */
+        @JvmField
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `street_completions` (`wayId` INTEGER NOT NULL, " +
+                        "`marked` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `sent` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`wayId`))",
+                )
+            }
+        }
+
         /** Hand-written migrations, oldest first. Add one for each version bump. */
         val MIGRATIONS: Array<Migration> =
             arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
-                MIGRATION_9_10)
+                MIGRATION_9_10, MIGRATION_10_11)
 
         fun build(context: Context): AppDatabase =
             // The phone now holds real drives and areas. Every schema change from version 4 on

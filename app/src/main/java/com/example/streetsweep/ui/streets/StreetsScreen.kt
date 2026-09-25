@@ -19,6 +19,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.RemoveDone
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -81,6 +83,10 @@ class StreetsViewModel(private val container: AppContainer, private val areaId: 
             if (excluded) container.coverageRepository.exclude(listOf(wayId), reason)
             else container.coverageRepository.include(listOf(wayId))
         }
+    }
+
+    fun setCompleted(wayId: Long, marked: Boolean) {
+        viewModelScope.launch { container.coverageRepository.setCompleted(listOf(wayId), marked) }
     }
 
     fun excludeAll(wayIds: List<Long>, reason: ExclusionReason) {
@@ -194,6 +200,7 @@ fun StreetsScreen(
                                 "${s.highway.replace('_', ' ')} · ${Geo.formatDistance(s.lengthMeters)} · " +
                                     when {
                                         s.excluded -> "excluded"
+                                        s.completed -> "marked complete"
                                         s.isDone -> "done"
                                         s.isPartial -> "${(s.fraction * 100).roundToInt()}% driven"
                                         else -> "not driven"
@@ -201,6 +208,18 @@ fun StreetsScreen(
                             )
                         },
                         trailingContent = {
+                          Row {
+                            // Finishing a street by hand is for one the GPS only partly
+                            // caught; a fully driven one has nothing to mark.
+                            if (s.completed) {
+                                IconButton(onClick = { viewModel.setCompleted(s.wayId, false) }) {
+                                    Icon(Icons.Default.RemoveDone, contentDescription = "Unmark complete")
+                                }
+                            } else if (s.isPartial) {
+                                IconButton(onClick = { viewModel.setCompleted(s.wayId, true) }) {
+                                    Icon(Icons.Default.DoneAll, contentDescription = "Mark this street complete")
+                                }
+                            }
                             IconButton(onClick = { viewModel.setExcluded(s.wayId, !s.excluded) }) {
                                 if (s.excluded) {
                                     Icon(Icons.Default.Undo, contentDescription = "Count this street again")
@@ -208,6 +227,7 @@ fun StreetsScreen(
                                     Icon(Icons.Default.Block, contentDescription = "Exclude this street")
                                 }
                             }
+                          }
                         },
                     )
                     HorizontalDivider()

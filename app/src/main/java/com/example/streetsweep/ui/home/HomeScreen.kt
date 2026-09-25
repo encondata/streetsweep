@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -381,6 +382,7 @@ fun HomeScreen(
             street = street,
             onExclude = { reason -> viewModel.setSelectedExcluded(true, reason) },
             onInclude = { viewModel.setSelectedExcluded(false) },
+            onComplete = viewModel::setSelectedCompleted,
             onDismiss = viewModel::clearSelectedStreet,
         )
     }
@@ -524,6 +526,7 @@ private fun StreetActionsDialog(
     street: StreetStatus,
     onExclude: (ExclusionReason) -> Unit,
     onInclude: () -> Unit,
+    onComplete: (Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var reason by remember(street.wayId) { mutableStateOf(ExclusionReason.GATED) }
@@ -540,6 +543,7 @@ private fun StreetActionsDialog(
                 Text(
                     when {
                         street.excluded -> "Excluded — does not count toward coverage"
+                        street.completed -> "Marked complete — counts as driven"
                         street.isDone -> "Driven"
                         street.isPartial -> "${(street.fraction * 100).roundToInt()}% driven"
                         else -> "Not driven yet"
@@ -547,7 +551,21 @@ private fun StreetActionsDialog(
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                if (!street.excluded) {
+                if (street.completed || street.isPartial) {
+                    Spacer(Modifier.height(12.dp))
+                    if (street.completed) {
+                        OutlinedButton(onClick = { onComplete(false) }) { Text("Unmark complete") }
+                    } else {
+                        Text(
+                            "Drove all of it but the trace missed some? Count the whole street as driven.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        FilledTonalButton(onClick = { onComplete(true) }) { Text("Mark as complete") }
+                    }
+                }
+                if (!street.excluded && !street.completed) {
                     Spacer(Modifier.height(12.dp))
                     Text("Exclude because", style = MaterialTheme.typography.labelMedium)
                     Spacer(Modifier.height(4.dp))
@@ -558,7 +576,7 @@ private fun StreetActionsDialog(
         confirmButton = {
             if (street.excluded) {
                 TextButton(onClick = onInclude) { Text("Count it again") }
-            } else {
+            } else if (!street.completed) {
                 TextButton(onClick = { onExclude(reason) }) { Text("Exclude") }
             }
         },

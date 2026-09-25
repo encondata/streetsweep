@@ -151,6 +151,12 @@ class PortalSync(
         val since = if (full) 0L else settings.current().lastPortalPushAt
         val startedAt = System.currentTimeMillis()
 
+        // Before the areas' totals are worked out, so they already count a street someone
+        // marked complete on the web. A server too old to know about marks is no reason to
+        // fail the rest of the push.
+        runCatching { syncCompletions() }
+            .onFailure { Log.w(TAG, "could not sync streets marked complete: ${it.message}") }
+
         val areas = coverage.areasWithStatsNow()
         // Areas reference their parent by id locally but travel by name, because the server
         // has no idea what our row ids mean.
@@ -190,6 +196,35 @@ class PortalSync(
 
         settings.setLastPortalPushAt(startedAt)
         return PushResult(areas.size, sent, drives.size, pois.size, areaPull)
+    }
+
+    /**
+     * Swaps streets marked complete by hand with the server: this phone's edits up, then
+     * everyone's down. Each side keeps whichever edit of a street is newer. Returns how many
+     * streets changed here.
+     */
+    suspend fun syncCompletions(): Int {
+        val unsent = coverage.unsentCompletions()
+        unsent.chunked(EDGE_BATCH).forEach { batch ->
+            client.sync(JSONObject().put("completions", JSONArray().apply {
+                batch.forEach {
+                    put(JSONObject().put("wayId", it.wayId).put("marked", it.marked).put("updatedAt", it.updatedAt))
+                }
+            }))
+            batch.forEach { coverage.markCompletionSent(it) }
+        }
+        val rows = JSONObject(client.getJson("/api/street-completions")).optJSONArray("completions")
+            ?: return 0
+        val incoming = (0 until rows.length()).map { i ->
+            val r = rows.getJSONObject(i)
+            com.example.streetsweep.data.db.StreetCompletion(
+                wayId = r.getLong("wayId"), marked = r.getBoolean("marked"),
+                updatedAt = r.getLong("updatedAt"), sent = true,
+            )
+        }
+        return coverage.applyCompletions(incoming).also {
+            if (unsent.isNotEmpty() || it > 0) Log.d(TAG, "completions: sent ${unsent.size}, took $it")
+        }
     }
 
     private fun areaJson(a: com.example.streetsweep.data.AreaWithStats, nameById: Map<Long, String>) = JSONObject()

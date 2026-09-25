@@ -8,6 +8,7 @@ import com.example.streetsweep.data.db.CoverageArea
 import com.example.streetsweep.data.db.DrivenEdge
 import com.example.streetsweep.data.db.OsmWay
 import com.example.streetsweep.data.db.StreetChunk
+import com.example.streetsweep.data.db.StreetCompletion
 import com.example.streetsweep.data.db.StreetExclusion
 import com.example.streetsweep.data.db.WayCoverageRow
 import com.example.streetsweep.data.db.WeeklyMetersRow
@@ -49,6 +50,8 @@ data class StreetStatus(
     val excluded: Boolean = false,
     /** Usually [DONE_THRESHOLD]; less for a street a car cannot finish. See RoadShape. */
     val doneFraction: Double = DONE_THRESHOLD,
+    /** Marked complete by hand; [fraction] is then 1. */
+    val completed: Boolean = false,
 ) {
     val isDone: Boolean get() = !excluded && fraction >= doneFraction
     val isPartial: Boolean get() = !excluded && fraction > PARTIAL_THRESHOLD && fraction < doneFraction
@@ -66,6 +69,7 @@ data class StreetStatus(
             fraction = if (r.lengthMeters <= 0) 0.0 else (r.drivenMeters / r.lengthMeters).coerceIn(0.0, 1.0),
             excluded = r.excluded,
             doneFraction = r.minDoneFraction,
+            completed = r.completed,
         )
     }
 }
@@ -301,6 +305,36 @@ class CoverageRepository(private val db: AppDatabase) {
     }
 
     suspend fun exclusionOf(wayId: Long): StreetExclusion? = dao.getExclusion(wayId)
+
+    /**
+     * Marks streets finished (or not) by hand. They count as fully driven from then on, on
+     * this phone at once and everywhere else after the next sync.
+     */
+    suspend fun setCompleted(wayIds: List<Long>, marked: Boolean) {
+        if (wayIds.isEmpty()) return
+        val now = System.currentTimeMillis()
+        dao.upsertCompletions(wayIds.distinct().map { StreetCompletion(it, marked, now, sent = false) })
+    }
+
+    suspend fun unsentCompletions(): List<StreetCompletion> = dao.unsentCompletions()
+
+    suspend fun markCompletionSent(row: StreetCompletion) = dao.markCompletionSent(row.wayId, row.updatedAt)
+
+    /**
+     * Takes the server's marks. Whichever edit is newer wins, so a street unmarked here after
+     * someone marked it on the web stays unmarked. Returns how many rows changed.
+     */
+    suspend fun applyCompletions(incoming: List<StreetCompletion>): Int = db.withTransaction {
+        if (incoming.isEmpty()) return@withTransaction 0
+        val mine = incoming.map { it.wayId }.chunked(500)
+            .flatMap { dao.getCompletions(it) }.associateBy { it.wayId }
+        val newer = incoming.filter { theirs ->
+            val local = mine[theirs.wayId]
+            local == null || theirs.updatedAt > local.updatedAt
+        }.map { it.copy(sent = true) }
+        dao.upsertCompletions(newer)
+        newer.count { it.marked != (mine[it.wayId]?.marked ?: false) }
+    }
 
     fun observeExclusionCount(): Flow<Int> = dao.observeExclusionCount()
 

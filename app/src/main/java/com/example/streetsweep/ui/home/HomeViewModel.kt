@@ -178,6 +178,15 @@ class HomeViewModel(private val container: AppContainer, private val context: Co
         }
     }
 
+    fun setSelectedCompleted(marked: Boolean) {
+        val s = selectedStreet.value ?: return
+        viewModelScope.launch {
+            container.coverageRepository.setCompleted(listOf(s.wayId), marked)
+            _message.value = if (marked) "${s.label} marked complete" else "${s.label} back to what was driven"
+            selectedStreet.value = null
+        }
+    }
+
     // ---- excluding everything inside a shape ----
 
     /** Non-null while the "exclude these streets?" confirmation is up; holds the street count. */

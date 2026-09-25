@@ -785,6 +785,12 @@
   .field { margin-bottom: 10px; }
   .card { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); padding: 13px; box-shadow: var(--shadow-1); }
   .card + .card { margin-top: 10px; }
+  /* Street popups on the map follow the page's theme rather than Leaflet's white. */
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+    background: var(--surface); color: var(--ink); box-shadow: var(--shadow-2);
+  }
+  .leaflet-popup-content { margin: 12px 14px; font: inherit; }
+  .streetPop b { font-size: 13px; }
   .hint { font-size: 11px; color: var(--ink-soft); line-height: 1.55; margin: 9px 0 0; }
   .coords { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); }
   .warn { color: var(--amber); }
@@ -1061,6 +1067,7 @@
         <div class="row2"><span class="key hollow" id="keyArea"></span>Area boundary</div>
         <div class="row2" id="keyMonthRow" hidden><span class="key" style="background:#1f6fe0"></span>Driven this month</div>
         <div class="row2" id="keyUndrivenRow" hidden><span class="key" style="background:#8f99a5"></span>Not driven yet</div>
+        <div class="row2" id="keyMarkedRow" hidden><span class="key" style="background:#0f9f8f"></span>Marked complete</div>
         <div class="row2"><span class="key dot" id="keyPlace"></span>Marked place</div>
       </div>
     </div>
@@ -4324,6 +4331,12 @@ window.StreetSweepBases = {
   // in, keeps it underneath however late it turns up.
   map.createPane("sweepNetwork");
   map.getPane("sweepNetwork").style.zIndex = 395;
+  // Wide, invisible copies of every street, above the drawn ones, so a click anywhere on
+  // a street finds it — including on the green part of one only partly driven.
+  map.createPane("sweepHits");
+  map.getPane("sweepHits").style.zIndex = 405;
+  var markedLayer = L.layerGroup();
+  var hitLayer = L.layerGroup();
   var networkCache = {};                    // area id -> array of [lat, lng] lines
   var shownStreetsFor = null;
 
@@ -4362,11 +4375,16 @@ window.StreetSweepBases = {
   function clearStreets() {
     streetLayer.clearLayers();
     networkLayer.clearLayers();
-    if (map.hasLayer(streetLayer)) map.removeLayer(streetLayer);
-    if (map.hasLayer(networkLayer)) map.removeLayer(networkLayer);
+    markedLayer.clearLayers();
+    hitLayer.clearLayers();
+    [streetLayer, networkLayer, markedLayer, hitLayer].forEach(function (l) {
+      if (map.hasLayer(l)) map.removeLayer(l);
+    });
+    map.closePopup();
     shownStreetsFor = null;
     el("keyMonthRow").hidden = true;
     el("keyUndrivenRow").hidden = true;
+    el("keyMarkedRow").hidden = true;
     el("keyDrivenText").textContent = "Streets you have driven";
   }
 
@@ -4377,14 +4395,31 @@ window.StreetSweepBases = {
    */
   var NETWORK_CELL_LIMIT = 6;
 
+  // The phone's thresholds: GPS slop means a fully driven street rarely scores 100%.
+  var DONE_FRACTION = 0.8, PARTIAL_FRACTION = 0.02;
+
+  /** Drivers and admins can mark a street complete; a viewer only looks. */
+  function canMark() { return Boolean(me && (me.role === "admin" || me.role === "driver")); }
+
+  function lineMeters(line) {
+    var m = 0;
+    for (var i = 1; i < line.length; i++) m += map.distance(line[i - 1], line[i]);
+    return m;
+  }
+
   function showStreets(a) {
     if (!a.serverId) return;                // not saved yet, so nothing driven in it
     var token_ = {};
     shownStreetsFor = token_;
     streetLayer.clearLayers();
     networkLayer.clearLayers();
+    markedLayer.clearLayers();
+    hitLayer.clearLayers();
+    map.closePopup();
     networkLayer.addTo(map);
     streetLayer.addTo(map);
+    markedLayer.addTo(map);
+    hitLayer.addTo(map);
     el("keyMonthRow").hidden = false;
     el("keyDrivenText").textContent = "Driven before this month";
 
@@ -4392,7 +4427,8 @@ window.StreetSweepBases = {
     var big = cellCount(a.latlngs) > NETWORK_CELL_LIMIT;
     el("keyUndrivenRow").hidden = big;
 
-    var state = { driven: null, month: 0, network: big ? "big" : "loading", count: 0, error: "" };
+    var state = { driven: null, month: 0, network: big ? "big" : "loading", count: 0, error: "",
+                  drivenByWay: {}, marked: {}, net: null };
     var note = el("streetNote");
     function say() {
       if (shownStreetsFor !== token_) return;
@@ -4409,6 +4445,9 @@ window.StreetSweepBases = {
       else {
         parts.push(state.count.toLocaleString() + " streets to sweep in this outline" +
           (state.stale ? " (an older copy — OpenStreetMap could not be reached just now)" : "") + ".");
+        var nMarked = Object.keys(state.marked).length;
+        if (nMarked) parts.push(nMarked.toLocaleString() + " marked complete by hand.");
+        if (canMark()) parts.push("Click a street to see how much of it is driven, or to mark one the trace only partly caught as complete.");
         if (state.phoneTotal && Math.abs(state.phoneTotal - state.count) > 2) {
           parts.push("The phone counts " + state.phoneTotal.toLocaleString() +
             " here, because its outline for this area is a different shape. Send the area " +
@@ -4419,6 +4458,80 @@ window.StreetSweepBases = {
     }
     say();
 
+    /** Marked streets drawn as driven, in their own colour so a mark is told from a trace. */
+    function paintMarked() {
+      markedLayer.clearLayers();
+      var net = state.net;
+      if (!net || !net.ids) return;
+      var any = false;
+      net.ids.forEach(function (id, i) {
+        if (!state.marked[id]) return;
+        any = true;
+        drawRoad(net.lines[i], markedLayer, onImagery
+          ? { casing: "#022b26", casingWeight: 7, core: "#3ff2d6", coreWeight: 3.5, opacity: 1 }
+          : { casing: null, casingWeight: 0, core: "#0f9f8f", coreWeight: 4, opacity: 0.95 }, 1);
+      });
+      markedLayer.eachLayer(function (l) { l.options.interactive = false; });
+      el("keyMarkedRow").hidden = !any;
+    }
+
+    function streetPopup(i, at) {
+      var net = state.net;
+      var id = net.ids[i];
+      var name = (net.names && net.names[i]) || "Unnamed street";
+      var length = lineMeters(net.lines[i]);
+      var driven = Math.min(length, state.drivenByWay[id] || 0);
+      var fraction = length > 0 ? driven / length : 0;
+      var mark = state.marked[id];
+      var line;
+      if (mark) line = "Marked complete" + (mark.by ? " by " + escapeHtml(mark.by) : "") +
+        (mark.updatedAt ? " on " + new Date(mark.updatedAt).toLocaleDateString() : "");
+      else if (fraction >= DONE_FRACTION) line = "Driven";
+      else if (fraction > PARTIAL_FRACTION) line = Math.round(fraction * 100) + "% driven";
+      else line = "Not driven yet";
+
+      var html = '<div class="streetPop"><b>' + escapeHtml(name) + "</b>" +
+        '<div class="hint" style="margin:2px 0 0">' + fmtDistance(length) + " · " + line + "</div>";
+      var action = null;
+      if (canMark()) {
+        if (mark) action = { marked: false, label: "Unmark complete", cls: "" };
+        else if (fraction > PARTIAL_FRACTION && fraction < DONE_FRACTION) {
+          action = { marked: true, label: "Mark as complete", cls: "primary" };
+          html += '<p class="hint" style="margin:8px 0 0">Drove all of it but the trace missed some? ' +
+            "Count the whole street as driven, on the web and every phone.</p>";
+        }
+      }
+      if (action) html += '<div class="row" style="margin-top:10px"><button class="' + action.cls +
+        '" data-mark>' + action.label + "</button></div>";
+      html += "</div>";
+
+      var pop = L.popup({
+        maxWidth: 280,
+        // Clear of the zoom buttons on the left and the status line along the top.
+        autoPanPaddingTopLeft: L.point(70, 70), autoPanPaddingBottomRight: L.point(20, 20),
+      }).setLatLng(at).setContent(html).openOn(map);
+      var btn = pop.getElement() && pop.getElement().querySelector("[data-mark]");
+      if (!btn) return;
+      btn.addEventListener("click", function () {
+        btn.disabled = true;
+        btn.textContent = action.marked ? "Marking…" : "Unmarking…";
+        apiJson("/api/street-completions", "POST", { wayIds: [id], marked: action.marked }).then(function () {
+          if (action.marked) state.marked[id] = { wayId: id, updatedAt: Date.now(), by: me && (me.name || me.email) };
+          else delete state.marked[id];
+          net.completed = Object.keys(state.marked).map(function (k) { return state.marked[k]; });
+          paintMarked();
+          say();
+          map.closePopup();
+          status(name + (action.marked ? " marked complete." : " unmarked.") +
+            " Phones pick it up on their next sync.", "ok");
+        }).catch(function (err) {
+          btn.disabled = false;
+          btn.textContent = action.label;
+          status("Could not change that street: " + err.message, "bad");
+        });
+      });
+    }
+
     // What the server has, drawn the moment it arrives — never held up by OpenStreetMap.
     apiJson("/api/areas/" + a.serverId + "/streets").then(function (d) {
       if (shownStreetsFor !== token_) return;
@@ -4427,6 +4540,7 @@ window.StreetSweepBases = {
                      opacity: 0.95 };
       var older = roadPaint();
       d.edges.forEach(function (e) {
+        if (e.wayId != null) state.drivenByWay[e.wayId] = (state.drivenByWay[e.wayId] || 0) + e.lengthMeters;
         var isRecent = e.drivenAt >= monthStart.getTime();
         if (isRecent) state.month++;
         drawRoad(e.shape, streetLayer, isRecent ? recent : older, 1);
@@ -4440,14 +4554,26 @@ window.StreetSweepBases = {
     if (big) return;
     networkFor(a).then(function (net) {
       if (shownStreetsFor !== token_) return;
-      net.lines.forEach(function (line) {
+      state.net = net;
+      state.marked = {};
+      (net.completed || []).forEach(function (c) { state.marked[c.wayId] = c; });
+      net.lines.forEach(function (line, i) {
         L.polyline(line, {
           pane: "sweepNetwork",
           color: onImagery ? "#ffffff" : "#8f99a5",
           weight: onImagery ? 2.5 : 3, opacity: onImagery ? 0.55 : 0.7,
           lineCap: "round", lineJoin: "round", interactive: false,
         }).addTo(networkLayer);
+        if (!net.ids) return;               // an older server: nothing to click
+        L.polyline(line, {
+          pane: "sweepHits", color: "#000", opacity: 0, weight: 16,
+          lineCap: "round", lineJoin: "round",
+        }).on("click", function (ev) {
+          L.DomEvent.stop(ev);
+          streetPopup(i, ev.latlng);
+        }).addTo(hitLayer);
       });
+      paintMarked();
       state.network = "done"; state.count = net.streets; state.stale = net.stale;
       // The phone keeps its own copy of each outline. When the two have drifted apart the
       // counts will too, and it is worth saying which, rather than showing two numbers

@@ -120,6 +120,24 @@ data class StreetExclusion(
     val excludedAt: Long,
 )
 
+/**
+ * A street someone has said is finished although the GPS trace does not cover enough of
+ * it: a cul-de-sac turned in at the mouth, a road the matcher kept losing, a stretch driven
+ * with the phone off. It counts as fully driven everywhere.
+ *
+ * Shared through the server, so a street marked on the web is complete on every phone.
+ * Unmarking keeps the row with [marked] false, so that the unmark reaches the other devices
+ * instead of the next pull bringing the mark back. [updatedAt] decides between two edits.
+ */
+@Entity(tableName = "street_completions")
+data class StreetCompletion(
+    @PrimaryKey val wayId: Long,
+    val marked: Boolean,
+    val updatedAt: Long,
+    /** False until the server has this version of the row. */
+    val sent: Boolean = false,
+)
+
 /** Row of the per-way coverage query. */
 data class WayCoverageRow(
     val id: Long,
@@ -130,6 +148,8 @@ data class WayCoverageRow(
     val drivenMeters: Double,
     val excluded: Boolean,
     val minDoneFraction: Double = RoadShape.DEFAULT_DONE_FRACTION,
+    /** Marked complete by hand ([StreetCompletion]); [drivenMeters] is then the full length. */
+    val completed: Boolean = false,
 )
 
 /** Aggregate coverage over an area's streets, ignoring excluded ones. */
