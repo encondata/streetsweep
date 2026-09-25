@@ -152,6 +152,10 @@ class CoverageRepository(private val db: AppDatabase) {
     // ---- areas ----
     fun observeAreas(): Flow<List<CoverageArea>> = dao.observeAreas()
     suspend fun getAreas(): List<CoverageArea> = dao.getAreas()
+
+    /** Areas whose streets have never finished downloading, including ones that failed. */
+    suspend fun unfinishedAreaIds(): List<Long> =
+        dao.getAreas().filter { it.streetsLoadedAt == null }.map { it.id }
     suspend fun getArea(id: Long): CoverageArea? = dao.getArea(id)
 
     fun observeStats(areaId: Long): Flow<AreaStats> = dao.observeStatsFor(areaId).map { AreaStats.fromRow(it) }

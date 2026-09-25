@@ -109,8 +109,18 @@ class AreasViewModel(private val container: AppContainer, private val context: C
         _downloading.value = true
         _message.value = try {
             val pull = container.portalSync.pullAreas()
-            pull.needStreets.forEach { StreetDownloadWorker.enqueue(context, it) }
-            pull.summary() ?: "Already up to date — this phone has every area on the server"
+            // Anything whose streets never finished goes back on the queue too. A second tap
+            // here is how a download that failed part-way gets finished: its outline already
+            // matches the web, so the pull alone would say there was nothing to do.
+            val unfinished = container.coverageRepository.unfinishedAreaIds()
+            val queued = StreetDownloadWorker.enqueueAll(context, pull.needStreets + unfinished)
+            val retrying = (unfinished - pull.needStreets.toSet()).size
+            listOfNotNull(
+                pull.summary(),
+                if (retrying > 0) "retrying streets for $retrying unfinished ${if (retrying == 1) "area" else "areas"}" else null,
+            ).joinToString(" · ").ifEmpty { null }
+                ?.let { it + if (queued > 0) " — downloading one area at a time" else "" }
+                ?: "Already up to date — this phone has every area on the server"
         } catch (e: Exception) {
             "Could not download areas: ${e.message ?: "no answer from the server"}"
         } finally {

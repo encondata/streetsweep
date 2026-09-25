@@ -4,6 +4,10 @@ import android.content.Context
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.util.Log
+import androidx.work.BackoffPolicy
+import androidx.work.Constraints
+import androidx.work.NetworkType
+import java.util.concurrent.TimeUnit
 import androidx.work.CoroutineWorker
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
@@ -17,26 +21,37 @@ import com.example.streetsweep.data.CoverageRepository
 import com.example.streetsweep.domain.ChunkGrid
 import com.example.streetsweep.tracking.Notifications
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 
 /**
  * Downloads the street network for an area, one 0.1° grid cell at a time, so a metro-sized
  * request becomes a hundred small ones the public Overpass server will actually answer.
  * Cells fetched in the last [CHUNK_TTL_MS] (for any area) are reused. Progress is written to
  * the area row so the UI can show it, and the job resumes where it left off if re-run.
+ *
+ * Areas download one after another, on a single queue. They used to each get a job of
+ * their own, which was fine while areas were added one at a time and fell apart the first
+ * time a sync brought down 108 of them: 108 jobs hit the free Overpass server at once, it
+ * answered 429 and then stopped accepting connections, and 106 areas failed for good. On
+ * one queue, neighbouring areas also reuse the cells the one before them fetched, instead
+ * of all asking for the same cell together.
  */
 class StreetDownloadWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
+        // Nothing here may return failure. On a queue, a failed job fails every job behind
+        // it, so one bad area would take every other area's download down with it. A problem
+        // with this area is written on the area, where it shows, and the queue moves on.
         val areaId = inputData.getLong(KEY_AREA_ID, -1L)
-        if (areaId < 0) return Result.failure()
+        if (areaId < 0) return Result.success()
         val container = applicationContext.appContainer
         val repo: CoverageRepository = container.coverageRepository
-        val area = repo.getArea(areaId) ?: return Result.failure()
+        val area = repo.getArea(areaId) ?: return Result.success()   // deleted since it was queued
 
         val cells = ChunkGrid.cellsFor(area.bounds)
         if (cells.size > MAX_CELLS) {
             repo.setProgress(areaId, cells.size, 0, error = "Area too large (${cells.size} cells; limit $MAX_CELLS). Split it into cities.")
-            return Result.failure()
+            return Result.success()
         }
         runCatching { setForeground(foregroundInfo(area.name, 0, cells.size)) }
         repo.setProgress(areaId, cells.size, 0)
@@ -51,8 +66,17 @@ class StreetDownloadWorker(context: Context, params: WorkerParameters) : Corouti
                     repo.storeChunk(cell.key, streets)
                 } catch (e: Exception) {
                     Log.w(TAG, "Cell ${cell.key} failed", e)
-                    repo.setProgress(areaId, cells.size, done, error = e.message ?: "Download failed")
-                    return Result.failure()
+                    // Almost always the server being busy or unreachable, which passes. Wait and
+                    // try this area again, holding the queue behind it — there is no point
+                    // asking for the next area from a server that is refusing this one. After a
+                    // few runs, give up on it and let the rest through.
+                    return if (runAttemptCount + 1 < MAX_RUN_ATTEMPTS) {
+                        repo.setProgress(areaId, cells.size, done, error = "Waiting to retry: ${e.message ?: "download failed"}")
+                        Result.retry()
+                    } else {
+                        repo.setProgress(areaId, cells.size, done, error = e.message ?: "Download failed")
+                        Result.success()
+                    }
                 }
                 delay(PAUSE_BETWEEN_CELLS_MS)
             }
@@ -73,7 +97,10 @@ class StreetDownloadWorker(context: Context, params: WorkerParameters) : Corouti
             } catch (e: Exception) {
                 last = e
                 Log.w(TAG, "Cell ${cell.key} attempt ${attempt + 1} failed: ${e.message}")
-                delay(RETRY_DELAY_MS * (attempt + 1))
+                // A 429 is the server asking outright for a minute's quiet; give it that
+                // rather than the shorter wait meant for a dropped connection.
+                val rateLimited = e.message?.contains("429") == true
+                delay(if (rateLimited) RATE_LIMIT_DELAY_MS else RETRY_DELAY_MS * (attempt + 1))
             }
         }
         throw last ?: OverpassException("Download failed")
@@ -101,12 +128,51 @@ class StreetDownloadWorker(context: Context, params: WorkerParameters) : Corouti
         private const val PAUSE_BETWEEN_CELLS_MS = 1_500L
         private const val ATTEMPTS = 4
         private const val RETRY_DELAY_MS = 15_000L
+        private const val RATE_LIMIT_DELAY_MS = 65_000L
+        private const val MAX_RUN_ATTEMPTS = 5
+        private const val QUEUE = "street-downloads"
 
+        /** Adds an area to the back of the one download queue. */
         fun enqueue(context: Context, areaId: Long) {
             val request = OneTimeWorkRequestBuilder<StreetDownloadWorker>()
                 .setInputData(Data.Builder().putLong(KEY_AREA_ID, areaId).build())
+                // Wait for a network rather than failing for the lack of one.
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 2, TimeUnit.MINUTES)
+                // The only way to see later which area a queued job is for: WorkInfo shows
+                // tags, not input data.
+                .addTag(areaTag(areaId))
                 .build()
-            WorkManager.getInstance(context).enqueueUniqueWork("streets-$areaId", ExistingWorkPolicy.KEEP, request)
+            val wm = WorkManager.getInstance(context)
+            // Jobs from before the queue were named per area and ran side by side.
+            wm.cancelUniqueWork("streets-$areaId")
+            wm.enqueueUniqueWork(QUEUE, ExistingWorkPolicy.APPEND_OR_REPLACE, request)
+        }
+
+        private fun areaTag(id: Long) = "area-$id"
+
+        /**
+         * Queues each area not already waiting, and returns how many were added. Checking
+         * matters: an area is unfinished for as long as it sits in the queue, so without it
+         * every sync during a long download would add the same areas again behind it.
+         */
+        suspend fun enqueueAll(context: Context, ids: Collection<Long>): Int {
+            val wm = WorkManager.getInstance(context)
+            val waiting: Set<Long> = runCatching {
+                wm.getWorkInfosForUniqueWorkFlow(QUEUE).first()
+                    .filter { info -> !info.state.isFinished }
+                    .flatMap { info -> info.tags }
+                    .filter { tag -> tag.startsWith("area-") }
+                    .mapNotNull { tag -> tag.removePrefix("area-").toLongOrNull() }
+                    .toSet()
+            }.getOrDefault(emptySet())
+            var added = 0
+            for (id in ids.distinct()) {
+                if (id in waiting) continue
+                enqueue(context, id)
+                added++
+            }
+            return added
         }
     }
 }

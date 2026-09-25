@@ -41,8 +41,8 @@ data class AreaPull(
             }
         }
         if (bits.isEmpty()) return null
-        return bits.joinToString(", ").replaceFirstChar { it.uppercase() } +
-            if (needStreets.isNotEmpty()) " — downloading their streets" else ""
+        // No "downloading…" here: the caller knows whether anything was actually queued.
+        return bits.joinToString(", ").replaceFirstChar { it.uppercase() }
     }
 }
 

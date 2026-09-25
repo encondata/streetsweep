@@ -125,9 +125,15 @@ class SettingsViewModel(private val container: AppContainer, private val context
     }
 
     /** Queues street downloads for whatever changed and says what happened, or null when nothing did. */
-    private fun describe(p: com.example.streetsweep.data.sync.AreaPull): String? {
-        p.needStreets.forEach { com.example.streetsweep.data.osm.StreetDownloadWorker.enqueue(context, it) }
-        return p.summary()
+    private suspend fun describe(p: com.example.streetsweep.data.sync.AreaPull): String? {
+        val unfinished = container.coverageRepository.unfinishedAreaIds()
+        val queued = com.example.streetsweep.data.osm.StreetDownloadWorker.enqueueAll(context, p.needStreets + unfinished)
+        val retrying = (unfinished - p.needStreets.toSet()).size
+        return listOfNotNull(
+            p.summary(),
+            if (retrying > 0) "retrying streets for $retrying unfinished ${if (retrying == 1) "area" else "areas"}" else null,
+        ).joinToString(" · ").ifEmpty { null }
+            ?.let { it + if (queued > 0) " — downloading one area at a time" else "" }
     }
 
     fun importAreas(uri: Uri) = work {
