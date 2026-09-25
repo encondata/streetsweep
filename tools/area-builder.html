@@ -1057,8 +1057,10 @@
       <div id="map"></div>
       <div id="status" hidden></div>
       <div id="legend">
-        <div class="row2"><span class="key" id="keyDriven"></span>Streets you have driven</div>
+        <div class="row2"><span class="key" id="keyDriven"></span><span id="keyDrivenText">Streets you have driven</span></div>
         <div class="row2"><span class="key hollow" id="keyArea"></span>Area boundary</div>
+        <div class="row2" id="keyMonthRow" hidden><span class="key" style="background:#1f6fe0"></span>Driven this month</div>
+        <div class="row2" id="keyUndrivenRow" hidden><span class="key" style="background:#8f99a5"></span>Not driven yet</div>
         <div class="row2"><span class="key dot" id="keyPlace"></span>Marked place</div>
       </div>
     </div>
@@ -1071,6 +1073,7 @@
           <p id="mapSubtitle">Click an outline on the map, or choose one under Areas, to see how far through it you are.</p>
         </div>
         <div id="areaDetail" hidden></div>
+        <p class="hint" id="streetNote" hidden></p>
         <p class="hint" id="storageMode">Connecting…</p>
         <div id="tokenBox" hidden>
           <label for="tokenInput">Access token</label>
@@ -1868,6 +1871,7 @@ window.StreetSweepBases = {
       // Handles belong to the Areas view; elsewhere a click just reads the area.
       if (window.StreetSweepViews.current() === "areas") select(area.id);
       detailFor(area);
+      if (window.StreetSweepViews.current() === "map") showStreets(area);
     });
     areas.push(area);
     return area;
@@ -3753,6 +3757,11 @@ window.StreetSweepBases = {
   // Which layers belong on the map depends on what the side panel is showing.
   function applyView(name) {
     if (drawing && name !== "areas") endDrawing();
+    // An area's streets belong to the moment it was clicked on the map.
+    if (name !== "map" && typeof clearStreets === "function") {
+      clearStreets();
+      el("streetNote").hidden = true;
+    }
     var wantsCoverage = name === "stats";
     var wantsDrives = name === "drives";
 
@@ -4299,6 +4308,158 @@ window.StreetSweepBases = {
   // ---- the area detail beside the map ----------------------------------------
 
   var reported = {};   // area name -> the stats the phone last sent
+
+  // ---- an area's own streets -------------------------------------------------
+  //
+  // Clicking an area colours its streets: every street a car is meant to sweep in grey,
+  // the ones driven drawn over them in green, and this month's in blue. The server only
+  // knows the driven ones, so the rest come from OpenStreetMap, asked for with exactly
+  // the filter the phone uses — otherwise "not driven" here would be a different set of
+  // streets from the one the phone is counting.
+
+  var streetLayer = L.layerGroup();
+  var networkLayer = L.layerGroup();
+  // The grey network arrives whenever a third-party server gets round to it, often after
+  // the driven streets are already drawn. Its own pane, under the one everything else is
+  // in, keeps it underneath however late it turns up.
+  map.createPane("sweepNetwork");
+  map.getPane("sweepNetwork").style.zIndex = 395;
+  var networkCache = {};                    // area id -> array of [lat, lng] lines
+  var shownStreetsFor = null;
+
+  function inside(latlngs, lat, lng) {
+    var hit = false;
+    for (var i = 0, j = latlngs.length - 1; i < latlngs.length; j = i++) {
+      var a = latlngs[i], b = latlngs[j];
+      if (((a.lat > lat) !== (b.lat > lat)) &&
+          (lng < (b.lng - a.lng) * (lat - a.lat) / (b.lat - a.lat) + a.lng)) hit = !hit;
+    }
+    return hit;
+  }
+
+  function areaBox(a) {
+    var s = 90, w = 180, n = -90, e = -180;
+    a.latlngs.forEach(function (p) {
+      s = Math.min(s, p.lat); n = Math.max(n, p.lat);
+      w = Math.min(w, p.lng); e = Math.max(e, p.lng);
+    });
+    return { s: s, w: w, n: n, e: e };
+  }
+
+  /**
+   * Every street to sweep in the area, from the server. It asks OpenStreetMap once per
+   * area and keeps the answer, so only the first click on an area ever waits, and the
+   * free service is asked once rather than once per viewer per click.
+   */
+  function networkFor(a) {
+    if (networkCache[a.id]) return Promise.resolve(networkCache[a.id]);
+    return apiJson("/api/areas/" + a.serverId + "/network").then(function (d) {
+      networkCache[a.id] = d;
+      return d;
+    });
+  }
+
+  function clearStreets() {
+    streetLayer.clearLayers();
+    networkLayer.clearLayers();
+    if (map.hasLayer(streetLayer)) map.removeLayer(streetLayer);
+    if (map.hasLayer(networkLayer)) map.removeLayer(networkLayer);
+    shownStreetsFor = null;
+    el("keyMonthRow").hidden = true;
+    el("keyUndrivenRow").hidden = true;
+    el("keyDrivenText").textContent = "Streets you have driven";
+  }
+
+  /**
+   * A county is thousands of ways: too slow to ask for on a click and too dense to read
+   * at the zoom it fits in. Above a handful of map cells only the driven streets are
+   * drawn, and the panel says so rather than leaving the grey out without explanation.
+   */
+  var NETWORK_CELL_LIMIT = 6;
+
+  function showStreets(a) {
+    if (!a.serverId) return;                // not saved yet, so nothing driven in it
+    var token_ = {};
+    shownStreetsFor = token_;
+    streetLayer.clearLayers();
+    networkLayer.clearLayers();
+    networkLayer.addTo(map);
+    streetLayer.addTo(map);
+    el("keyMonthRow").hidden = false;
+    el("keyDrivenText").textContent = "Driven before this month";
+
+    var monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+    var big = cellCount(a.latlngs) > NETWORK_CELL_LIMIT;
+    el("keyUndrivenRow").hidden = big;
+
+    var state = { driven: null, month: 0, network: big ? "big" : "loading", count: 0, error: "" };
+    var note = el("streetNote");
+    function say() {
+      if (shownStreetsFor !== token_) return;
+      note.hidden = false;
+      var parts = [];
+      if (state.driven == null) parts.push("Reading the driven streets…");
+      else {
+        parts.push(state.driven.toLocaleString() + " driven segments" +
+          (state.month ? ", " + state.month + " of them this month" : "") + ".");
+      }
+      if (state.network === "big") parts.push("Too large to draw every street at once, so only the driven ones are shown.");
+      else if (state.network === "loading") parts.push("Loading the streets still to sweep…");
+      else if (state.network === "failed") parts.push("The undriven streets could not be loaded: " + state.error + ". Click the area again to retry.");
+      else {
+        parts.push(state.count.toLocaleString() + " streets to sweep in this outline" +
+          (state.stale ? " (an older copy — OpenStreetMap could not be reached just now)" : "") + ".");
+        if (state.phoneTotal && Math.abs(state.phoneTotal - state.count) > 2) {
+          parts.push("The phone counts " + state.phoneTotal.toLocaleString() +
+            " here, because its outline for this area is a different shape. Send the area " +
+            "to the phone to line them up.");
+        }
+      }
+      note.textContent = parts.join(" ");
+    }
+    say();
+
+    // What the server has, drawn the moment it arrives — never held up by OpenStreetMap.
+    apiJson("/api/areas/" + a.serverId + "/streets").then(function (d) {
+      if (shownStreetsFor !== token_) return;
+      var recent = { casing: onImagery ? "#031a3a" : null, casingWeight: 7,
+                     core: onImagery ? "#6fb6ff" : "#1f6fe0", coreWeight: onImagery ? 3.5 : 4,
+                     opacity: 0.95 };
+      var older = roadPaint();
+      d.edges.forEach(function (e) {
+        var isRecent = e.drivenAt >= monthStart.getTime();
+        if (isRecent) state.month++;
+        drawRoad(e.shape, streetLayer, isRecent ? recent : older, 1);
+      });
+      state.driven = d.edges.length;
+      say();
+    }).catch(function (err) {
+      if (shownStreetsFor === token_) status("Could not read the streets: " + err.message, "bad");
+    });
+
+    if (big) return;
+    networkFor(a).then(function (net) {
+      if (shownStreetsFor !== token_) return;
+      net.lines.forEach(function (line) {
+        L.polyline(line, {
+          pane: "sweepNetwork",
+          color: onImagery ? "#ffffff" : "#8f99a5",
+          weight: onImagery ? 2.5 : 3, opacity: onImagery ? 0.55 : 0.7,
+          lineCap: "round", lineJoin: "round", interactive: false,
+        }).addTo(networkLayer);
+      });
+      state.network = "done"; state.count = net.streets; state.stale = net.stale;
+      // The phone keeps its own copy of each outline. When the two have drifted apart the
+      // counts will too, and it is worth saying which, rather than showing two numbers
+      // that silently disagree.
+      var rep = reported[a.name];
+      state.phoneTotal = rep && rep.total ? rep.total : null;
+      say();
+    }).catch(function (err) {
+      state.network = "failed"; state.error = err.message;
+      say();
+    });
+  }
 
   function detailFor(a) {
     var stats = reported[a.name];

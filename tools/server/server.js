@@ -10,6 +10,7 @@ const path = require("path");
 const { Pool } = require("pg");
 const identity = require("./identity");
 const achievements = require("./achievements");
+const networks = require("./networks");
 const photos = require("./photos");
 
 const PORT = Number(process.env.PORT || 80);
@@ -1599,6 +1600,64 @@ async function handle(req, res) {
     return sendJson(res, 200, result);
   }
 
+  /**
+   * The driven streets inside one area, for colouring it on the map. Found by bounding
+   * box against the index the table already has, then kept only where the segment's
+   * middle falls inside the outline — the same test the phone uses to decide which area
+   * a street belongs to, so the two agree about what "in Walden" means.
+   */
+  const areaStreets = route.match(/^\/api\/areas\/(\d+)\/streets$/);
+  if (areaStreets && req.method === "GET") {
+    const { rows: arows } = await pool.query(
+      "SELECT polygon, min_lat, min_lng, max_lat, max_lng FROM areas WHERE id=$1",
+      [Number(areaStreets[1])]);
+    const area = arows[0];
+    if (!area) return sendJson(res, 404, { error: "No such area" });
+
+    const { rows } = await pool.query(
+      `SELECT e.key, e.way_id, e.name, e.road_class, e.length_m, e.driven_at, e.shape,
+              e.min_lat, e.min_lng, e.max_lat, e.max_lng, u.name AS driver
+         FROM driven_edges e LEFT JOIN users u ON u.id = e.user_id
+        WHERE e.max_lat >= $1 AND e.min_lat <= $2 AND e.max_lng >= $3 AND e.min_lng <= $4`,
+      [area.min_lat, area.max_lat, area.min_lng, area.max_lng]);
+
+    // Same rule as the network and the phone: the centre of the segment's box, which the
+    // table already stores, so there is nothing to compute.
+    const inside = rows.filter((r) => {
+      if (!(r.shape || []).length) return false;
+      return contains(area, [(r.min_lat + r.max_lat) / 2, (r.min_lng + r.max_lng) / 2]);
+    });
+    return sendJson(res, 200, {
+      bounds: [area.min_lat, area.min_lng, area.max_lat, area.max_lng],
+      edges: inside.map((r) => ({
+        key: r.key, wayId: r.way_id != null ? Number(r.way_id) : null,
+        name: r.name, roadClass: r.road_class, lengthMeters: Number(r.length_m),
+        drivenAt: Number(r.driven_at), driver: r.driver || null, shape: r.shape,
+      })),
+    });
+  }
+
+  /**
+   * Every street to sweep in an area, fetched from OpenStreetMap once and kept. The first
+   * person to click an area waits for Overpass; everyone after that does not.
+   */
+  const areaNetwork = route.match(/^\/api\/areas\/(\d+)\/network$/);
+  if (areaNetwork && req.method === "GET") {
+    const { rows } = await pool.query(
+      "SELECT id, polygon, min_lat, min_lng, max_lat, max_lng FROM areas WHERE id=$1",
+      [Number(areaNetwork[1])]);
+    if (!rows[0]) return sendJson(res, 404, { error: "No such area" });
+    try {
+      const got = await networks.forArea(pool, rows[0]);
+      return sendJson(res, 200, {
+        streets: got.lines.length, lines: got.lines.map((l) => l.shape),
+        fetchedAt: got.fetchedAt, cached: got.cached, stale: Boolean(got.stale),
+      });
+    } catch (err) {
+      return sendJson(res, 502, { error: err.message || "OpenStreetMap could not be reached" });
+    }
+  }
+
   if (route === "/api/coverage" && req.method === "GET") {
     return sendJson(res, 200, await coverage(Number(url.searchParams.get("edgeLimit")) || EDGE_LIMIT));
   }
@@ -1707,6 +1766,7 @@ waitForDatabase()
   .then(() => identity.ensureFirstAdmin(pool, (line) => console.log(line)))
   .then(ensureAttribution)
   .then(() => achievements.ensureSchema(pool))
+  .then(() => networks.ensureSchema(pool))
   .then(readyPhotos)
   .then(() => {
     // Expired rows are dead weight; clear them at boot and once a day after.
