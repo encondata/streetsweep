@@ -606,6 +606,10 @@ async function applySync(body, by) {
       // a street is finished for everyone, and the newer edit wins whoever made it.
       result.completions = await completions.apply(client, body.completions, by.userId);
     }
+    if (Array.isArray(body.exclusions)) {
+      // Streets excluded on the phone: gated, private, not drivable. Shared the same way.
+      result.exclusions = await completions.applyExclusions(client, body.exclusions, by.userId);
+    }
 
     await client.query("COMMIT");
   } catch (err) {
@@ -839,6 +843,7 @@ function rightFor(route, method) {
   if (route === "/api/sync") return "record";
   if (route.startsWith("/api/pois") && method !== "GET") return "record";
   if (route.startsWith("/api/street-completions") && method !== "GET") return "record";
+  if (route.startsWith("/api/street-exclusions") && method !== "GET") return "record";
   return "read";
 }
 
@@ -1676,13 +1681,15 @@ async function handle(req, res) {
     if (!rows[0]) return sendJson(res, 404, { error: "No such area" });
     try {
       const got = await networks.forArea(pool, rows[0]);
-      const marked = await completions.markedAmong(pool, got.lines.map((l) => l.id));
+      const wayIds = got.lines.map((l) => l.id);
+      const marked = await completions.markedAmong(pool, wayIds);
+      const excluded = await completions.excludedAmong(pool, wayIds);
       return sendJson(res, 200, {
         streets: got.lines.length, lines: got.lines.map((l) => l.shape),
         // Parallel to lines, so the page can say which street was clicked and match
         // driven segments to it.
         ids: got.lines.map((l) => l.id), names: got.lines.map((l) => l.name),
-        completed: marked,
+        completed: marked, excluded,
         fetchedAt: got.fetchedAt, cached: got.cached, stale: Boolean(got.stale),
       });
     } catch (err) {
@@ -1706,6 +1713,23 @@ async function handle(req, res) {
     const taken = await completions.apply(pool,
       ids.map((wayId) => ({ wayId, marked: body.marked !== false, updatedAt: at })), who.user.id);
     return sendJson(res, 200, { marked: body.marked !== false, streets: taken });
+  }
+
+  /** Excluded streets, the same way: the phone reads all of them, the web map edits here. */
+  if (route === "/api/street-exclusions" && req.method === "GET") {
+    return sendJson(res, 200, { exclusions: await completions.listExclusions(pool) });
+  }
+  if (route === "/api/street-exclusions" && req.method === "POST") {
+    const body = await readBody(req);
+    const ids = (Array.isArray(body.wayIds) ? body.wayIds : [body.wayId]).map(Number)
+      .filter((n) => Number.isSafeInteger(n) && n > 0).slice(0, 5000);
+    if (!ids.length) return sendJson(res, 400, { error: "Which street?" });
+    const excluded = body.excluded !== false;
+    const at = Date.now();
+    const taken = await completions.applyExclusions(pool, ids.map((wayId) => ({
+      wayId, excluded, reason: body.reason, note: body.note, updatedAt: at,
+    })), who.user.id);
+    return sendJson(res, 200, { excluded, streets: taken });
   }
 
   if (route === "/api/coverage" && req.method === "GET") {

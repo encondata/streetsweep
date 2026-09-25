@@ -156,6 +156,8 @@ class PortalSync(
         // fail the rest of the push.
         runCatching { syncCompletions() }
             .onFailure { Log.w(TAG, "could not sync streets marked complete: ${it.message}") }
+        runCatching { syncExclusions() }
+            .onFailure { Log.w(TAG, "could not sync excluded streets: ${it.message}") }
 
         val areas = coverage.areasWithStatsNow()
         // Areas reference their parent by id locally but travel by name, because the server
@@ -224,6 +226,35 @@ class PortalSync(
         }
         return coverage.applyCompletions(incoming).also {
             if (unsent.isNotEmpty() || it > 0) Log.d(TAG, "completions: sent ${unsent.size}, took $it")
+        }
+    }
+
+    /** The same swap for excluded streets: gated, private, not drivable, not needed. */
+    suspend fun syncExclusions(): Int {
+        val unsent = coverage.unsentExclusions()
+        unsent.chunked(EDGE_BATCH).forEach { batch ->
+            client.sync(JSONObject().put("exclusions", JSONArray().apply {
+                batch.forEach {
+                    put(JSONObject().put("wayId", it.wayId).put("excluded", it.active)
+                        .put("reason", it.reason).put("note", it.note ?: JSONObject.NULL)
+                        .put("updatedAt", it.updatedAt))
+                }
+            }))
+            batch.forEach { coverage.markExclusionSent(it) }
+        }
+        val rows = JSONObject(client.getJson("/api/street-exclusions")).optJSONArray("exclusions")
+            ?: return 0
+        val incoming = (0 until rows.length()).map { i ->
+            val r = rows.getJSONObject(i)
+            val at = r.getLong("updatedAt")
+            com.example.streetsweep.data.db.StreetExclusion(
+                wayId = r.getLong("wayId"), reason = r.optString("reason", "OTHER"),
+                note = r.optString("note").takeIf { it.isNotBlank() && it != "null" },
+                excludedAt = at, active = r.getBoolean("excluded"), updatedAt = at, sent = true,
+            )
+        }
+        return coverage.applyExclusions(incoming).also {
+            if (unsent.isNotEmpty() || it > 0) Log.d(TAG, "exclusions: sent ${unsent.size}, took $it")
         }
     }
 

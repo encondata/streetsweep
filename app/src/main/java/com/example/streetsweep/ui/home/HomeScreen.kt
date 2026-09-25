@@ -551,13 +551,13 @@ private fun StreetActionsDialog(
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                if (street.completed || street.isPartial) {
+                if (street.completed || (!street.isDone && !street.excluded)) {
                     Spacer(Modifier.height(12.dp))
                     if (street.completed) {
                         OutlinedButton(onClick = { onComplete(false) }) { Text("Unmark complete") }
                     } else {
                         Text(
-                            "Drove all of it but the trace missed some? Count the whole street as driven.",
+                            "Drove it but the trace missed some or all of it? Count the whole street as driven.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

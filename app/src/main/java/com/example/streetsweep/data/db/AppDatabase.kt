@@ -16,7 +16,7 @@ import com.example.streetsweep.domain.RoadShape
         CoverageArea::class, AreaWay::class, OsmWay::class, StreetChunk::class, DrivenEdge::class,
         Poi::class, StreetExclusion::class, StreetCompletion::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -143,10 +143,25 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v12: exclusions are shared with the server, so counting a street again keeps its
+         * row (inactive) and every row knows when it last changed and whether it went up.
+         * Existing exclusions are active, changed when they were made, and not yet sent.
+         */
+        @JvmField
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `street_exclusions` ADD COLUMN `active` INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE `street_exclusions` ADD COLUMN `updatedAt` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `street_exclusions` ADD COLUMN `sent` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("UPDATE `street_exclusions` SET `updatedAt` = `excludedAt`")
+            }
+        }
+
         /** Hand-written migrations, oldest first. Add one for each version bump. */
         val MIGRATIONS: Array<Migration> =
             arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
-                MIGRATION_9_10, MIGRATION_10_11)
+                MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
 
         fun build(context: Context): AppDatabase =
             // The phone now holds real drives and areas. Every schema change from version 4 on

@@ -296,12 +296,32 @@ class CoverageRepository(private val db: AppDatabase) {
     suspend fun exclude(wayIds: List<Long>, reason: ExclusionReason, note: String? = null) {
         if (wayIds.isEmpty()) return
         val now = System.currentTimeMillis()
-        dao.insertExclusions(wayIds.distinct().map { StreetExclusion(it, reason.name, note, now) })
+        dao.insertExclusions(wayIds.distinct().map {
+            StreetExclusion(it, reason.name, note, now, active = true, updatedAt = now, sent = false)
+        })
     }
 
     suspend fun include(wayIds: List<Long>) {
         if (wayIds.isEmpty()) return
-        dao.removeExclusions(wayIds.distinct())
+        val now = System.currentTimeMillis()
+        wayIds.distinct().chunked(500).forEach { dao.removeExclusions(it, now) }
+    }
+
+    suspend fun unsentExclusions(): List<StreetExclusion> = dao.unsentExclusions()
+
+    suspend fun markExclusionSent(row: StreetExclusion) = dao.markExclusionSent(row.wayId, row.updatedAt)
+
+    /** Takes the server's exclusions, newer edit winning, as [applyCompletions] does for marks. */
+    suspend fun applyExclusions(incoming: List<StreetExclusion>): Int = db.withTransaction {
+        if (incoming.isEmpty()) return@withTransaction 0
+        val mine = incoming.map { it.wayId }.chunked(500)
+            .flatMap { dao.getExclusions(it) }.associateBy { it.wayId }
+        val newer = incoming.filter { theirs ->
+            val local = mine[theirs.wayId]
+            local == null || theirs.updatedAt > local.updatedAt
+        }.map { it.copy(sent = true) }
+        dao.insertExclusions(newer)
+        newer.count { it.active != (mine[it.wayId]?.active ?: false) }
     }
 
     suspend fun exclusionOf(wayId: Long): StreetExclusion? = dao.getExclusion(wayId)

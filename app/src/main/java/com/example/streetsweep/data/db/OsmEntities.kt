@@ -1,5 +1,6 @@
 package com.example.streetsweep.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -110,6 +111,10 @@ data class DrivenEdge(
 /**
  * A street the user has decided does not count: inside a gated community, private, or simply
  * not worth sweeping. Excluded streets keep their geometry but leave every total.
+ *
+ * Shared through the server like [StreetCompletion]. Counting a street again keeps the row
+ * with [active] false, so that reaches the other devices too; [updatedAt] decides between
+ * two edits of the same street.
  */
 @Entity(tableName = "street_exclusions")
 data class StreetExclusion(
@@ -118,6 +123,10 @@ data class StreetExclusion(
     val reason: String,
     val note: String?,
     val excludedAt: Long,
+    @ColumnInfo(defaultValue = "1") val active: Boolean = true,
+    @ColumnInfo(defaultValue = "0") val updatedAt: Long = excludedAt,
+    /** False until the server has this version of the row. */
+    @ColumnInfo(defaultValue = "0") val sent: Boolean = false,
 )
 
 /**

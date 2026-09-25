@@ -209,13 +209,13 @@ fun StreetsScreen(
                         },
                         trailingContent = {
                           Row {
-                            // Finishing a street by hand is for one the GPS only partly
-                            // caught; a fully driven one has nothing to mark.
+                            // Finishing a street by hand is for one the GPS missed some or all
+                            // of; a driven one has nothing to mark, an excluded one no total.
                             if (s.completed) {
                                 IconButton(onClick = { viewModel.setCompleted(s.wayId, false) }) {
                                     Icon(Icons.Default.RemoveDone, contentDescription = "Unmark complete")
                                 }
-                            } else if (s.isPartial) {
+                            } else if (!s.isDone && !s.excluded) {
                                 IconButton(onClick = { viewModel.setCompleted(s.wayId, true) }) {
                                     Icon(Icons.Default.DoneAll, contentDescription = "Mark this street complete")
                                 }

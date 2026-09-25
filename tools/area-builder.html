@@ -718,6 +718,50 @@
     padding: 8px 16px; font-size: 12px; font-weight: 600; box-shadow: var(--shadow-2);
   }
 
+  /* Street tools: across the top of the map, clear of the zoom buttons. */
+  #streetTools {
+    position: absolute; z-index: 610; top: 12px; left: 62px; right: 14px;
+    display: flex; flex-direction: column; gap: 6px; align-items: flex-start; pointer-events: none;
+  }
+  #streetTools > * { pointer-events: auto; }
+  #streetTools .stRow {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 8px;
+    background: color-mix(in srgb, var(--surface) 92%, transparent);
+    -webkit-backdrop-filter: saturate(160%) blur(10px); backdrop-filter: saturate(160%) blur(10px);
+    border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow-2);
+  }
+  #streetTools .stLabel {
+    font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ink-soft); padding: 0 4px; line-height: 1.8;
+  }
+  #streetTools .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  #streetTools .seg button {
+    border: 0; border-radius: 0; background: transparent; box-shadow: none;
+    padding: 6px 11px; font-size: 12px; font-weight: 600; color: var(--ink);
+  }
+  #streetTools .seg button + button { border-left: 1px solid var(--line); }
+  #streetTools .seg button.on { background: var(--accent); color: var(--accent-ink); }
+  #streetTools .seg button:disabled { opacity: .45; cursor: default; }
+  #streetTools label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); }
+  #streetTools select { font-size: 12px; padding: 5px 8px; }
+  #streetTools .stRow > button { padding: 6px 12px; font-size: 12px; }
+  #stHint {
+    font-size: 11.5px; font-weight: 600; color: var(--ink); padding: 5px 10px; border-radius: 8px;
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); max-width: 560px; line-height: 1.5;
+  }
+  /* The status line moves below the bar rather than sitting on it. */
+  #mapwrap.hasTools #status { top: auto; bottom: 26px; left: auto; right: 14px; transform: none; max-width: 60%; }
+  #mapwrap.toolActive .leaflet-sweepHits-pane path { cursor: crosshair; }
+  #mapwrap.cardOpen #legend, #mapwrap.cardOpen #status { visibility: hidden; }
+  #legend .key.dashes {
+    height: 0; border-top: 3px dotted #c2410c; border-radius: 0;
+  }
+  .popActions { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+  .popExclude { display: flex; gap: 6px; }
+  .popExclude select { flex: 1; min-width: 0; font-size: 12px; }
+
   #side {
     background: var(--surface); border-left: 1px solid var(--line);
     overflow-y: auto; padding: 16px; min-height: 0;
@@ -1062,12 +1106,33 @@
     <div id="mapwrap">
       <div id="map"></div>
       <div id="status" hidden></div>
+      <div id="streetTools" hidden>
+        <div class="stRow">
+          <span class="stLabel">Street tools</span>
+          <div class="seg" role="radiogroup" aria-label="What a click on a street does">
+            <button type="button" role="radio" data-tool="inspect" class="on" aria-checked="true">Inspect</button>
+            <button type="button" role="radio" data-tool="complete" aria-checked="false">Mark complete</button>
+            <button type="button" role="radio" data-tool="gated" aria-checked="false">Mark gated</button>
+            <button type="button" role="radio" data-tool="exclude" aria-checked="false">Exclude</button>
+          </div>
+          <label id="stReasonWrap" hidden>as
+            <select id="stReason">
+              <option value="NOT_DRIVABLE">Not drivable</option>
+              <option value="NOT_NEEDED">Not needed</option>
+              <option value="OTHER">Other</option>
+            </select>
+          </label>
+          <button type="button" id="stUndo" hidden>Undo</button>
+        </div>
+        <div id="stHint"></div>
+      </div>
       <div id="legend">
         <div class="row2"><span class="key" id="keyDriven"></span><span id="keyDrivenText">Streets you have driven</span></div>
         <div class="row2"><span class="key hollow" id="keyArea"></span>Area boundary</div>
         <div class="row2" id="keyMonthRow" hidden><span class="key" style="background:#1f6fe0"></span>Driven this month</div>
         <div class="row2" id="keyUndrivenRow" hidden><span class="key" style="background:#8f99a5"></span>Not driven yet</div>
         <div class="row2" id="keyMarkedRow" hidden><span class="key" style="background:#0f9f8f"></span>Marked complete</div>
+        <div class="row2" id="keyExcludedRow" hidden><span class="key dashes"></span>Gated or excluded</div>
         <div class="row2"><span class="key dot" id="keyPlace"></span>Marked place</div>
       </div>
     </div>
@@ -4337,6 +4402,11 @@ window.StreetSweepBases = {
   map.getPane("sweepHits").style.zIndex = 405;
   var markedLayer = L.layerGroup();
   var hitLayer = L.layerGroup();
+  var excludedLayer = L.layerGroup();
+  // The street tools (further down) act on whichever area is shown; declared here because
+  // clearing the streets, which can happen before they are set up, resets them.
+  var streetCtx = null;
+  var tool = { mode: "inspect", reason: "NOT_DRIVABLE", undo: null };
   var networkCache = {};                    // area id -> array of [lat, lng] lines
   var shownStreetsFor = null;
 
@@ -4376,8 +4446,10 @@ window.StreetSweepBases = {
     streetLayer.clearLayers();
     networkLayer.clearLayers();
     markedLayer.clearLayers();
+    excludedLayer.clearLayers();
     hitLayer.clearLayers();
-    [streetLayer, networkLayer, markedLayer, hitLayer].forEach(function (l) {
+    hideToolbar();
+    [streetLayer, networkLayer, markedLayer, excludedLayer, hitLayer].forEach(function (l) {
       if (map.hasLayer(l)) map.removeLayer(l);
     });
     map.closePopup();
@@ -4385,6 +4457,7 @@ window.StreetSweepBases = {
     el("keyMonthRow").hidden = true;
     el("keyUndrivenRow").hidden = true;
     el("keyMarkedRow").hidden = true;
+    el("keyExcludedRow").hidden = true;
     el("keyDrivenText").textContent = "Streets you have driven";
   }
 
@@ -4414,11 +4487,13 @@ window.StreetSweepBases = {
     streetLayer.clearLayers();
     networkLayer.clearLayers();
     markedLayer.clearLayers();
+    excludedLayer.clearLayers();
     hitLayer.clearLayers();
     map.closePopup();
     networkLayer.addTo(map);
     streetLayer.addTo(map);
     markedLayer.addTo(map);
+    excludedLayer.addTo(map);
     hitLayer.addTo(map);
     el("keyMonthRow").hidden = false;
     el("keyDrivenText").textContent = "Driven before this month";
@@ -4428,7 +4503,7 @@ window.StreetSweepBases = {
     el("keyUndrivenRow").hidden = big;
 
     var state = { driven: null, month: 0, network: big ? "big" : "loading", count: 0, error: "",
-                  drivenByWay: {}, marked: {}, net: null };
+                  drivenByWay: {}, marked: {}, excluded: {}, net: null, lengths: [] };
     var note = el("streetNote");
     function say() {
       if (shownStreetsFor !== token_) return;
@@ -4445,9 +4520,14 @@ window.StreetSweepBases = {
       else {
         parts.push(state.count.toLocaleString() + " streets to sweep in this outline" +
           (state.stale ? " (an older copy — OpenStreetMap could not be reached just now)" : "") + ".");
-        var nMarked = Object.keys(state.marked).length;
-        if (nMarked) parts.push(nMarked.toLocaleString() + " marked complete by hand.");
-        if (canMark()) parts.push("Click a street to see how much of it is driven, or to mark one the trace only partly caught as complete.");
+        if (state.net && state.net.ids) {
+          var t = liveTotals();
+          parts.push("On this map, " + t.done.toLocaleString() + " of " + t.total.toLocaleString() +
+            " are done" +
+            (t.marked ? ", " + t.marked.toLocaleString() + " of them marked complete by hand" : "") +
+            (t.excluded ? ", with " + t.excluded.toLocaleString() + " excluded" : "") +
+            ". The percentage above is the phones' and catches up at their next sync.");
+        }
         if (state.phoneTotal && Math.abs(state.phoneTotal - state.count) > 2) {
           parts.push("The phone counts " + state.phoneTotal.toLocaleString() +
             " here, because its outline for this area is a different shape. Send the area " +
@@ -4458,79 +4538,9 @@ window.StreetSweepBases = {
     }
     say();
 
-    /** Marked streets drawn as driven, in their own colour so a mark is told from a trace. */
-    function paintMarked() {
-      markedLayer.clearLayers();
-      var net = state.net;
-      if (!net || !net.ids) return;
-      var any = false;
-      net.ids.forEach(function (id, i) {
-        if (!state.marked[id]) return;
-        any = true;
-        drawRoad(net.lines[i], markedLayer, onImagery
-          ? { casing: "#022b26", casingWeight: 7, core: "#3ff2d6", coreWeight: 3.5, opacity: 1 }
-          : { casing: null, casingWeight: 0, core: "#0f9f8f", coreWeight: 4, opacity: 0.95 }, 1);
-      });
-      markedLayer.eachLayer(function (l) { l.options.interactive = false; });
-      el("keyMarkedRow").hidden = !any;
-    }
-
-    function streetPopup(i, at) {
-      var net = state.net;
-      var id = net.ids[i];
-      var name = (net.names && net.names[i]) || "Unnamed street";
-      var length = lineMeters(net.lines[i]);
-      var driven = Math.min(length, state.drivenByWay[id] || 0);
-      var fraction = length > 0 ? driven / length : 0;
-      var mark = state.marked[id];
-      var line;
-      if (mark) line = "Marked complete" + (mark.by ? " by " + escapeHtml(mark.by) : "") +
-        (mark.updatedAt ? " on " + new Date(mark.updatedAt).toLocaleDateString() : "");
-      else if (fraction >= DONE_FRACTION) line = "Driven";
-      else if (fraction > PARTIAL_FRACTION) line = Math.round(fraction * 100) + "% driven";
-      else line = "Not driven yet";
-
-      var html = '<div class="streetPop"><b>' + escapeHtml(name) + "</b>" +
-        '<div class="hint" style="margin:2px 0 0">' + fmtDistance(length) + " · " + line + "</div>";
-      var action = null;
-      if (canMark()) {
-        if (mark) action = { marked: false, label: "Unmark complete", cls: "" };
-        else if (fraction > PARTIAL_FRACTION && fraction < DONE_FRACTION) {
-          action = { marked: true, label: "Mark as complete", cls: "primary" };
-          html += '<p class="hint" style="margin:8px 0 0">Drove all of it but the trace missed some? ' +
-            "Count the whole street as driven, on the web and every phone.</p>";
-        }
-      }
-      if (action) html += '<div class="row" style="margin-top:10px"><button class="' + action.cls +
-        '" data-mark>' + action.label + "</button></div>";
-      html += "</div>";
-
-      var pop = L.popup({
-        maxWidth: 280,
-        // Clear of the zoom buttons on the left and the status line along the top.
-        autoPanPaddingTopLeft: L.point(70, 70), autoPanPaddingBottomRight: L.point(20, 20),
-      }).setLatLng(at).setContent(html).openOn(map);
-      var btn = pop.getElement() && pop.getElement().querySelector("[data-mark]");
-      if (!btn) return;
-      btn.addEventListener("click", function () {
-        btn.disabled = true;
-        btn.textContent = action.marked ? "Marking…" : "Unmarking…";
-        apiJson("/api/street-completions", "POST", { wayIds: [id], marked: action.marked }).then(function () {
-          if (action.marked) state.marked[id] = { wayId: id, updatedAt: Date.now(), by: me && (me.name || me.email) };
-          else delete state.marked[id];
-          net.completed = Object.keys(state.marked).map(function (k) { return state.marked[k]; });
-          paintMarked();
-          say();
-          map.closePopup();
-          status(name + (action.marked ? " marked complete." : " unmarked.") +
-            " Phones pick it up on their next sync.", "ok");
-        }).catch(function (err) {
-          btn.disabled = false;
-          btn.textContent = action.label;
-          status("Could not change that street: " + err.message, "bad");
-        });
-      });
-    }
+    // The street tools act on whichever area is shown; this is how they reach it.
+    streetCtx = { token: token_, state: state, say: say, area: a };
+    toolbarFor(big ? "big" : "loading");
 
     // What the server has, drawn the moment it arrives — never held up by OpenStreetMap.
     apiJson("/api/areas/" + a.serverId + "/streets").then(function (d) {
@@ -4556,7 +4566,10 @@ window.StreetSweepBases = {
       if (shownStreetsFor !== token_) return;
       state.net = net;
       state.marked = {};
+      state.excluded = {};
       (net.completed || []).forEach(function (c) { state.marked[c.wayId] = c; });
+      (net.excluded || []).forEach(function (x) { state.excluded[x.wayId] = x; });
+      state.lengths = net.lines.map(lineMeters);
       net.lines.forEach(function (line, i) {
         L.polyline(line, {
           pane: "sweepNetwork",
@@ -4570,22 +4583,326 @@ window.StreetSweepBases = {
           lineCap: "round", lineJoin: "round",
         }).on("click", function (ev) {
           L.DomEvent.stop(ev);
-          streetPopup(i, ev.latlng);
+          streetClicked(i, ev.latlng);
         }).addTo(hitLayer);
       });
-      paintMarked();
+      paintHandEdits();
       state.network = "done"; state.count = net.streets; state.stale = net.stale;
       // The phone keeps its own copy of each outline. When the two have drifted apart the
       // counts will too, and it is worth saying which, rather than showing two numbers
       // that silently disagree.
       var rep = reported[a.name];
       state.phoneTotal = rep && rep.total ? rep.total : null;
+      toolbarFor(net.ids ? "ready" : "old");
       say();
     }).catch(function (err) {
       state.network = "failed"; state.error = err.message;
+      toolbarFor("failed");
       say();
     });
   }
+
+  // ---- street tools ----------------------------------------------------------
+  //
+  // Marking a street complete and excluding one (a gated community, a private road) are
+  // both things said about a street rather than driven, so they are made here or on a
+  // phone and shared through the server. The bar across the top of the map picks what a
+  // click on a street does; Inspect, the default, opens a card with every action.
+
+  var REASON_LABEL = {
+    GATED: "Gated or private", NOT_DRIVABLE: "Not drivable", NOT_NEEDED: "Not needed", OTHER: "Other",
+  };
+  var TOOL_HINT = {
+    inspect: "Click any street to see how much of it is driven and what can be done with it.",
+    complete: "Click streets to mark them complete. Click a marked one to unmark it.",
+    gated: "Click streets behind a gate or otherwise private. They stop counting. Click one again to count it.",
+    exclude: "Click streets to exclude them for the reason chosen. Click an excluded one to count it again.",
+  };
+
+  function ctxLive() { return streetCtx && shownStreetsFor === streetCtx.token; }
+
+  /** Everything worked out about one street of the shown network. */
+  function streetInfo(i) {
+    var st = streetCtx.state, net = st.net, id = net.ids[i];
+    var length = st.lengths[i];
+    var fraction = length > 0 ? Math.min(1, (st.drivenByWay[id] || 0) / length) : 0;
+    return {
+      i: i, id: id, name: (net.names && net.names[i]) || "Unnamed street", length: length,
+      fraction: fraction, mark: st.marked[id] || null, exclusion: st.excluded[id] || null,
+      driven: fraction >= DONE_FRACTION,
+    };
+  }
+
+  /** Marked streets in teal, excluded ones dashed, so a hand edit is told from a trace. */
+  function paintHandEdits() {
+    markedLayer.clearLayers();
+    excludedLayer.clearLayers();
+    if (!ctxLive() || !streetCtx.state.net || !streetCtx.state.net.ids) return;
+    var st = streetCtx.state, net = st.net, anyMarked = false, anyExcluded = false;
+    net.ids.forEach(function (id, i) {
+      if (st.excluded[id]) {
+        anyExcluded = true;
+        L.polyline(net.lines[i], {
+          color: onImagery ? "#ffb38a" : "#c2410c", weight: onImagery ? 3.5 : 3.5, opacity: 0.95,
+          dashArray: "1 7", lineCap: "round", interactive: false,
+        }).addTo(excludedLayer);
+      } else if (st.marked[id]) {
+        anyMarked = true;
+        drawRoad(net.lines[i], markedLayer, onImagery
+          ? { casing: "#022b26", casingWeight: 7, core: "#3ff2d6", coreWeight: 3.5, opacity: 1 }
+          : { casing: null, casingWeight: 0, core: "#0f9f8f", coreWeight: 4, opacity: 0.95 }, 1);
+      }
+    });
+    markedLayer.eachLayer(function (l) { l.options.interactive = false; });
+    el("keyMarkedRow").hidden = !anyMarked;
+    el("keyExcludedRow").hidden = !anyExcluded;
+  }
+
+  /** Street totals as this map sees them, hand edits included, for the panel. */
+  function liveTotals() {
+    var st = streetCtx.state, net = st.net;
+    var total = 0, done = 0, marked = 0, excluded = 0;
+    net.ids.forEach(function (id, i) {
+      if (st.excluded[id]) { excluded++; return; }
+      total++;
+      if (st.marked[id]) { marked++; done++; return; }
+      if (st.lengths[i] > 0 && (st.drivenByWay[id] || 0) / st.lengths[i] >= DONE_FRACTION) done++;
+    });
+    return { total: total, done: done, marked: marked, excluded: excluded };
+  }
+
+  // Shared by every tool: send the change, apply it here, offer to take it back.
+  function sendMarks(ids, marked) {
+    return apiJson("/api/street-completions", "POST", { wayIds: ids, marked: marked }).then(function () {
+      var st = streetCtx.state, by = me && (me.name || me.email), at = Date.now();
+      ids.forEach(function (id) {
+        if (marked) st.marked[id] = { wayId: id, updatedAt: at, by: by };
+        else delete st.marked[id];
+      });
+    });
+  }
+
+  function sendExclusions(ids, excluded, reason) {
+    return apiJson("/api/street-exclusions", "POST", { wayIds: ids, excluded: excluded, reason: reason })
+      .then(function () {
+        var st = streetCtx.state, by = me && (me.name || me.email), at = Date.now();
+        ids.forEach(function (id) {
+          if (excluded) st.excluded[id] = { wayId: id, reason: reason, updatedAt: at, by: by };
+          else delete st.excluded[id];
+        });
+      });
+  }
+
+  /**
+   * Runs one edit and remembers how to reverse it. `undo` is another edit, so undoing goes
+   * through the server exactly as the edit did.
+   */
+  function edit(label, run, undo) {
+    var ctx = streetCtx;
+    return run().then(function () {
+      if (streetCtx !== ctx) return;
+      paintHandEdits();
+      ctx.say();
+      tool.undo = { label: label, run: undo };
+      showUndo();
+      status(label + ". Phones pick it up on their next sync.");
+    }).catch(function (err) {
+      status("Could not change that: " + err.message, "bad");
+    });
+  }
+
+  function markStreets(ids, marked, label) {
+    return edit(label, function () { return sendMarks(ids, marked); },
+      function () { return sendMarks(ids, !marked); });
+  }
+
+  function excludeStreets(ids, reason, label) {
+    var st = streetCtx.state;
+    // What each street was before, so an undo puts back an old reason rather than none.
+    var before = ids.map(function (id) { return st.excluded[id] || null; });
+    return edit(label, function () { return sendExclusions(ids, true, reason); }, function () {
+      var back = ids.filter(function (id, k) { return !before[k]; });
+      var jobs = [];
+      if (back.length) jobs.push(sendExclusions(back, false, reason));
+      var byReason = {};
+      ids.forEach(function (id, k) {
+        if (before[k]) (byReason[before[k].reason] = byReason[before[k].reason] || []).push(id);
+      });
+      Object.keys(byReason).forEach(function (r) { jobs.push(sendExclusions(byReason[r], true, r)); });
+      return Promise.all(jobs);
+    });
+  }
+
+  function includeStreets(ids, label) {
+    var st = streetCtx.state;
+    var reasons = {};
+    ids.forEach(function (id) {
+      var r = (st.excluded[id] && st.excluded[id].reason) || "OTHER";
+      (reasons[r] = reasons[r] || []).push(id);
+    });
+    return edit(label, function () { return sendExclusions(ids, false, "OTHER"); }, function () {
+      return Promise.all(Object.keys(reasons).map(function (r) { return sendExclusions(reasons[r], true, r); }));
+    });
+  }
+
+  function streetClicked(i, latlng) {
+    if (!ctxLive()) return;
+    var s = streetInfo(i);
+    if (tool.mode === "inspect" || !canMark()) { streetCard(s, latlng); return; }
+    if (tool.mode === "complete") {
+      if (s.exclusion) { status(s.name + " is excluded. Count it again before marking it complete.", "warn"); return; }
+      if (s.mark) { markStreets([s.id], false, s.name + " unmarked"); return; }
+      if (s.driven) { status(s.name + " is already driven.", "warn"); return; }
+      markStreets([s.id], true, s.name + " marked complete");
+      return;
+    }
+    if (tool.mode === "gated" || tool.mode === "exclude") {
+      var reason = tool.mode === "gated" ? "GATED" : tool.reason;
+      if (s.exclusion) includeStreets([s.id], s.name + " counts again");
+      else excludeStreets([s.id], reason, reason === "GATED"
+        ? s.name + " marked gated"
+        : s.name + " excluded (" + REASON_LABEL[reason].toLowerCase() + ")");
+    }
+  }
+
+  /** The card a click opens in Inspect: what is known about the street and what can be done. */
+  function streetCard(s, at) {
+    var line;
+    if (s.exclusion) {
+      line = "Excluded — " + REASON_LABEL[s.exclusion.reason || "OTHER"] +
+        (s.exclusion.by ? ", by " + escapeHtml(s.exclusion.by) : "") + ". Does not count";
+    } else if (s.mark) {
+      line = "Marked complete" + (s.mark.by ? " by " + escapeHtml(s.mark.by) : "") +
+        (s.mark.updatedAt ? " on " + new Date(s.mark.updatedAt).toLocaleDateString() : "");
+    } else if (s.driven) line = "Driven";
+    else if (s.fraction > PARTIAL_FRACTION) line = Math.round(s.fraction * 100) + "% driven";
+    else line = "Not driven yet";
+
+    var html = '<div class="streetPop"><b>' + escapeHtml(s.name) + "</b>" +
+      '<div class="hint" style="margin:2px 0 0">' + fmtDistance(s.length) + " · " + line + "</div>";
+    if (canMark()) {
+      html += '<div class="popActions">';
+      if (s.exclusion) {
+        html += '<button class="primary" data-act="include">' +
+          (s.exclusion.reason === "GATED" ? "Not gated — count it again" : "Count it again") + "</button>";
+      } else {
+        if (s.mark) html += '<button data-act="unmark">Unmark complete</button>';
+        else if (!s.driven) {
+          html += '<button class="primary" data-act="mark">Mark as complete</button>' +
+            '<p class="hint" style="margin:0">Drove it but the trace missed some or all of it? ' +
+            "Count the whole street as driven.</p>";
+        }
+        html += '<button data-act="gated">Mark as gated</button>' +
+          '<div class="popExclude"><select data-reason>' +
+          Object.keys(REASON_LABEL).filter(function (r) { return r !== "GATED"; }).map(function (r) {
+            return '<option value="' + r + '"' + (r === tool.reason ? " selected" : "") + ">" +
+              REASON_LABEL[r] + "</option>";
+          }).join("") + '</select><button data-act="exclude">Exclude</button></div>';
+      }
+      html += "</div>";
+    }
+    html += "</div>";
+
+    var pop = L.popup({
+      maxWidth: 300, minWidth: 240,
+      // Clear of the zoom buttons and the street tools, however many rows those wrap to.
+      autoPanPaddingTopLeft: L.point(70, el("streetTools").offsetHeight + 24),
+      autoPanPaddingBottomRight: L.point(20, 20),
+    }).setLatLng(at).setContent(html).openOn(map);
+    var root = pop.getElement();
+    if (!root) return;
+    root.querySelectorAll("[data-act]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var act = b.getAttribute("data-act");
+        b.disabled = true;
+        map.closePopup();
+        if (act === "mark") markStreets([s.id], true, s.name + " marked complete");
+        else if (act === "unmark") markStreets([s.id], false, s.name + " unmarked");
+        else if (act === "include") includeStreets([s.id], s.name + " counts again");
+        else if (act === "gated") excludeStreets([s.id], "GATED", s.name + " marked gated");
+        else if (act === "exclude") {
+          var reason = root.querySelector("[data-reason]").value;
+          tool.reason = reason;
+          el("stReason").value = reason;
+          excludeStreets([s.id], reason, s.name + " excluded (" + REASON_LABEL[reason].toLowerCase() + ")");
+        }
+      });
+    });
+  }
+
+  // The legend and status line sit above the map's own layers, so a card opened under them
+  // would be half hidden. They step aside while one is open.
+  map.on("popupopen", function () { el("mapwrap").classList.add("cardOpen"); });
+  map.on("popupclose", function () { el("mapwrap").classList.remove("cardOpen"); });
+
+  // ---- the bar ----
+
+  function setTool(mode) {
+    if (mode !== "inspect" && !canMark()) mode = "inspect";
+    tool.mode = mode;
+    map.closePopup();
+    document.querySelectorAll("#streetTools [data-tool]").forEach(function (b) {
+      b.classList.toggle("on", b.getAttribute("data-tool") === mode);
+      b.setAttribute("aria-checked", b.getAttribute("data-tool") === mode ? "true" : "false");
+    });
+    el("stReasonWrap").hidden = mode !== "exclude";
+    el("stHint").textContent = TOOL_HINT[mode];
+    el("mapwrap").classList.toggle("toolActive", mode !== "inspect");
+  }
+
+  function showUndo() {
+    var b = el("stUndo");
+    b.hidden = !tool.undo;
+    if (tool.undo) b.title = "Undo: " + tool.undo.label;
+  }
+
+  /** Shows the bar for the area on the map, saying why the tools are off when they are. */
+  function toolbarFor(phase) {
+    var bar = el("streetTools");
+    bar.hidden = false;
+    el("mapwrap").classList.add("hasTools");
+    var ready = phase === "ready";
+    document.querySelectorAll("#streetTools [data-tool]").forEach(function (b) {
+      var t = b.getAttribute("data-tool");
+      b.disabled = !ready || (t !== "inspect" && !canMark());
+    });
+    tool.undo = null;
+    showUndo();
+    if (ready) { setTool(tool.mode); return; }
+    el("stReasonWrap").hidden = true;
+    el("stHint").textContent =
+      phase === "loading" ? "Loading this area's streets…" :
+      phase === "big" ? "This area is too large to edit street by street. Open a neighborhood or city inside it." :
+      phase === "old" ? "The server needs updating before streets can be edited here." :
+      "The streets could not be loaded, so they cannot be edited just now.";
+  }
+
+  function hideToolbar() {
+    el("streetTools").hidden = true;
+    el("mapwrap").classList.remove("hasTools", "toolActive");
+    streetCtx = null;
+  }
+
+  document.querySelectorAll("#streetTools [data-tool]").forEach(function (b) {
+    b.addEventListener("click", function () { setTool(b.getAttribute("data-tool")); });
+  });
+  el("stReason").addEventListener("change", function () { tool.reason = el("stReason").value; });
+  el("stUndo").addEventListener("click", function () {
+    var u = tool.undo;
+    if (!u || !ctxLive()) return;
+    tool.undo = null;
+    showUndo();
+    var ctx = streetCtx;
+    u.run().then(function () {
+      if (streetCtx !== ctx) return;
+      paintHandEdits();
+      ctx.say();
+      status("Undone: " + u.label + ".");
+    }).catch(function (err) { status("Could not undo that: " + err.message, "bad"); });
+  });
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape" && tool.mode !== "inspect" && !el("streetTools").hidden) setTool("inspect");
+  });
 
   function detailFor(a) {
     var stats = reported[a.name];

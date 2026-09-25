@@ -66,7 +66,7 @@ interface CoverageDao {
         SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape, w.minDoneFraction,
                CASE WHEN EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) THEN w.lengthMeters
                     ELSE COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) END AS drivenMeters,
-               EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id) AS excluded,
+               EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id AND x.active = 1) AS excluded,
                EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) AS completed
         FROM osm_ways w
         WHERE w.maxLat >= :south AND w.minLat <= :north AND w.maxLng >= :west AND w.minLng <= :east
@@ -81,7 +81,7 @@ interface CoverageDao {
         SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape, w.minDoneFraction,
                CASE WHEN EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) THEN w.lengthMeters
                     ELSE COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) END AS drivenMeters,
-               EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id) AS excluded,
+               EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id AND x.active = 1) AS excluded,
                EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) AS completed
         FROM area_ways aw
         JOIN osm_ways w ON w.id = aw.wayId
@@ -98,7 +98,7 @@ interface CoverageDao {
         SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape, w.minDoneFraction,
                CASE WHEN EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) THEN w.lengthMeters
                     ELSE COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) END AS drivenMeters,
-               EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id) AS excluded,
+               EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id AND x.active = 1) AS excluded,
                EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) AS completed
         FROM area_ways aw
         JOIN osm_ways w ON w.id = aw.wayId
@@ -114,7 +114,7 @@ interface CoverageDao {
         SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape, w.minDoneFraction,
                CASE WHEN EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) THEN w.lengthMeters
                     ELSE COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) END AS drivenMeters,
-               EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id) AS excluded,
+               EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id AND x.active = 1) AS excluded,
                EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) AS completed
         FROM osm_ways w
         WHERE w.id IN (:wayIds)
@@ -132,7 +132,7 @@ interface CoverageDao {
                0 AS completed
         FROM osm_ways w
         WHERE w.maxLat >= :south AND w.minLat <= :north AND w.maxLng >= :west AND w.minLng <= :east
-          AND NOT EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id)
+          AND NOT EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id AND x.active = 1)
           AND CASE WHEN EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) THEN w.lengthMeters
                     ELSE COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) END
               < MIN(:doneFraction, w.minDoneFraction) * w.lengthMeters
@@ -153,7 +153,7 @@ interface CoverageDao {
         JOIN osm_ways w ON w.id = aw.wayId
         WHERE aw.areaId = :areaId
           AND w.maxLat >= :south AND w.minLat <= :north AND w.maxLng >= :west AND w.minLng <= :east
-          AND NOT EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id)
+          AND NOT EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id AND x.active = 1)
           AND CASE WHEN EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) THEN w.lengthMeters
                     ELSE COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) END
               < MIN(:doneFraction, w.minDoneFraction) * w.lengthMeters
@@ -168,7 +168,7 @@ interface CoverageDao {
         SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape, w.minDoneFraction,
                CASE WHEN EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) THEN w.lengthMeters
                     ELSE COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) END AS drivenMeters,
-               EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id) AS excluded,
+               EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id AND x.active = 1) AS excluded,
                EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) AS completed
         FROM osm_ways w
         WHERE w.maxLat >= :south AND w.minLat <= :north AND w.maxLng >= :west AND w.minLng <= :east
@@ -181,13 +181,23 @@ interface CoverageDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertExclusions(rows: List<StreetExclusion>)
 
-    @Query("DELETE FROM street_exclusions WHERE wayId IN (:wayIds)")
-    suspend fun removeExclusions(wayIds: List<Long>)
+    /** Counts streets again, keeping the rows so the change reaches the server. */
+    @Query("UPDATE street_exclusions SET active = 0, updatedAt = :now, sent = 0 WHERE wayId IN (:wayIds) AND active = 1")
+    suspend fun removeExclusions(wayIds: List<Long>, now: Long)
 
-    @Query("SELECT * FROM street_exclusions WHERE wayId = :wayId")
+    @Query("SELECT * FROM street_exclusions WHERE wayId IN (:wayIds)")
+    suspend fun getExclusions(wayIds: List<Long>): List<StreetExclusion>
+
+    @Query("SELECT * FROM street_exclusions WHERE sent = 0")
+    suspend fun unsentExclusions(): List<StreetExclusion>
+
+    @Query("UPDATE street_exclusions SET sent = 1 WHERE wayId = :wayId AND updatedAt = :updatedAt")
+    suspend fun markExclusionSent(wayId: Long, updatedAt: Long)
+
+    @Query("SELECT * FROM street_exclusions WHERE wayId = :wayId AND active = 1")
     suspend fun getExclusion(wayId: Long): StreetExclusion?
 
-    @Query("SELECT COUNT(*) FROM street_exclusions")
+    @Query("SELECT COUNT(*) FROM street_exclusions WHERE active = 1")
     fun observeExclusionCount(): Flow<Int>
 
     // ---- streets marked complete by hand ----
@@ -212,12 +222,12 @@ interface CoverageDao {
                SUM(MIN(w.lengthMeters, (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END))) AS drivenMeters,
                SUM(CASE WHEN (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END) >= w.minDoneFraction * w.lengthMeters THEN 1 ELSE 0 END) AS done,
                SUM(CASE WHEN (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END) > 0.02 * w.lengthMeters AND (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END) < w.minDoneFraction * w.lengthMeters THEN 1 ELSE 0 END) AS partial,
-               (SELECT COUNT(*) FROM area_ways aw2 JOIN street_exclusions x2 ON x2.wayId = aw2.wayId WHERE aw2.areaId = :areaId) AS excluded
+               (SELECT COUNT(*) FROM area_ways aw2 JOIN street_exclusions x2 ON x2.wayId = aw2.wayId AND x2.active = 1 WHERE aw2.areaId = :areaId) AS excluded
         FROM area_ways aw
         JOIN osm_ways w ON w.id = aw.wayId
         LEFT JOIN (SELECT wayId, SUM(lengthMeters) AS m FROM driven_edges GROUP BY wayId) d ON d.wayId = w.id
         LEFT JOIN street_completions c ON c.wayId = w.id AND c.marked = 1
-        WHERE aw.areaId = :areaId AND NOT EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id)
+        WHERE aw.areaId = :areaId AND NOT EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id AND x.active = 1)
         """,
     )
     fun observeStatsFor(areaId: Long): Flow<AreaStatsRow>
