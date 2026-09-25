@@ -171,7 +171,19 @@ class PortalSync(
             .put("drives", JSONArray().apply { drives.forEach { put(driveJson(it)) } })
             .put("pois", JSONArray().apply { pois.forEach { put(poiJson(it)) } })
         if (full) head.put("resetEdges", true)
-        client.sync(head)
+        val answer = client.sync(head)
+        // The web is the record. An area drawn here, or redrawn here since it was last
+        // pulled, has just been written there (if this account may edit areas); from now
+        // on it is the web's outline, so remember it as pulled and the next pull agrees.
+        answer.optJSONObject("areasUploaded")?.let { up ->
+            val taken = (jsonNames(up.optJSONArray("created")) + jsonNames(up.optJSONArray("redrawn")))
+                .map { it.lowercase() }.toSet()
+            val ids = areas.filter { it.name.lowercase() in taken }.map { it.area.id }
+            if (ids.isNotEmpty()) {
+                coverage.markPulled(ids)
+                Log.i(TAG, "sent ${ids.size} areas drawn or redrawn here to the web")
+            }
+        }
 
         val edges = coverage.getAllDrivenEdges().filter { it.drivenAt > since }
         var sent = 0
@@ -258,8 +270,13 @@ class PortalSync(
         }
     }
 
+    private fun jsonNames(arr: JSONArray?): List<String> =
+        if (arr == null) emptyList() else (0 until arr.length()).map { arr.optString(it) }
+
     private fun areaJson(a: com.example.streetsweep.data.AreaWithStats, nameById: Map<Long, String>) = JSONObject()
         .put("name", a.name)
+        // Redrawn on this phone since the web last sent it: the web takes the new outline.
+        .put("redrawn", a.area.pulledOutline != null && a.area.polygon != a.area.pulledOutline)
         .put("level", a.level.name)
         .put("parent", a.area.parentId?.let { nameById[it] } ?: JSONObject.NULL)
         .put("polygon", pointsJson(a.vertices))

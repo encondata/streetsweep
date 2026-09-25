@@ -19,6 +19,10 @@
 
 const streets = require("./streets");
 const networks = require("./networks");
+// Loaded when first needed: achievements reads the counts this module writes.
+let achievements = null;
+// People whose counts changed in this run, whose achievements are looked at once it ends.
+const recounted = new Set();
 
 const DONE_FRACTION = 0.8;
 const PARTIAL_FRACTION = 0.02;
@@ -40,6 +44,19 @@ async function ensureSchema(pool) {
       computed_at     TIMESTAMPTZ,
       area_updated_at TIMESTAMPTZ,
       error           TEXT
+    );
+    -- When the area first reached 100%, and who had driven most of it by then.
+    ALTER TABLE area_progress ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+    ALTER TABLE area_progress ADD COLUMN IF NOT EXISTS top_user_id BIGINT;
+    -- Each person's own share of each area: what they drove themselves, overlap once.
+    -- Marks by hand are left out on purpose — they are shared, not anyone's driving.
+    CREATE TABLE IF NOT EXISTS area_user_progress (
+      area_id       BIGINT NOT NULL REFERENCES areas(id) ON DELETE CASCADE,
+      user_id       BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      done          INT NOT NULL,
+      partial       INT NOT NULL,
+      meters_driven DOUBLE PRECISION NOT NULL,
+      PRIMARY KEY (area_id, user_id)
     );
   `);
   // Anything left half done by a restart is simply started again.
@@ -146,15 +163,24 @@ async function compute(pool, areaId) {
 
   // What was driven on them, and what was said about them by hand.
   const shapesByWay = new Map(), summed = new Map();
+  // The same, person by person: user id -> way id -> [shapes].
+  const byUser = new Map();
   for (let i = 0; i < ids.length; i += 5000) {
     const batch = ids.slice(i, i + 5000);
     const { rows: edges } = await pool.query(
-      "SELECT way_id, length_m, shape FROM driven_edges WHERE way_id = ANY($1::bigint[])", [batch]);
+      "SELECT way_id, user_id, length_m, shape FROM driven_edges WHERE way_id = ANY($1::bigint[])", [batch]);
     for (const e of edges) {
       const id = Number(e.way_id);
       if (!shapesByWay.has(id)) shapesByWay.set(id, []);
       shapesByWay.get(id).push(e.shape);
       summed.set(id, (summed.get(id) || 0) + Number(e.length_m));
+      if (e.user_id == null) continue;
+      const u = Number(e.user_id);
+      if (!byUser.has(u)) byUser.set(u, new Map());
+      const mine = byUser.get(u);
+      if (!mine.has(id)) mine.set(id, { shapes: [], summed: 0 });
+      mine.get(id).shapes.push(e.shape);
+      mine.get(id).summed += Number(e.length_m);
     }
   }
   const marked = new Set(), excluded = new Set();
@@ -184,12 +210,50 @@ async function compute(pool, areaId) {
     else if (f > PARTIAL_FRACTION) partial++;
   }
 
-  await pool.query(
-    `UPDATE area_progress SET status = $2, total = $3, done = $4, partial = $5, excluded = $6, marked = $7,
-            meters_total = $8, meters_driven = $9, computed_at = now(), area_updated_at = $10, error = $11
-      WHERE area_id = $1`,
-    [areaId, failed ? "failed" : "done", total, done, partial, nExcluded, nMarked,
-     metersTotal, metersDriven, area.updated_at, failed]);
+  // Each person's own driving in the area.
+  const people = [];
+  for (const [userId, ways] of byUser) {
+    let uDone = 0, uPartial = 0, uMeters = 0;
+    for (const [id, w] of ways) {
+      const street = found.get(id);
+      if (!street || excluded.has(id)) continue;
+      const driven = Math.min(coveredLength(street.shape, w.shapes), w.summed, street.length);
+      uMeters += driven;
+      const f = street.length > 0 ? driven / street.length : 0;
+      if (f >= DONE_FRACTION) uDone++;
+      else if (f > PARTIAL_FRACTION) uPartial++;
+    }
+    if (uMeters > 0) people.push([userId, uDone, uPartial, uMeters]);
+    recounted.add(userId);
+  }
+  const top = people.slice().sort((a, b) => b[3] - a[3])[0];
+  const complete = total > 0 && done >= total;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM area_user_progress WHERE area_id = $1", [areaId]);
+    for (const [userId, d, p, m] of people) {
+      await client.query(
+        `INSERT INTO area_user_progress (area_id, user_id, done, partial, meters_driven)
+         VALUES ($1, $2, $3, $4, $5)`, [areaId, userId, d, p, m]);
+    }
+    await client.query(
+      `UPDATE area_progress SET status = $2, total = $3, done = $4, partial = $5, excluded = $6, marked = $7,
+              meters_total = $8, meters_driven = $9, computed_at = now(), area_updated_at = $10, error = $11,
+              -- Kept from the first time it was complete; cleared if it stops being (a redraw).
+              completed_at = CASE WHEN $12 THEN COALESCE(completed_at, now()) ELSE NULL END,
+              top_user_id = $13
+        WHERE area_id = $1`,
+      [areaId, failed ? "failed" : "done", total, done, partial, nExcluded, nMarked,
+       metersTotal, metersDriven, area.updated_at, failed, complete, top ? top[0] : null]);
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // ---- one at a time, in the background -------------------------------------------------
@@ -218,6 +282,13 @@ async function run(pool) {
     running = null;
   }
   looping = false;
+  // A badge for taking an area to 100% is only decidable once it has been counted.
+  achievements = achievements || require("./achievements");
+  for (const userId of [...recounted]) {
+    recounted.delete(userId);
+    await achievements.evaluate(pool, userId).catch((err) =>
+      console.error("could not work out achievements for", userId, err.message));
+  }
 }
 
 /**
@@ -265,10 +336,35 @@ function changed(pool, settleMs) {
       const { rows } = await pool.query(
         "UPDATE area_progress SET dirty = true WHERE status IN ('done', 'failed') RETURNING area_id");
       rows.forEach((r) => enqueue(pool, Number(r.area_id)));
+      await catchUp(pool);
     } catch (err) {
       console.error("could not queue progress updates", err.message);
     }
   }, settleMs != null ? settleMs : CHANGE_SETTLE_MS);
 }
 
-module.exports = { ensureSchema, forArea, changed, coveredLength };
+/**
+ * Every area gets counted, not just the ones someone opens: the Areas list, the dashboard
+ * and the achievements all read these. Areas never counted, or changed since, go on the
+ * queue at start-up and whenever an area is added or redrawn.
+ */
+async function catchUp(pool) {
+  const { rows } = await pool.query(
+    `SELECT a.id FROM areas a LEFT JOIN area_progress p ON p.area_id = a.id
+      WHERE p.area_id IS NULL OR p.status <> 'done' OR p.dirty
+         OR p.area_updated_at IS NULL OR a.updated_at > p.area_updated_at
+      ORDER BY (a.max_lat - a.min_lat) * (a.max_lng - a.min_lng)`);   // small ones first
+  for (const r of rows) {
+    await pool.query("INSERT INTO area_progress (area_id) VALUES ($1) ON CONFLICT (area_id) DO NOTHING", [r.id]);
+    enqueue(pool, Number(r.id));
+  }
+  return rows.length;
+}
+
+/** An area was added, redrawn or renamed: count it again, soon. */
+function touched(pool, areaId) {
+  pool.query("INSERT INTO area_progress (area_id) VALUES ($1) ON CONFLICT (area_id) DO UPDATE SET dirty = true",
+    [areaId]).then(() => enqueue(pool, Number(areaId))).catch(() => {});
+}
+
+module.exports = { ensureSchema, forArea, changed, catchUp, touched, coveredLength };

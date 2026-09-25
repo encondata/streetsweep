@@ -342,6 +342,7 @@ async function createArea(area) {
     [area.name, area.level, area.parentName, area.city, area.notes, area.color,
      JSON.stringify(area.polygon), area.minLat, area.minLng, area.maxLat, area.maxLng],
   );
+  progress.touched(pool, rows[0].id);
   return rowToArea(rows[0]);
 }
 
@@ -354,7 +355,41 @@ async function updateArea(id, area) {
     [area.name, area.level, area.parentName, area.city, area.notes, area.color,
      JSON.stringify(area.polygon), area.minLat, area.minLng, area.maxLat, area.maxLng, id],
   );
+  if (rows.length) progress.touched(pool, id);
   return rows.length ? rowToArea(rows[0]) : null;
+}
+
+/**
+ * Areas a phone has that the web does not, or that were redrawn on the phone since it
+ * last pulled them. The web is the record: they are written here, and every other device
+ * takes them from here. Only for someone who may edit areas at all.
+ */
+async function uploadPhoneAreas(list) {
+  const out = { created: [], redrawn: [] };
+  for (const a of Array.isArray(list) ? list : []) {
+    let clean;
+    try {
+      clean = cleanArea({ name: a.name, level: a.level, parentName: a.parent, polygon: a.polygon });
+    } catch (err) {
+      continue;
+    }
+    const { rows } = await pool.query(
+      `SELECT id, name, level, parent_name, city, notes, color FROM areas WHERE lower(name) = lower($1)`,
+      [clean.name]);
+    if (!rows.length) {
+      await createArea(clean);
+      out.created.push(clean.name);
+    } else if (a.redrawn === true) {
+      // A new outline only; the web's name, level, parent, notes and colour stay.
+      const r = rows[0];
+      await updateArea(r.id, {
+        ...clean, name: r.name, level: r.level, parentName: r.parent_name,
+        city: r.city, notes: r.notes, color: r.color,
+      });
+      out.redrawn.push(r.name);
+    }
+  }
+  return out;
 }
 
 async function deleteArea(id) {
@@ -728,9 +763,14 @@ function contains(area, point) {
 async function coverage(edgeLimit) {
   const cap = Math.max(1, Math.min(edgeLimit, EDGE_LIMIT));
   const [areas, edges, drives, pois, totals] = await Promise.all([
-    pool.query(`SELECT name, level, parent_name, polygon, streets_total, streets_done,
-                       streets_partial, streets_excluded, meters_total, meters_driven, reported_at
-                FROM reported_areas ORDER BY ${LEVEL_RANK}, name`),
+    // The server's own count of each area (progress.js), from everyone's driving — not
+    // what any one phone last reported. The web is the record; phones only feed it.
+    pool.query(`SELECT a.name, a.level, a.parent_name, a.polygon,
+                       p.total AS streets_total, p.done AS streets_done, p.partial AS streets_partial,
+                       p.excluded AS streets_excluded, p.meters_total, p.meters_driven,
+                       p.computed_at AS reported_at
+                  FROM areas a LEFT JOIN area_progress p ON p.area_id = a.id AND p.total IS NOT NULL
+                 ORDER BY ${LEVEL_RANK}, a.name`),
     pool.query("SELECT key, name, road_class, length_m, driven_at, shape FROM driven_edges ORDER BY driven_at DESC LIMIT $1", [cap]),
     pool.query("SELECT started_at, ended_at, trigger, point_count, distance_m, new_segments, new_meters, paused_ms FROM drives ORDER BY started_at DESC"),
     pool.query("SELECT id, lat, lng, note, name, photo_key, at, updated_at FROM pois ORDER BY at DESC"),
@@ -743,7 +783,8 @@ async function coverage(edgeLimit) {
       level: r.level,
       parentName: r.parent_name,
       polygon: r.polygon,
-      stats: {
+      // Null until the server has counted it (a new area, for a moment).
+      stats: r.streets_total == null ? null : {
         total: r.streets_total, done: r.streets_done, partial: r.streets_partial,
         excluded: r.streets_excluded, metersTotal: Number(r.meters_total),
         metersDriven: Number(r.meters_driven),
@@ -1308,13 +1349,11 @@ async function handle(req, res) {
       };
     }
 
-    // How far through the areas everyone is, from the phones' own reports. Each area is
-    // counted once, at its furthest-along report, so two phones reporting the same
-    // neighbourhood do not double it.
+    // How far through the areas everyone is, from the server's own count of each.
     const coverage = await pool.query(
       `SELECT COALESCE(sum(done), 0)::int AS done, COALESCE(sum(total), 0)::int AS total
-         FROM (SELECT name, max(streets_done) AS done, max(streets_total) AS total
-                 FROM reported_areas GROUP BY name) a`);
+         FROM (SELECT a.name, p.done, p.total, p.computed_at
+                   FROM area_progress p JOIN areas a ON a.id = p.area_id WHERE p.total IS NOT NULL) a`);
 
     const [today, week] = await Promise.all([window_(dayStart), window_(weekStart)]);
     const c = coverage.rows[0];
@@ -1350,10 +1389,9 @@ async function handle(req, res) {
       };
     }
 
-    // One row per area, at its furthest-along report, so two phones reporting the same
-    // neighbourhood are not counted twice.
-    const best = `SELECT name, max(streets_done) AS done, max(streets_total) AS total
-                    FROM reported_areas GROUP BY name`;
+    // One row per area, the server's own count of it.
+    const best = `SELECT a.name, p.done, p.total, p.computed_at
+                   FROM area_progress p JOIN areas a ON a.id = p.area_id WHERE p.total IS NOT NULL`;
 
     const [now_, prev, coverage, areasList, top, drivesFeed, doneFeed] = await Promise.all([
       tally(from, to),
@@ -1384,13 +1422,15 @@ async function handle(req, res) {
                 u.avatar_key IS NOT NULL AS has_avatar, u.updated_at
            FROM drives d JOIN users u ON u.id = d.user_id
           ORDER BY d.started_at DESC LIMIT 8`),
+      // Areas finished, newest first, credited to whoever drove most of each.
       pool.query(
-        `SELECT r.name, r.streets_done, r.streets_total, r.reported_at,
+        `SELECT a.name, p.done AS streets_done, p.total AS streets_total, p.completed_at AS reported_at,
                 u.id AS user_id, u.name AS user_name,
                 u.avatar_key IS NOT NULL AS has_avatar, u.updated_at
-           FROM reported_areas r JOIN users u ON u.id = r.user_id
-          WHERE r.streets_total > 0 AND r.streets_done >= r.streets_total
-          ORDER BY r.reported_at DESC LIMIT 5`),
+           FROM area_progress p JOIN areas a ON a.id = p.area_id
+           LEFT JOIN users u ON u.id = p.top_user_id
+          WHERE p.completed_at IS NOT NULL
+          ORDER BY p.completed_at DESC LIMIT 5`),
     ]);
 
     const c = coverage.rows[0];
@@ -1435,9 +1475,8 @@ async function handle(req, res) {
    */
   if (route === "/api/admin/area-progress" && req.method === "GET") {
     const { rows } = await pool.query(
-      `SELECT name, max(streets_done)::int AS done, max(streets_total)::int AS total,
-              max(reported_at) AS reported_at
-         FROM reported_areas GROUP BY name`);
+      `SELECT a.name, p.done::int AS done, p.total::int AS total, p.computed_at AS reported_at
+         FROM area_progress p JOIN areas a ON a.id = p.area_id WHERE p.total IS NOT NULL`);
     return sendJson(res, 200, {
       areas: rows.map((r) => ({
         name: r.name, done: r.done, total: r.total,
@@ -1463,11 +1502,15 @@ async function handle(req, res) {
            (SELECT max(started_at) FROM drives WHERE user_id=$1) AS last_drive,
            (SELECT count(*)::int FROM driven_edges WHERE user_id=$1) AS streets,
            (SELECT COALESCE(sum(length_m),0) FROM driven_edges WHERE user_id=$1) AS street_meters,
-           (SELECT count(*)::int FROM reported_areas WHERE user_id=$1) AS areas`, [id]),
+           (SELECT count(*)::int FROM area_user_progress WHERE user_id=$1) AS areas`, [id]),
+      // Their own share of each area they have driven in: what they drove themselves.
       pool.query(
-        `SELECT name, streets_done::int AS done, streets_total::int AS total
-           FROM reported_areas WHERE user_id=$1 AND streets_total > 0
-          ORDER BY (streets_done::float / streets_total) DESC`, [id]),
+        `SELECT a.name, up.done::int AS done, p.total::int AS total
+           FROM area_user_progress up
+           JOIN area_progress p ON p.area_id = up.area_id
+           JOIN areas a ON a.id = up.area_id
+          WHERE up.user_id=$1 AND p.total > 0
+          ORDER BY (up.done::float / p.total) DESC`, [id]),
       pool.query(
         `SELECT d.started_at, d.ended_at, d.distance_m, d.new_segments, d.new_meters,
                 d.paused_ms, v.name AS vehicle
@@ -1519,9 +1562,9 @@ async function handle(req, res) {
                 COALESCE(sum(distance_m),0) AS meters
            FROM drives WHERE started_at >= $1 GROUP BY wk ORDER BY wk`, [since]),
       pool.query(
-        `SELECT name, max(streets_done)::int AS done, max(streets_total)::int AS total
-           FROM reported_areas GROUP BY name
-          ORDER BY max(streets_done) DESC LIMIT 10`),
+        `SELECT a.name, p.done::int AS done, p.total::int AS total
+           FROM area_progress p JOIN areas a ON a.id = p.area_id WHERE p.total IS NOT NULL
+          ORDER BY p.done DESC LIMIT 10`),
       pool.query(
         `SELECT u.name, count(e.*)::int AS streets, COALESCE(sum(e.length_m),0) AS meters
            FROM driven_edges e JOIN users u ON u.id = e.user_id
@@ -1602,12 +1645,19 @@ async function handle(req, res) {
   if (route === "/api/sync" && req.method === "POST") {
     // Everything a phone pushes is stamped with whose phone it is, and which vehicle
     // that phone was issued for, so a drive can be told from anyone else's later.
-    const result = await applySync(await readBody(req), {
+    const body_ = await readBody(req);
+    const result = await applySync(body_, {
       userId: who.user.id,
       vehicleId: who.vehicleId || null,
     });
     // The only moment the figures can have moved. Failing here must not fail the sync:
     // a badge is not worth losing a drive over.
+    if (Array.isArray(body_.areas) && identity.can(who.user, "areas")) {
+      result.areasUploaded = await uploadPhoneAreas(body_.areas).catch((err) => {
+        console.error("could not take the phone's areas", err.message);
+        return { created: [], redrawn: [] };
+      });
+    }
     progress.changed(pool);
     result.awarded = await achievements.evaluate(pool, who.user.id).catch((err) => {
       console.error("could not work out achievements", err.message);
@@ -1870,6 +1920,7 @@ waitForDatabase()
   .then(() => streets.ensureSchema(pool))
   .then(() => completions.ensureSchema(pool))
   .then(() => progress.ensureSchema(pool))
+  .then(() => progress.catchUp(pool).then((n) => n && console.log(`Counting ${n} areas in the background.`)))
   .then(readyPhotos)
   .then(() => {
     // Expired rows are dead weight; clear them at boot and once a day after.

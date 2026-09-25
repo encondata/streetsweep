@@ -8,7 +8,7 @@
  * the named ones are kept for things that actually mean something different.
  *
  * Everything here is counted from records that already exist — driven_edges, drives and
- * the areas the phones report. Nothing is stored twice, so a badge cannot drift away
+ * the server's own count of each area. Nothing is stored twice, so a badge cannot drift away
  * from the thing it is describing; the only thing written down is the moment one was
  * first reached, because that is the one fact the counts cannot reconstruct.
  *
@@ -162,12 +162,14 @@ async function figuresFor(pool, userId) {
               count(*) FILTER (WHERE distance_m > 0 AND EXTRACT(HOUR FROM ${LOCAL("started_at")}) < 4)::int AS night,
               count(*) FILTER (WHERE distance_m > 0 AND EXTRACT(HOUR FROM ${LOCAL("started_at")}) BETWEEN 4 AND 5)::int AS early
          FROM drives WHERE user_id = $1`, [userId]),
+    // Their own share of each area, as the server counts it from what they drove
+    // (progress.js) — not what their phone reported, and not streets marked by hand.
     pool.query(
-      `SELECT count(*) FILTER (WHERE streets_total > 0 AND streets_done >= streets_total)::int AS completed,
-              count(*) FILTER (WHERE streets_done > 0)::int AS driven_in,
-              COALESCE(max(CASE WHEN streets_total > 0
-                                THEN (streets_done::float / streets_total) * 100 END), 0) AS best_pct
-         FROM reported_areas WHERE user_id = $1`, [userId]),
+      `SELECT count(*) FILTER (WHERE p.total > 0 AND up.done >= p.total)::int AS completed,
+              count(*) FILTER (WHERE up.done > 0)::int AS driven_in,
+              COALESCE(max(CASE WHEN p.total > 0 THEN (up.done::float / p.total) * 100 END), 0) AS best_pct
+         FROM area_user_progress up JOIN area_progress p ON p.area_id = up.area_id
+        WHERE up.user_id = $1`, [userId]),
     pool.query(
       `SELECT DISTINCT to_char(${LOCAL("driven_at")}, 'IYYY-IW') AS week,
               to_char(${LOCAL("driven_at")}, 'YYYY-MM') AS month,

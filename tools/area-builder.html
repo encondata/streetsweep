@@ -4300,7 +4300,7 @@ window.StreetSweepBases = {
   }
 
   // ---- coverage tab ------------------------------------------------------
-  // What the phone has reported: which streets it has driven and how far each area has got.
+  // What the server has: the streets driven, and its own count of how far each area has got.
 
   var coverageLayer = L.layerGroup();
   var coverageLoaded = false;
@@ -4484,7 +4484,7 @@ window.StreetSweepBases = {
     areas.forEach(function (a) { reported[a.name] = a.stats; });
 
     el("covSummary").innerHTML = empty
-      ? "Nothing sent from the phone yet."
+      ? "Nothing driven yet."
       : '<div class="ringrow">' + ring(overall, 104, 11) +
           '<div class="legend">' +
             legendLine("Driven streets", streetsDone.toLocaleString(), "var(--accent)") +
@@ -4873,7 +4873,7 @@ window.StreetSweepBases = {
 
   // ---- the area detail beside the map ----------------------------------------
 
-  var reported = {};   // area name -> the stats the phone last sent
+  var reported = {};   // area name -> the server's count of it (progress.js), everyone's driving
 
   // ---- an area's own streets -------------------------------------------------
   //
@@ -5051,11 +5051,6 @@ window.StreetSweepBases = {
           if (t.marked) parts.push(t.marked.toLocaleString() + " marked complete by hand.");
           if (t.excluded) parts.push(t.excluded.toLocaleString() + " gated or excluded.");
         }
-        if (state.phoneTotal && Math.abs(state.phoneTotal - state.count) > 2) {
-          parts.push("The phone counts " + state.phoneTotal.toLocaleString() +
-            " here, because its outline for this area is a different shape. Send the area " +
-            "to the phone to line them up.");
-        }
       }
       note.textContent = parts.join(" ");
       paintLiveProgress();
@@ -5120,11 +5115,6 @@ window.StreetSweepBases = {
       addNetwork(state, net);
       paintHandEdits();
       state.network = "done"; state.count = net.streets; state.stale = net.stale;
-      // The phone keeps its own copy of each outline. When the two have drifted apart the
-      // counts will too, and it is worth saying which, rather than showing two numbers
-      // that silently disagree.
-      var rep = reported[a.name];
-      state.phoneTotal = rep && rep.total ? rep.total : null;
       toolbarFor(net.ids ? "ready" : "old");
       say();
     }).catch(function (err) {
@@ -5703,7 +5693,7 @@ window.StreetSweepBases = {
 
   /** The progress card's contents. */
   function progressHtml(percent, done, total, caption) {
-    if (percent === null) return '<p class="hint" style="margin:0">The phone has not reported on this one yet.</p>';
+    if (percent === null) return '<p class="hint" style="margin:0">Not counted yet: the server is adding this area up, which takes a moment for a new one.</p>';
     return '<div style="display:flex;align-items:baseline;gap:8px">' +
         '<span style="font-size:26px;font-weight:700;letter-spacing:-.02em">' + percent + "%</span>" +
         '<span style="font-size:12px;color:var(--ink-soft)">Complete</span></div>' +
@@ -5727,15 +5717,11 @@ window.StreetSweepBases = {
     if (st.network === "view") return serverProgressFor(a, st.serverProgress);
     if (st.driven == null || st.network !== "done" || !st.net || !st.net.ids) return null;
     var t = liveTotals();
-    var rep = reported[a.name];
-    var phone = rep ? percentOf(rep) : null;
     return {
       percent: t.metersTotal > 0 ? Math.round((t.metersDriven / t.metersTotal) * 100) : 0,
       done: t.done, total: t.total,
-      caption: "Worked out from this map, hand edits included" +
-        (t.excluded ? " (" + t.excluded + " gated or excluded left out)" : "") +
-        (phone !== null && phone !== Math.round((t.metersDriven / Math.max(1, t.metersTotal)) * 100)
-          ? ". The phones last reported " + phone + "%." : "."),
+      caption: "Everyone's driving, hand edits included" +
+        (t.excluded ? " (" + t.excluded + " gated or excluded left out)" : "") + ".",
     };
   }
 
@@ -5753,15 +5739,13 @@ window.StreetSweepBases = {
         : "Adding up every street in this area on the server" + cells + ". The first time takes a few minutes for a large area; after that, seconds." };
     }
     var pct = sp.metersTotal > 0 ? Math.round((sp.metersDriven / sp.metersTotal) * 100) : 0;
-    var rep = reported[a.name], phone = rep ? percentOf(rep) : null;
     return {
       percent: pct, done: sp.done, total: sp.total,
       caption: working
         ? "Updating on the server" + cells + ". Showing the last count, from " + new Date(sp.computedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + "."
         : "Worked out on the server from all " + sp.total.toLocaleString() + " streets in the area, hand edits included" +
           (sp.excluded ? " (" + sp.excluded.toLocaleString() + " gated or excluded left out)" : "") +
-          (sp.status === "failed" ? ". Some map cells could not be fetched, so this may be short" : "") +
-          (phone !== null && phone !== pct ? ". The phones last reported " + phone + "%." : "."),
+          (sp.status === "failed" ? ". Some map cells could not be fetched, so this may be short" : "") + ".",
     };
   }
 
