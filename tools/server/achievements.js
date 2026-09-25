@@ -18,6 +18,15 @@
 const METERS_PER_MILE = 1609.344;
 
 /**
+ * Where "Sunday", "before 6 AM" and "after midnight" are measured. Drives are stored as
+ * UTC moments; without this a Saturday-evening drive in Texas counted as Sunday.
+ * TIMEZONE takes any IANA name (America/Chicago, America/Denver, ...).
+ */
+const TIMEZONE = /^[A-Za-z_]+(\/[A-Za-z_+-]+){0,2}$/.test(process.env.TIMEZONE || "")
+  ? process.env.TIMEZONE : "America/Chicago";
+const LOCAL = (col) => `(to_timestamp(${col}/1000) AT TIME ZONE '${TIMEZONE}')`;
+
+/**
  * The families that are just "more of it". Thresholds from the brief, except that the
  * first street is now level I: the badge art names level I "First Sweep", which the old
  * separate First Sweep badge was, and two achievements for one street was one too many.
@@ -103,6 +112,10 @@ const BADGES = [
 
   { code: "sunday_driver", category: "special", art: "sunday_driver", tier: "common", name: "Sunday Driver", icon: "sun",
     blurb: "Twenty-five streets recorded on a Sunday", test: (s) => s.sundayStreets >= 25 },
+  { code: "early_bird", category: "special", art: "early_bird", tier: "uncommon", name: "Early Bird",
+    blurb: "Record a drive that starts between 4 and 6 AM", test: (s) => s.earlyDrives >= 1 },
+  { code: "night_owl", category: "special", art: "night_owl", tier: "uncommon", name: "Night Owl",
+    blurb: "Record a drive that starts after midnight, before 4 AM", test: (s) => s.nightDrives >= 1 },
   { code: "rain_or_shine", category: "special", art: "rain_or_shine", tier: "rare", name: "Rain or Shine", icon: "calendar",
     blurb: "Drive on thirty different days", test: (s) => s.drivingDays >= 30 },
   { code: "weekend_warrior", category: "special", art: "roundabout", tier: "uncommon", name: "Weekend Warrior", icon: "calendar",
@@ -139,12 +152,15 @@ async function figuresFor(pool, userId) {
   const [edges, drives, areas, buckets] = await Promise.all([
     pool.query(
       `SELECT count(*)::int AS streets, COALESCE(sum(length_m),0) AS meters,
-              count(*) FILTER (WHERE EXTRACT(DOW FROM to_timestamp(driven_at/1000)) = 0)::int AS sunday
+              count(*) FILTER (WHERE EXTRACT(DOW FROM ${LOCAL("driven_at")}) = 0)::int AS sunday
          FROM driven_edges WHERE user_id = $1`, [userId]),
     pool.query(
       `SELECT COALESCE(max(new_segments),0)::int AS best_streets,
               COALESCE(max(new_meters),0) AS best_meters,
-              count(DISTINCT to_char(to_timestamp(started_at/1000), 'YYYY-MM-DD'))::int AS days
+              count(DISTINCT to_char(${LOCAL("started_at")}, 'YYYY-MM-DD'))::int AS days,
+              -- Split so one drive at 1 AM is a Night Owl drive, not both.
+              count(*) FILTER (WHERE distance_m > 0 AND EXTRACT(HOUR FROM ${LOCAL("started_at")}) < 4)::int AS night,
+              count(*) FILTER (WHERE distance_m > 0 AND EXTRACT(HOUR FROM ${LOCAL("started_at")}) BETWEEN 4 AND 5)::int AS early
          FROM drives WHERE user_id = $1`, [userId]),
     pool.query(
       `SELECT count(*) FILTER (WHERE streets_total > 0 AND streets_done >= streets_total)::int AS completed,
@@ -153,9 +169,9 @@ async function figuresFor(pool, userId) {
                                 THEN (streets_done::float / streets_total) * 100 END), 0) AS best_pct
          FROM reported_areas WHERE user_id = $1`, [userId]),
     pool.query(
-      `SELECT DISTINCT to_char(to_timestamp(driven_at/1000), 'IYYY-IW') AS week,
-              to_char(to_timestamp(driven_at/1000), 'YYYY-MM') AS month,
-              EXTRACT(ISODOW FROM to_timestamp(driven_at/1000))::int AS dow
+      `SELECT DISTINCT to_char(${LOCAL("driven_at")}, 'IYYY-IW') AS week,
+              to_char(${LOCAL("driven_at")}, 'YYYY-MM') AS month,
+              EXTRACT(ISODOW FROM ${LOCAL("driven_at")})::int AS dow
          FROM driven_edges WHERE user_id = $1`, [userId]),
   ]);
 
@@ -174,6 +190,8 @@ async function figuresFor(pool, userId) {
     bestDriveStreets: drives.rows[0].best_streets,
     bestDriveNewMeters: Number(drives.rows[0].best_meters),
     drivingDays: drives.rows[0].days,
+    nightDrives: drives.rows[0].night,
+    earlyDrives: drives.rows[0].early,
     areasCompleted: areas.rows[0].completed,
     areasDrivenIn: areas.rows[0].driven_in,
     bestAreaPct: Number(areas.rows[0].best_pct),
@@ -342,10 +360,10 @@ async function forUser(pool, userId) {
  *
  * Some of these have art on the design sheet, and that art is used for the nearest badge
  * that can be decided (Trailblazer's for Halfway There, Cul-de-Sac King's for So Close,
- * and so on — see the art fields above). Early Bird and Night Owl's is not used at all.
+ * and so on — see the art fields above).
  *
- * Early Bird and Night Owl are also absent: the brief says not to reward driving at
- * unsafe hours, and a badge for driving before six or after midnight does exactly that.
+ * Early Bird and Night Owl are in: they were left out once on the grounds of unsafe
+ * hours, which was not this code's call. Their hours are the drive's start, in TIMEZONE.
  */
 
 module.exports = { LADDERS, BADGES, ensureSchema, evaluate, forUser, figuresFor };
