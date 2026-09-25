@@ -267,12 +267,12 @@
   .metric .bar i { display: block; height: 100%; background: var(--grad-accent); }
 
   .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-  .grid3 .cell {
+  .grid3 .cell, .udStats .cell {
     border: 1px solid var(--line); border-radius: var(--r); background: var(--surface);
     padding: 10px 11px; min-width: 0;
   }
-  .grid3 .cell .n { font-size: 17px; font-weight: 800; letter-spacing: -.02em; }
-  .grid3 .cell .k { font-size: 10.5px; color: var(--ink-soft); font-weight: 600; margin-top: 1px; }
+  .grid3 .cell .n, .udStats .cell .n { font-size: 17px; font-weight: 800; letter-spacing: -.02em; }
+  .grid3 .cell .k, .udStats .cell .k { font-size: 10.5px; color: var(--ink-soft); font-weight: 600; margin-top: 1px; }
   .board { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
   .board li {
     display: flex; align-items: center; gap: 10px; padding: 9px 11px;
@@ -474,6 +474,50 @@
   :root[data-view="ach"] .eyebrow { margin: 26px 0 11px; }
   #dashCols > div > .eyebrow:first-child,
   #peopleCols > div > .eyebrow:first-child { margin-top: 6px; }
+
+  /* The Users page fills the screen rather than sitting in a column in the middle of it. */
+  :root[data-view="people"] .view[data-view="people"] { max-width: none; }
+  .peopleGrid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 28px; align-items: start; }
+  @media (min-width: 1500px) { .peopleGrid { grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); } }
+  .listHead { display: flex; align-items: center; gap: 12px; }
+  .listHead .eyebrow { flex: 1 1 auto; }
+  .listHead button { padding: 7px 14px; font-size: 12px; margin-top: 14px; }
+  #userForm { max-width: 520px; margin-top: 12px; }
+
+  .tableWrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-1); }
+  .utable { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .utable th {
+    text-align: left; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--ink-soft); padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: nowrap;
+  }
+  .utable td { padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+  .utable tbody tr:last-child td { border-bottom: none; }
+  .utable tbody tr:hover td { background: var(--surface-2); }
+  .utable .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .utable tr.off td { opacity: .55; }
+  .utable .who { display: flex; align-items: center; gap: 10px; cursor: pointer; min-width: 220px; }
+  .utable .who .avatar { width: 32px; height: 32px; font-size: 12px; flex: 0 0 auto; }
+  .utable .who b { display: block; font-size: 13px; }
+  .utable .who span.mail { display: block; font-size: 11.5px; color: var(--ink-soft); }
+  .utable .who:hover b { text-decoration: underline; }
+  .utable .acts { display: flex; gap: 6px; justify-content: flex-end; }
+  .utable .acts button { padding: 4px 9px; font-size: 11.5px; }
+  .rolepill {
+    display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 800;
+    letter-spacing: .05em; text-transform: uppercase; background: var(--surface-2); color: var(--ink-soft);
+  }
+  .rolepill.admin { background: var(--accent-soft); color: var(--green-700); }
+  .rolepill.driver { background: color-mix(in srgb, #2f7de1 14%, transparent); color: #2f7de1; }
+  :root[data-theme="dark"] .rolepill.admin { background: rgba(69,189,35,.16); color: var(--green-400); }
+  .statusdot { display: inline-flex; align-items: center; gap: 6px; }
+  .statusdot::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .statusdot.off::before { background: var(--line-strong); }
+  .personhead .statusdot { font-size: 12.5px; font-weight: 600; color: var(--ink-soft); }
+
+  /* One person: every figure across one row, then two columns where there is room. */
+  .udStats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 14px; }
+  .udCols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 28px; align-items: start; }
+  @media (min-width: 1300px) { .udCols { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); } }
 
   /* The Users page's two tabs: people (and their phones), and vehicles. */
   .chips.peopleTabs { border-bottom: none; padding: 0 0 6px; margin-top: 14px; }
@@ -1668,18 +1712,23 @@
             <span class="tag" id="udRole"></span>
             <span class="tag" id="udActive"></span>
           </div>
-          <div class="grid3" id="udStats" style="margin-top:14px"></div>
+          <div class="udStats" id="udStats"></div>
 
-          <p class="eyebrow">Completion by area</p>
-          <ul class="board plain" id="udAreas"></ul>
-          <p class="hint" id="udAreasEmpty" hidden>This person has not driven in any area yet.</p>
+          <div class="udCols">
+            <div style="min-width:0">
+              <p class="eyebrow">Completion by area</p>
+              <ul class="board plain" id="udAreas"></ul>
+              <p class="hint" id="udAreasEmpty" hidden>This person has not driven in any area yet.</p>
 
-          <p class="eyebrow">Recent drives</p>
-          <ul class="board plain" id="udDrives"></ul>
-          <p class="hint" id="udDrivesEmpty" hidden>No drive has been recorded for them.</p>
-
-          <p class="eyebrow">Achievements <span id="udAchCount" class="tag"></span></p>
-          <div id="udAch"></div>
+              <p class="eyebrow">Achievements <span id="udAchCount" class="tag"></span></p>
+              <div id="udAch"></div>
+            </div>
+            <div style="min-width:0">
+              <p class="eyebrow">Recent drives</p>
+              <ul class="board plain" id="udDrives"></ul>
+              <p class="hint" id="udDrivesEmpty" hidden>No drive has been recorded for them.</p>
+            </div>
+          </div>
         </div>
 
         <div id="peopleMain">
@@ -1692,11 +1741,22 @@
           <button type="button" role="tab" data-ptab="vehicles" aria-pressed="false">Vehicles <span class="tag" id="ptVehicles"></span></button>
         </div>
         <div data-ppane="users">
-        <div id="peopleCols">
-          <div>
-            <p class="eyebrow">People</p>
-            <ul id="userList" class="board plain"></ul>
-            <button type="button" id="btnNewUser" class="primary" style="width:100%;margin-top:9px">Add someone</button>
+        <div class="peopleGrid">
+          <div style="min-width:0">
+            <div class="listHead">
+              <p class="eyebrow">People</p>
+              <button type="button" id="btnNewUser" class="primary">Add someone</button>
+            </div>
+            <div class="tableWrap">
+              <table class="utable">
+                <thead><tr>
+                  <th>Person</th><th>Role</th><th>Status</th>
+                  <th class="num">Streets</th><th class="num">Swept</th><th class="num">Driven</th>
+                  <th class="num">Drives</th><th>Last drive</th><th>Phones</th><th></th>
+                </tr></thead>
+                <tbody id="userList"></tbody>
+              </table>
+            </div>
             <form id="userForm" hidden>
               <div class="field"><label for="uName">Name</label><input type="text" id="uName" placeholder="Jim Henderson"></div>
               <div class="field"><label for="uEmail">Email</label><input type="text" id="uEmail" placeholder="jim@example.com"></div>
@@ -1708,7 +1768,7 @@
               </div>
             </form>
           </div>
-          <div>
+          <div style="min-width:0">
             <p class="eyebrow">Phones</p>
             <ul id="devList" class="board plain"></ul>
             <p class="hint" id="devEmpty" hidden>No phone has signed in yet.</p>
@@ -3769,16 +3829,16 @@ window.StreetSweepBases = {
       el("udEmail").textContent = u.email;
       el("udJoined").textContent = "Joined " + new Date(d.joinedAt).toLocaleDateString();
       el("udRole").textContent = u.role;
-      el("udRole").className = "tag " + u.role;
+      el("udRole").className = "rolepill " + u.role;
       el("udActive").textContent = u.active ? "Active" : "Switched off";
-      el("udActive").className = "tag";
+      el("udActive").className = "statusdot" + (u.active ? "" : " off");
 
       el("udStats").innerHTML =
         cell(t.streets.toLocaleString(), "Streets swept") +
         cell(fmtDistance(t.streetMeters), "Swept") +
         cell(fmtDistance(t.meters), "Driven") +
         cell(t.drives.toLocaleString(), "Drives") +
-        cell(t.areas.toLocaleString(), "Areas reported") +
+        cell(t.areas.toLocaleString(), "Areas driven in") +
         cell(d.rank ? "#" + d.rank : "—", "Rank by streets");
 
       el("udAreasEmpty").hidden = d.areas.length > 0;
@@ -3811,18 +3871,28 @@ window.StreetSweepBases = {
     return apiJson("/api/users").then(function (d) {
       el("ptUsers").textContent = d.users.length;
       el("userList").innerHTML = d.users.map(function (u) {
-        return "<li data-user='" + u.id + "'" + (u.active ? "" : " class='off'") + ">" +
-          "<span class='main open' role='button' tabindex='0'><b>" + escapeHtml(u.name) +
-            " <span class='tag " + u.role + "'>" + u.role + "</span></b>" +
-            "<span>" + escapeHtml(u.email) +
-            (u.devices ? " · " + u.devices + (u.devices === 1 ? " phone" : " phones") : "") +
-            (u.active ? "" : " · switched off") + "</span></span>" +
-          "<span class='acts'>" +
+        return "<tr data-user='" + u.id + "' data-name='" + escapeHtml(u.name) + "'" + (u.active ? "" : " class='off'") + ">" +
+          "<td><span class='who open' role='button' tabindex='0'>" +
+            "<span class='avatar' data-avatar='" + u.id + "'></span>" +
+            "<span><b>" + escapeHtml(u.name) + "</b><span class='mail'>" + escapeHtml(u.email) + "</span></span></span></td>" +
+          "<td><span class='rolepill " + u.role + "'>" + u.role + "</span></td>" +
+          "<td><span class='statusdot" + (u.active ? "" : " off") + "'>" + (u.active ? "Active" : "Switched off") + "</span></td>" +
+          "<td class='num'>" + (u.streets || 0).toLocaleString() + "</td>" +
+          "<td class='num'>" + fmtDistance(u.streetMeters || 0) + "</td>" +
+          "<td class='num'>" + fmtDistance(u.meters || 0) + "</td>" +
+          "<td class='num'>" + (u.drives || 0).toLocaleString() + "</td>" +
+          "<td>" + (u.lastDriveAt ? new Date(u.lastDriveAt).toLocaleDateString() : "—") + "</td>" +
+          "<td>" + (u.devices ? u.devices + (u.phoneSeenAt ? " · seen " + new Date(u.phoneSeenAt).toLocaleDateString() : "") : "—") + "</td>" +
+          "<td><span class='acts'>" +
             "<button type='button' data-act='role'>Role</button>" +
             "<button type='button' data-act='pass'>Password</button>" +
             "<button type='button' data-act='active'>" + (u.active ? "Disable" : "Enable") + "</button>" +
-          "</span></li>";
+          "</span></td></tr>";
       }).join("");
+      d.users.forEach(function (u) {
+        var node = el("userList").querySelector("[data-avatar='" + u.id + "']");
+        if (node) paintAvatar(node, u);
+      });
     });
   }
 
@@ -3965,15 +4035,15 @@ window.StreetSweepBases = {
   });
 
   el("userList").addEventListener("click", function (ev) {
-    var open = ev.target.closest && ev.target.closest(".main.open");
+    var open = ev.target.closest && ev.target.closest(".open");
     if (open) {
-      return openUser(open.closest("li").getAttribute("data-user"));
+      return openUser(open.closest("[data-user]").getAttribute("data-user"));
     }
     var btn = ev.target.closest && ev.target.closest("button[data-act]");
     if (!btn) return;
-    var li = btn.closest("li"), id = li.getAttribute("data-user");
+    var row = btn.closest("[data-user]"), id = row.getAttribute("data-user");
     var act = btn.getAttribute("data-act");
-    var name = li.querySelector(".main b").textContent.trim();
+    var name = row.getAttribute("data-name");
 
     if (act === "role") {
       var next = prompt("Role for " + name + " — " + ROLES.join(", "), "driver");

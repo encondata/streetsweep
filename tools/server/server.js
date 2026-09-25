@@ -1067,12 +1067,29 @@ async function handle(req, res) {
   // ---------------------------------------------------------------- people
 
   if (route === "/api/users" && req.method === "GET") {
+    // What the Users list shows in its columns, per person, in one query.
     const { rows } = await pool.query(
-      `SELECT u.*, (SELECT count(*)::int FROM device_tokens d
-                     WHERE d.user_id = u.id AND d.revoked_at IS NULL) AS devices
-         FROM users u ORDER BY u.active DESC, lower(u.name)`);
+      `SELECT u.*,
+              (SELECT count(*)::int FROM device_tokens d
+                WHERE d.user_id = u.id AND d.revoked_at IS NULL) AS devices,
+              (SELECT max(d.last_seen_at) FROM device_tokens d WHERE d.user_id = u.id) AS phone_seen,
+              COALESCE(e.streets, 0) AS streets, COALESCE(e.meters, 0) AS street_meters,
+              COALESCE(dr.drives, 0) AS drives, COALESCE(dr.meters, 0) AS meters, dr.last_drive
+         FROM users u
+         LEFT JOIN (SELECT user_id, count(*)::int AS streets, sum(length_m) AS meters
+                      FROM driven_edges GROUP BY user_id) e ON e.user_id = u.id
+         LEFT JOIN (SELECT user_id, count(*)::int AS drives, sum(distance_m) AS meters,
+                           max(started_at) AS last_drive
+                      FROM drives GROUP BY user_id) dr ON dr.user_id = u.id
+        ORDER BY u.active DESC, lower(u.name)`);
     return sendJson(res, 200, {
-      users: rows.map((r) => Object.assign(identity.publicUser(r), { devices: r.devices })),
+      users: rows.map((r) => Object.assign(identity.publicUser(r), {
+        devices: r.devices,
+        streets: Number(r.streets), streetMeters: Number(r.street_meters),
+        drives: Number(r.drives), meters: Number(r.meters),
+        lastDriveAt: r.last_drive ? Number(r.last_drive) : null,
+        phoneSeenAt: r.phone_seen ? new Date(r.phone_seen).getTime() : null,
+      })),
     });
   }
 
