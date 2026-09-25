@@ -150,8 +150,11 @@ class TrackRepository(private val db: AppDatabase) {
     }
 
     suspend fun deleteSession(sessionId: Long) = db.withTransaction {
+        // The streets it drove are measured again once its segments are gone.
+        val touched = db.coverageDao().wayIdsDrivenIn(sessionId)
         db.coverageDao().deleteDrivenEdgesForSession(sessionId)
         dao.deleteSession(sessionId)
+        com.example.streetsweep.data.WayCoverageBuilder(db).refresh(touched)
     }
 
     /** Appends road-matched geometry and advances the session's matched watermark atomically. */

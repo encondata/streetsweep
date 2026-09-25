@@ -5,6 +5,10 @@ import android.content.Context
 import com.example.streetsweep.data.backup.BackupWorker
 import com.example.streetsweep.data.osm.MatchRetryWorker
 import com.example.streetsweep.tracking.Notifications
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class StreetSweepApplication : Application() {
     lateinit var container: AppContainer
@@ -18,6 +22,11 @@ class StreetSweepApplication : Application() {
         MatchRetryWorker.schedule(this)
         MatchRetryWorker.enqueueNow(this)
         BackupWorker.schedule(this)
+        // The upgrade to street coverage fills it in; this catches a database restored from
+        // a backup, or anything else that arrived with segments but no coverage.
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            runCatching { container.coverageRepository.ensureWayCoverage() }
+        }
     }
 }
 

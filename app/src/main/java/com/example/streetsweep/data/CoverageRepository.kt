@@ -56,12 +56,18 @@ data class StreetStatus(
     val isDone: Boolean get() = !excluded && fraction >= doneFraction
     val isPartial: Boolean get() = !excluded && fraction > PARTIAL_THRESHOLD && fraction < doneFraction
     val isUndriven: Boolean get() = !excluded && fraction <= PARTIAL_THRESHOLD
+    /**
+     * Driven end to end, near enough. A street past [doneFraction] counts as done but can
+     * still have a stretch no trace reached, and is worth marking complete until this.
+     */
+    val isFull: Boolean get() = completed || fraction >= FULL_THRESHOLD
     val label: String get() = name ?: "Unnamed ${highway.replace('_', ' ')}"
 
     companion object {
         /** GPS and matching slop means a fully driven street rarely scores exactly 1.0. */
         const val DONE_THRESHOLD = 0.8
         const val PARTIAL_THRESHOLD = 0.02
+        const val FULL_THRESHOLD = 0.98
 
         fun fromRow(r: WayCoverageRow) = StreetStatus(
             wayId = r.id, name = r.name, highway = r.highway, lengthMeters = r.lengthMeters,
@@ -152,6 +158,10 @@ class GateException(val problem: GateProblem) : Exception(problem.name)
 @OptIn(ExperimentalCoroutinesApi::class)
 class CoverageRepository(private val db: AppDatabase) {
     private val dao get() = db.coverageDao()
+    private val coverageBuilder = WayCoverageBuilder(db)
+
+    /** Works out any street coverage a restored or older database arrived without. */
+    suspend fun ensureWayCoverage() = coverageBuilder.rebuildIfMissing()
 
     // ---- areas ----
     fun observeAreas(): Flow<List<CoverageArea>> = dao.observeAreas()
@@ -536,6 +546,9 @@ class CoverageRepository(private val db: AppDatabase) {
             },
         )
         dao.upsertChunk(StreetChunk(key = key, loadedAt = now, wayCount = streets.size))
+        // A street driven before its shape was here was measured by adding its segments up;
+        // with the shape, it can be measured properly.
+        coverageBuilder.refresh(streets.map { it.id })
     }.also {
         Bounds.of(streets.flatMap { s -> listOf(s.shape.first(), s.shape.last()) })?.let { refreshMembershipTouching(it) }
     }
@@ -574,6 +587,7 @@ class CoverageRepository(private val db: AppDatabase) {
         }.distinctBy { it.key }
         if (rows.isEmpty()) return Recorded(0, 0.0)
         val ids = dao.insertDrivenEdges(rows)
+        coverageBuilder.refresh(rows.map { it.wayId })
         var n = 0
         var m = 0.0
         ids.forEachIndexed { i, id -> if (id != -1L) { n++; m += rows[i].lengthMeters } }

@@ -201,7 +201,8 @@ fun StreetsScreen(
                                     when {
                                         s.excluded -> "excluded"
                                         s.completed -> "marked complete"
-                                        s.isDone -> "done"
+                                        s.isFull -> "done"
+                                        s.isDone -> "${(s.fraction * 100).roundToInt()}% · counts as done"
                                         s.isPartial -> "${(s.fraction * 100).roundToInt()}% driven"
                                         else -> "not driven"
                                     },
@@ -215,7 +216,7 @@ fun StreetsScreen(
                                 IconButton(onClick = { viewModel.setCompleted(s.wayId, false) }) {
                                     Icon(Icons.Default.RemoveDone, contentDescription = "Unmark complete")
                                 }
-                            } else if (!s.isDone && !s.excluded) {
+                            } else if (!s.isFull && !s.excluded) {
                                 IconButton(onClick = { viewModel.setCompleted(s.wayId, true) }) {
                                     Icon(Icons.Default.DoneAll, contentDescription = "Mark this street complete")
                                 }

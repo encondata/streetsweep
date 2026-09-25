@@ -544,14 +544,15 @@ private fun StreetActionsDialog(
                     when {
                         street.excluded -> "Excluded — does not count toward coverage"
                         street.completed -> "Marked complete — counts as driven"
-                        street.isDone -> "Driven"
+                        street.isFull -> "Driven"
+                        street.isDone -> "${(street.fraction * 100).roundToInt()}% driven · counts as done"
                         street.isPartial -> "${(street.fraction * 100).roundToInt()}% driven"
                         else -> "Not driven yet"
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                if (street.completed || (!street.isDone && !street.excluded)) {
+                if (street.completed || (!street.isFull && !street.excluded)) {
                     Spacer(Modifier.height(12.dp))
                     if (street.completed) {
                         OutlinedButton(onClick = { onComplete(false) }) { Text("Unmark complete") }

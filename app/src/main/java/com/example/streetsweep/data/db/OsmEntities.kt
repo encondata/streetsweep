@@ -147,6 +147,18 @@ data class StreetCompletion(
     val sent: Boolean = false,
 )
 
+/**
+ * How much of each street has been driven, with overlapping segments counted once
+ * ([com.example.streetsweep.domain.CoveredLength]). Kept up to date whenever a street's
+ * segments or shape change ([com.example.streetsweep.data.WayCoverageBuilder]); every
+ * coverage figure reads it rather than adding the segments up again.
+ */
+@Entity(tableName = "way_coverage")
+data class WayCoverage(
+    @PrimaryKey val wayId: Long,
+    val drivenMeters: Double,
+)
+
 /** Row of the per-way coverage query. */
 data class WayCoverageRow(
     val id: Long,

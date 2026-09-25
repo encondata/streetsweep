@@ -65,7 +65,7 @@ interface CoverageDao {
         """
         SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape, w.minDoneFraction,
                CASE WHEN EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) THEN w.lengthMeters
-                    ELSE COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) END AS drivenMeters,
+                    ELSE COALESCE((SELECT wc.drivenMeters FROM way_coverage wc WHERE wc.wayId = w.id), 0) END AS drivenMeters,
                EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id AND x.active = 1) AS excluded,
                EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) AS completed
         FROM osm_ways w
@@ -80,7 +80,7 @@ interface CoverageDao {
         """
         SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape, w.minDoneFraction,
                CASE WHEN EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) THEN w.lengthMeters
-                    ELSE COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) END AS drivenMeters,
+                    ELSE COALESCE((SELECT wc.drivenMeters FROM way_coverage wc WHERE wc.wayId = w.id), 0) END AS drivenMeters,
                EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id AND x.active = 1) AS excluded,
                EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) AS completed
         FROM area_ways aw
@@ -97,7 +97,7 @@ interface CoverageDao {
         """
         SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape, w.minDoneFraction,
                CASE WHEN EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) THEN w.lengthMeters
-                    ELSE COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) END AS drivenMeters,
+                    ELSE COALESCE((SELECT wc.drivenMeters FROM way_coverage wc WHERE wc.wayId = w.id), 0) END AS drivenMeters,
                EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id AND x.active = 1) AS excluded,
                EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) AS completed
         FROM area_ways aw
@@ -113,7 +113,7 @@ interface CoverageDao {
         """
         SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape, w.minDoneFraction,
                CASE WHEN EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) THEN w.lengthMeters
-                    ELSE COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) END AS drivenMeters,
+                    ELSE COALESCE((SELECT wc.drivenMeters FROM way_coverage wc WHERE wc.wayId = w.id), 0) END AS drivenMeters,
                EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id AND x.active = 1) AS excluded,
                EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) AS completed
         FROM osm_ways w
@@ -127,14 +127,14 @@ interface CoverageDao {
         """
         SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape, w.minDoneFraction,
                CASE WHEN EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) THEN w.lengthMeters
-                    ELSE COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) END AS drivenMeters,
+                    ELSE COALESCE((SELECT wc.drivenMeters FROM way_coverage wc WHERE wc.wayId = w.id), 0) END AS drivenMeters,
                0 AS excluded,
                0 AS completed
         FROM osm_ways w
         WHERE w.maxLat >= :south AND w.minLat <= :north AND w.maxLng >= :west AND w.minLng <= :east
           AND NOT EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id AND x.active = 1)
           AND CASE WHEN EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) THEN w.lengthMeters
-                    ELSE COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) END
+                    ELSE COALESCE((SELECT wc.drivenMeters FROM way_coverage wc WHERE wc.wayId = w.id), 0) END
               < MIN(:doneFraction, w.minDoneFraction) * w.lengthMeters
         LIMIT :limit
         """,
@@ -146,7 +146,7 @@ interface CoverageDao {
         """
         SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape, w.minDoneFraction,
                CASE WHEN EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) THEN w.lengthMeters
-                    ELSE COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) END AS drivenMeters,
+                    ELSE COALESCE((SELECT wc.drivenMeters FROM way_coverage wc WHERE wc.wayId = w.id), 0) END AS drivenMeters,
                0 AS excluded,
                0 AS completed
         FROM area_ways aw
@@ -155,7 +155,7 @@ interface CoverageDao {
           AND w.maxLat >= :south AND w.minLat <= :north AND w.maxLng >= :west AND w.minLng <= :east
           AND NOT EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id AND x.active = 1)
           AND CASE WHEN EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) THEN w.lengthMeters
-                    ELSE COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) END
+                    ELSE COALESCE((SELECT wc.drivenMeters FROM way_coverage wc WHERE wc.wayId = w.id), 0) END
               < MIN(:doneFraction, w.minDoneFraction) * w.lengthMeters
         LIMIT :limit
         """,
@@ -167,7 +167,7 @@ interface CoverageDao {
         """
         SELECT w.id, w.name, w.highway, w.lengthMeters, w.shape, w.minDoneFraction,
                CASE WHEN EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) THEN w.lengthMeters
-                    ELSE COALESCE((SELECT SUM(e.lengthMeters) FROM driven_edges e WHERE e.wayId = w.id), 0) END AS drivenMeters,
+                    ELSE COALESCE((SELECT wc.drivenMeters FROM way_coverage wc WHERE wc.wayId = w.id), 0) END AS drivenMeters,
                EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id AND x.active = 1) AS excluded,
                EXISTS(SELECT 1 FROM street_completions c WHERE c.wayId = w.id AND c.marked = 1) AS completed
         FROM osm_ways w
@@ -225,7 +225,7 @@ interface CoverageDao {
                (SELECT COUNT(*) FROM area_ways aw2 JOIN street_exclusions x2 ON x2.wayId = aw2.wayId AND x2.active = 1 WHERE aw2.areaId = :areaId) AS excluded
         FROM area_ways aw
         JOIN osm_ways w ON w.id = aw.wayId
-        LEFT JOIN (SELECT wayId, SUM(lengthMeters) AS m FROM driven_edges GROUP BY wayId) d ON d.wayId = w.id
+        LEFT JOIN (SELECT wayId, drivenMeters AS m FROM way_coverage) d ON d.wayId = w.id
         LEFT JOIN street_completions c ON c.wayId = w.id AND c.marked = 1
         WHERE aw.areaId = :areaId AND NOT EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id AND x.active = 1)
         """,
@@ -250,6 +250,28 @@ interface CoverageDao {
 
     @Query("SELECT COUNT(*) FROM driven_edges")
     fun observeDrivenEdgeCount(): Flow<Int>
+
+    // ---- how much of each street is driven, overlap counted once ----
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertCoverage(rows: List<WayCoverage>)
+
+    @Query("DELETE FROM way_coverage WHERE wayId IN (:wayIds)")
+    suspend fun deleteCoverage(wayIds: List<Long>)
+
+    @Query("SELECT * FROM driven_edges WHERE wayId IN (:wayIds)")
+    suspend fun drivenEdgesOn(wayIds: List<Long>): List<DrivenEdge>
+
+    @Query("SELECT * FROM osm_ways WHERE id IN (:wayIds)")
+    suspend fun waysById(wayIds: List<Long>): List<OsmWay>
+
+    @Query("SELECT DISTINCT wayId FROM driven_edges WHERE sessionId = :sessionId")
+    suspend fun wayIdsDrivenIn(sessionId: Long): List<Long>
+
+    @Query("SELECT DISTINCT wayId FROM driven_edges")
+    suspend fun allDrivenWayIds(): List<Long>
+
+    @Query("SELECT COUNT(*) FROM way_coverage")
+    suspend fun coverageCount(): Int
 
     @Query("SELECT * FROM driven_edges ORDER BY drivenAt")
     suspend fun getAllDrivenEdges(): List<DrivenEdge>

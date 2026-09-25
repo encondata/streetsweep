@@ -14,9 +14,9 @@ import com.example.streetsweep.domain.RoadShape
     entities = [
         TrackSession::class, TrackPoint::class, SnappedPoint::class,
         CoverageArea::class, AreaWay::class, OsmWay::class, StreetChunk::class, DrivenEdge::class,
-        Poi::class, StreetExclusion::class, StreetCompletion::class,
+        Poi::class, StreetExclusion::class, StreetCompletion::class, WayCoverage::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -158,10 +158,52 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v13: each street's driven length, overlap counted once. Filled here from the
+         * segments already recorded, so no figure reads zero between the upgrade and the
+         * next drive. A street whose shape cannot be read falls back to the old sum.
+         */
+        @JvmField
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `way_coverage` (`wayId` INTEGER NOT NULL, " +
+                        "`drivenMeters` REAL NOT NULL, PRIMARY KEY(`wayId`))",
+                )
+                val segments = HashMap<Long, MutableList<List<com.example.streetsweep.domain.LatLngPoint>>>()
+                val sums = HashMap<Long, Double>()
+                db.query("SELECT wayId, lengthMeters, shape FROM driven_edges").use { c ->
+                    while (c.moveToNext()) {
+                        val id = c.getLong(0)
+                        sums[id] = (sums[id] ?: 0.0) + c.getDouble(1)
+                        runCatching { ShapeText.decode(c.getString(2)) }.getOrNull()
+                            ?.let { segments.getOrPut(id) { ArrayList() }.add(it) }
+                    }
+                }
+                for (batch in sums.keys.chunked(400)) {
+                    val shapes = HashMap<Long, Pair<Double, String>>()
+                    db.query("SELECT id, lengthMeters, shape FROM osm_ways WHERE id IN (${batch.joinToString(",")})").use { c ->
+                        while (c.moveToNext()) shapes[c.getLong(0)] = c.getDouble(1) to c.getString(2)
+                    }
+                    for (id in batch) {
+                        val way = shapes[id]
+                        val line = way?.let { runCatching { ShapeText.decode(it.second) }.getOrNull() }
+                        val meters = if (way == null || line == null || line.size < 2) {
+                            if (way != null) minOf(sums[id] ?: 0.0, way.first) else sums[id] ?: 0.0
+                        } else {
+                            minOf(com.example.streetsweep.domain.CoveredLength.of(line, segments[id].orEmpty()),
+                                sums[id] ?: 0.0, way.first)
+                        }
+                        db.execSQL("INSERT OR REPLACE INTO way_coverage (wayId, drivenMeters) VALUES (?, ?)", arrayOf<Any>(id, meters))
+                    }
+                }
+            }
+        }
+
         /** Hand-written migrations, oldest first. Add one for each version bump. */
         val MIGRATIONS: Array<Migration> =
             arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
-                MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+                MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
 
         fun build(context: Context): AppDatabase =
             // The phone now holds real drives and areas. Every schema change from version 4 on
