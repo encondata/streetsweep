@@ -4,13 +4,32 @@ import android.util.Log
 import com.example.streetsweep.data.CoverageRepository
 import com.example.streetsweep.data.TrackRepository
 import com.example.streetsweep.data.osm.AreaGeoJson
+import com.example.streetsweep.data.osm.ImportedArea
 import com.example.streetsweep.data.osm.ShapeText
 import com.example.streetsweep.data.prefs.SettingsRepository
 import org.json.JSONArray
 import org.json.JSONObject
 
 /** What a push actually moved. */
-data class PushResult(val areas: Int, val edges: Int, val drives: Int, val pois: Int)
+data class PushResult(
+    val areas: Int, val edges: Int, val drives: Int, val pois: Int,
+    /** What came back down: areas the web added or reshaped since the last sync. */
+    val pulled: AreaPull = AreaPull(),
+)
+
+/**
+ * What a pull of the portal's areas did. [needStreets] is every area whose outline is new
+ * or changed, which is exactly the set that needs its streets downloaded again.
+ */
+data class AreaPull(
+    val added: List<Long> = emptyList(),
+    val updated: List<Long> = emptyList(),
+    val keptLocal: List<String> = emptyList(),
+    val unchanged: Int = 0,
+) {
+    val needStreets: List<Long> get() = added + updated
+    val changedAnything: Boolean get() = added.isNotEmpty() || updated.isNotEmpty()
+}
 
 /**
  * Moves work between the phone and the area builder's server.
@@ -27,12 +46,41 @@ class PortalSync(
     private val settings: SettingsRepository,
 ) {
     /** Pulls areas from the server and adds any the phone does not already have. */
-    suspend fun pullAreas(): Int {
+    /**
+     * Brings the phone's areas into line with the portal's.
+     *
+     * This used to add only areas whose name the phone did not have, and never touched one
+     * it did. So an outline refined on the web never reached the phone: April Sound stayed
+     * at the 26 corners it first arrived with while the web's grew to 269, and the two sides
+     * counted 165 streets against 126 for what they both called April Sound.
+     *
+     * Now the portal's outline, level and parent win for every area both sides have —
+     * except where the phone has redrawn it since, which is kept (see
+     * [CoverageRepository.syncFromWeb]). An area that exists only on the phone is left
+     * alone: nothing here deletes.
+     */
+    suspend fun pullAreas(): AreaPull {
         val parsed = AreaGeoJson.parse(client.areasGeoJson())
-        val existing = coverage.getAreas().map { it.name.lowercase() }.toSet()
-        val fresh = parsed.filter { it.name.lowercase() !in existing }
-        if (fresh.isEmpty()) return 0
-        return coverage.importAreas(fresh).size
+        val onPhone = coverage.getAreas().associateBy { it.name.lowercase() }
+
+        val fresh = ArrayList<ImportedArea>()
+        val updated = ArrayList<Long>()
+        val kept = ArrayList<String>()
+        var same = 0
+        // Biggest first, so a neighbourhood's city is already in place to be its parent.
+        for (web in parsed.sortedByDescending { it.level.ordinal }) {
+            val mine = onPhone[web.name.lowercase()]
+            if (mine == null) { fresh += web; continue }
+            val parentId = web.parent?.lowercase()?.let { onPhone[it]?.id }
+            when (coverage.syncFromWeb(mine, web, parentId)) {
+                CoverageRepository.WebSync.UPDATED -> updated += mine.id
+                CoverageRepository.WebSync.KEPT_LOCAL -> kept += mine.name
+                CoverageRepository.WebSync.UNCHANGED -> same++
+            }
+        }
+        val added = if (fresh.isEmpty()) emptyList() else coverage.importAreas(fresh).map { it.id }
+        coverage.markPulled(added)
+        return AreaPull(added, updated, kept, same)
     }
 
     /** The key the server gives a marked place, so the phone can address one. */
@@ -117,9 +165,16 @@ class PortalSync(
         val photos = runCatching { pushPhotos() }.getOrDefault(0)
         val pulled = runCatching { pullPlaceEdits() }.getOrDefault(0)
         if (photos > 0 || pulled > 0) Log.d(TAG, "sent $photos photos, took back $pulled edits")
+        // Last, and not allowed to fail the push: the drives have gone up either way.
+        val areaPull = runCatching { pullAreas() }
+            .onFailure { Log.w(TAG, "could not take back the portal's areas: ${it.message}") }
+            .getOrDefault(AreaPull())
+        if (areaPull.changedAnything) {
+            Log.i(TAG, "areas from the portal: ${areaPull.added.size} added, ${areaPull.updated.size} reshaped")
+        }
 
         settings.setLastPortalPushAt(startedAt)
-        return PushResult(areas.size, sent, drives.size, pois.size)
+        return PushResult(areas.size, sent, drives.size, pois.size, areaPull)
     }
 
     private fun areaJson(a: com.example.streetsweep.data.AreaWithStats, nameById: Map<Long, String>) = JSONObject()

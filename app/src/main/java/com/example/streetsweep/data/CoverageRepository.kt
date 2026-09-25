@@ -198,6 +198,57 @@ class CoverageRepository(private val db: AppDatabase) {
         return created
     }
 
+    /** What a pull did to one area that the phone already had. */
+    enum class WebSync { UNCHANGED, UPDATED, KEPT_LOCAL }
+
+    /**
+     * Brings one area into line with the portal's copy.
+     *
+     * The portal is where outlines are drawn and refined, so its outline wins — with one
+     * exception. If this phone has redrawn the area since it last received it, that redraw
+     * is somebody's deliberate work and a sync must not throw it away; the phone's outline
+     * is kept and the caller is told, so it can say so.
+     *
+     * [pulledOutline] is what makes the difference visible. An area that has never been
+     * pulled under this rule has none, and is treated as unedited: that is how the
+     * outlines that had already drifted — April Sound at 26 corners here against 269 on
+     * the web — get brought back into line the first time.
+     */
+    suspend fun syncFromWeb(mine: CoverageArea, incoming: ImportedArea, parentId: Long?): WebSync {
+        if (incoming.polygon.size < 3) return WebSync.UNCHANGED
+        val webOutline = ShapeText.encode(incoming.polygon)
+        val redrawnHere = mine.pulledOutline != null && mine.polygon != mine.pulledOutline
+        val outlineDiffers = mine.polygon != webOutline
+        val levelDiffers = mine.level != incoming.level.ordinal
+        val parentDiffers = parentId != null && mine.parentId != parentId
+
+        if (outlineDiffers && redrawnHere) return WebSync.KEPT_LOCAL
+        if (!outlineDiffers && !levelDiffers && !parentDiffers) {
+            // Already identical; remember that it is, so a later redraw here is noticed.
+            if (mine.pulledOutline != webOutline) dao.updateArea(mine.copy(pulledOutline = webOutline))
+            return WebSync.UNCHANGED
+        }
+
+        val b = Bounds.of(incoming.polygon)!!
+        val updated = mine.copy(
+            polygon = webOutline, pulledOutline = webOutline,
+            south = b.south, west = b.west, north = b.north, east = b.east,
+            level = incoming.level.ordinal,
+            parentId = parentId ?: mine.parentId,
+        )
+        dao.updateArea(updated)
+        if (outlineDiffers) refreshMembership(updated)
+        return WebSync.UPDATED
+    }
+
+    /** Stamps freshly imported areas as having come from the portal. */
+    suspend fun markPulled(ids: List<Long>) {
+        for (id in ids) {
+            val a = dao.getArea(id) ?: continue
+            dao.updateArea(a.copy(pulledOutline = a.polygon))
+        }
+    }
+
     /** Replaces an area's outline and recomputes which streets it contains. */
     suspend fun updatePolygon(id: Long, polygon: List<LatLngPoint>) {
         require(polygon.size >= 3)

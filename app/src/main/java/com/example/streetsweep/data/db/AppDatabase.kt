@@ -16,7 +16,7 @@ import com.example.streetsweep.domain.RoadShape
         CoverageArea::class, AreaWay::class, OsmWay::class, StreetChunk::class, DrivenEdge::class,
         Poi::class, StreetExclusion::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -119,9 +119,22 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v10: an area remembers the outline the portal last sent for it. Nullable and
+         * empty to begin with — nothing here has been pulled under this rule yet — so it
+         * is a column added and nothing more.
+         */
+        @JvmField
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `areas` ADD COLUMN `pulledOutline` TEXT")
+            }
+        }
+
         /** Hand-written migrations, oldest first. Add one for each version bump. */
         val MIGRATIONS: Array<Migration> =
-            arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+            arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
+                MIGRATION_9_10)
 
         fun build(context: Context): AppDatabase =
             // The phone now holds real drives and areas. Every schema change from version 4 on

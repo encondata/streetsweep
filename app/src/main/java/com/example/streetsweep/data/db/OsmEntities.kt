@@ -28,6 +28,13 @@ data class CoverageArea(
     val chunksTotal: Int = 0,
     val chunksDone: Int = 0,
     val lastError: String? = null,
+    /**
+     * The outline exactly as it last arrived from the portal ([ShapeText]), or null for an
+     * area drawn here or brought in before this was kept. It is how a pull tells "the web
+     * has a newer outline" from "this was redrawn on the phone since", so a redraw here is
+     * never quietly replaced by the next sync.
+     */
+    val pulledOutline: String? = null,
 ) {
     val bounds: Bounds get() = Bounds(south, west, north, east)
     val vertices: List<LatLngPoint> get() = ShapeText.decode(polygon)

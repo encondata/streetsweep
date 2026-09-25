@@ -114,21 +114,34 @@ class SettingsViewModel(private val container: AppContainer, private val context
     fun signInAgain() = viewModelScope.launch { container.settings.setStandalone(false) }
 
     fun pullAreasFromPortal() = work {
-        val added = container.portalSync.pullAreas()
-        if (added == 0) {
-            "Nothing new — the phone already has every area on the server"
-        } else {
-            added.let { n ->
-                container.coverageRepository.getAreas().takeLast(n)
-                    .forEach { com.example.streetsweep.data.osm.StreetDownloadWorker.enqueue(context, it.id) }
-                "Added $n areas — downloading their streets"
-            }
-        }
+        describe(container.portalSync.pullAreas())
+            ?: "Nothing to change — the phone already matches every area on the server"
     }
 
     fun pushToPortal(full: Boolean) = work {
         val r = container.portalSync.push(full)
-        "Sent ${r.edges} street segments, ${r.areas} areas and ${r.drives} drives"
+        "Sent ${r.edges} street segments, ${r.areas} areas and ${r.drives} drives" +
+            (describe(r.pulled)?.let { ". $it" } ?: "")
+    }
+
+    /**
+     * Queues street downloads for whatever changed and says what happened, or null when
+     * nothing did. Used to take the last n areas and assume those were the new ones, which
+     * was only true until anything else touched the list.
+     */
+    private fun describe(p: com.example.streetsweep.data.sync.AreaPull): String? {
+        p.needStreets.forEach { com.example.streetsweep.data.osm.StreetDownloadWorker.enqueue(context, it) }
+        val bits = buildList {
+            if (p.added.isNotEmpty()) add("added ${p.added.size} ${if (p.added.size == 1) "area" else "areas"}")
+            if (p.updated.isNotEmpty()) add("reshaped ${p.updated.size} to match the web")
+            if (p.keptLocal.isNotEmpty()) {
+                add("kept your own outline for ${p.keptLocal.joinToString()} " +
+                    "because ${if (p.keptLocal.size == 1) "it was" else "they were"} redrawn on this phone")
+            }
+        }
+        if (bits.isEmpty()) return null
+        return bits.joinToString(", ").replaceFirstChar { it.uppercase() } +
+            if (p.needStreets.isNotEmpty()) " — downloading their streets" else ""
     }
 
     fun importAreas(uri: Uri) = work {

@@ -21,6 +21,10 @@ class PortalPushWorker(context: Context, params: WorkerParameters) : CoroutineWo
         return try {
             val pushed = container.portalSync.push()
             Log.i(TAG, "pushed $pushed")
+            // Areas added or reshaped on the web need their streets, same as by hand.
+            pushed.pulled.needStreets.forEach {
+                com.example.streetsweep.data.osm.StreetDownloadWorker.enqueue(applicationContext, it)
+            }
             Result.success()
         } catch (e: Exception) {
             Log.w(TAG, "push failed, will retry", e)
