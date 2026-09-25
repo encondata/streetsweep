@@ -482,80 +482,192 @@
   .viewhead.withaction select { width: auto; flex: 0 0 auto; }
 
   /* ---- achievements -------------------------------------------------------- */
-  .ladders { display: flex; flex-direction: column; gap: 9px; }
-  .ladder {
-    display: flex; align-items: center; gap: 12px; padding: 11px 13px;
-    border: 1px solid var(--line); border-radius: var(--r); background: var(--surface);
+  /*
+   * The badge art is the design sheet's, cut out per badge (public/ach-*.webp). Its own
+   * name ribbon is cut off because the sheet's names are not always ours; this draws the
+   * ribbon back over the bottom of the hexagon, where the sheet had it, with the real name.
+   */
+  :root {
+    --tier-common: #3fae4a; --tier-uncommon: #2f7de1; --tier-rare: #8b4fe0; --tier-legendary: #e0a526;
+    --ach-progress: #2f7de1;
   }
-  .ladder .medal {
-    width: 40px; height: 40px; border-radius: 11px; flex: 0 0 auto; position: relative;
-    display: grid; place-items: center; background: var(--surface-2);
+  .achArt { position: relative; display: inline-flex; flex-direction: column; align-items: center; }
+  .achArt img { display: block; width: var(--art, 92px); height: auto; filter: drop-shadow(0 4px 10px rgba(0,0,0,.35)); }
+  .achArt .ribbon {
+    position: relative; margin-top: -3px; max-width: calc(var(--art, 92px) + 34px);
+    background: #0d1a27; color: #fff; border: 1px solid rgba(255,255,255,.10);
+    border-radius: 8px; padding: 3px 10px; font-size: 11.5px; font-weight: 700; line-height: 1.3;
+    text-align: center; box-shadow: 0 3px 8px rgba(0,0,0,.35);
   }
-  .ladder.has .medal { background: var(--grad-accent); }
-  .ladder .medal svg { width: 21px; height: 21px; fill: none; stroke: var(--ink-soft); stroke-width: 1.8; }
-  .ladder.has .medal svg { stroke: var(--accent-ink); }
-  .ladder .medal .lv {
-    position: absolute; right: -4px; bottom: -4px; min-width: 18px; height: 18px; padding: 0 4px;
-    border-radius: 999px; background: var(--navy-800); color: #fff;
-    font-size: 9.5px; font-weight: 800; display: grid; place-items: center;
-    border: 2px solid var(--surface);
+  .achArt .lock {
+    position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%);
+    width: 30px; height: 30px; border-radius: 50%; background: rgba(8,16,26,.82);
+    display: grid; place-items: center; border: 1px solid rgba(255,255,255,.18);
   }
-  .ladder .body { flex: 1 1 auto; min-width: 0; }
-  .ladder .body b { display: block; font-size: 13px; }
-  .ladder .body span { font-size: 11px; color: var(--ink-soft); }
-  .ladder .bar { height: 6px; border-radius: 999px; background: var(--surface-2); margin-top: 6px; overflow: hidden; }
-  .ladder .bar i { display: block; height: 100%; background: var(--grad-accent); }
+  .achArt .lock svg { width: 15px; height: 15px; stroke: #dfe7ef; fill: none; stroke-width: 2; }
+  .locked .achArt img { filter: grayscale(1) brightness(.62) contrast(.9); }
 
-  .badges { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 9px; margin-top: 12px; }
-  .badge2 {
-    border: 1px solid var(--line); border-radius: var(--r); background: var(--surface);
-    padding: 12px 8px; text-align: center; min-width: 0;
+  .achHero {
+    position: relative; border-radius: var(--r-lg); overflow: hidden; padding: 26px 26px 22px;
+    background: #0b1826 url("/login-art.webp") center 58% / cover no-repeat; color: #fff;
+    box-shadow: var(--shadow-2);
   }
-  .badge2 .disc {
-    width: 40px; height: 40px; border-radius: 50%; margin: 0 auto 7px;
-    display: grid; place-items: center; background: var(--surface-2);
+  .achHero::before {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(100deg, rgba(6,14,24,.92) 0%, rgba(6,14,24,.78) 45%, rgba(6,14,24,.35) 100%);
   }
-  .badge2.has .disc { background: var(--grad-accent); }
-  .badge2 .disc svg { width: 20px; height: 20px; fill: none; stroke: var(--ink-soft); stroke-width: 1.8; }
-  .badge2.has .disc svg { stroke: var(--accent-ink); }
-  .badge2 b { display: block; font-size: 11px; line-height: 1.3; }
-  .badge2 span { display: block; font-size: 10px; color: var(--ink-soft); margin-top: 3px; }
-  .badge2:not(.has) { opacity: .55; }
+  .achHero > * { position: relative; }
+  .achHero h2 { margin: 0; font-size: 30px; letter-spacing: -.02em; color: #fff; }
+  .achHero > p { margin: 4px 0 18px; font-size: 13px; color: rgba(255,255,255,.78); }
+  .achStats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+  .achStat {
+    display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px;
+    background: rgba(9,20,33,.72); border: 1px solid rgba(255,255,255,.10);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); min-width: 0;
+  }
+  .achStat svg { width: 30px; height: 30px; flex: 0 0 auto; }
+  .achStat b { display: block; font-size: 22px; font-weight: 800; letter-spacing: -.02em; line-height: 1.15; color: #fff; }
+  .achStat span { display: block; font-size: 11px; color: rgba(255,255,255,.7); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-  /* The Achievements page: the same pieces, with room to read them. */
-  .achLadders { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
-  .achLadders .ladder { padding: 16px; align-items: flex-start; box-shadow: var(--shadow-1); }
-  .achLadders .ladder .medal { width: 52px; height: 52px; border-radius: 14px; }
-  .achLadders .ladder .medal svg { width: 26px; height: 26px; }
-  .achLadders .ladder .body b { font-size: 14px; }
-  .achLadders .ladder .blurb { display: block; font-size: 11.5px; color: var(--ink-soft); margin: 2px 0 8px; line-height: 1.5; }
-  .achLadders .ladder .bar { display: block; }
-  .achLadders .ladder .steps { display: flex; gap: 4px; margin-top: 9px; flex-wrap: wrap; }
-  .achLadders .ladder .steps i {
-    font-style: normal; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 999px;
-    background: var(--surface-2); color: var(--ink-soft);
+  .achLayout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; margin-top: 18px; align-items: start; }
+  @media (min-width: 1240px) { .achLayout { grid-template-columns: minmax(0, 1fr) 340px; } }
+  .achAside { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  /* Kept in view beside the grid, scrolling on its own when it is taller than the screen. */
+  @media (min-width: 1240px) {
+    .achAside { position: sticky; top: 0; max-height: calc(100vh - 106px); overflow-y: auto; scrollbar-width: thin; }
   }
-  .achLadders .ladder .steps i.got { background: var(--accent-soft); color: var(--green-700); }
-  :root[data-theme="dark"] .achLadders .ladder .steps i.got { background: rgba(69,189,35,.16); color: var(--green-400); }
-  .achBadges { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
-  .achBadge {
-    display: flex; gap: 12px; align-items: flex-start; padding: 13px 14px;
-    border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); min-width: 0;
+  .achPanel {
+    border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface);
+    padding: 16px; box-shadow: var(--shadow-1); min-width: 0;
   }
-  .achBadge .disc {
-    width: 42px; height: 42px; border-radius: 50%; flex: 0 0 auto;
-    display: grid; place-items: center; background: var(--surface-2);
+  .achPanel h3 { margin: 0 0 12px; font-size: 14px; }
+
+  .achBar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .achChips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 420px; }
+  .achChips button {
+    padding: 5px 11px; font-size: 11.5px; font-weight: 600; border-radius: 999px;
+    background: var(--surface); border: 1px solid var(--line); color: var(--ink); box-shadow: none;
   }
-  .achBadge.has .disc { background: var(--grad-accent); }
-  .achBadge .disc svg { width: 21px; height: 21px; fill: none; stroke: var(--ink-soft); stroke-width: 1.8; }
-  .achBadge.has .disc svg { stroke: var(--accent-ink); }
-  .achBadge b { display: block; font-size: 13px; line-height: 1.35; }
-  .achBadge .what { display: block; font-size: 11.5px; color: var(--ink-soft); line-height: 1.5; margin-top: 2px; }
-  .achBadge .when { display: block; font-size: 10.5px; font-weight: 700; color: var(--ink-soft); margin-top: 6px; }
-  .achBadge:not(.has) .disc { opacity: .7; }
-  .achEmpty { font-size: 12px; color: var(--ink-soft); padding: 6px 0; }
-  /* A name, not a number: smaller, and allowed to wrap rather than being cut off. */
-  .kpi .n.word { font-size: 17px; letter-spacing: -.01em; line-height: 1.3; white-space: normal; padding-top: 3px; }
+  .achChips button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .achChips button[data-tier="legendary"] { color: var(--tier-legendary); }
+  .achChips button[data-tier="rare"] { color: var(--tier-rare); }
+  .achChips button[data-tier][aria-pressed="true"] { color: var(--accent-ink); }
+  .achBar select { width: auto; font-size: 12px; padding: 6px 10px; }
+
+  .achGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px; }
+  .achCard {
+    position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px;
+    padding: 16px 12px 12px; border-radius: 14px; background: var(--surface); color: var(--ink);
+    border: 1.5px solid var(--line); box-shadow: var(--shadow-1); text-align: center; cursor: pointer;
+    font: inherit; min-width: 0; transition: transform .12s, box-shadow .12s;
+  }
+  .achCard:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); }
+  .achCard.progress { border-color: color-mix(in srgb, var(--ach-progress) 70%, transparent); }
+  .achCard.done { border-color: color-mix(in srgb, var(--accent) 75%, transparent); }
+  .achCard.fresh { border-color: var(--tier-legendary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tier-legendary) 22%, transparent), var(--shadow-1); }
+  .achCard.selected { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .achCard .desc { font-size: 11.5px; color: var(--ink-soft); line-height: 1.45; min-height: 2.9em; }
+  .achCard .foot { width: 100%; margin-top: auto; }
+  .achCard .newtag {
+    position: absolute; top: 8px; right: 8px; background: #d93a2f; color: #fff;
+    font-size: 9.5px; font-weight: 800; letter-spacing: .05em; padding: 2px 6px; border-radius: 5px;
+  }
+  .achCard .tierdot { position: absolute; top: 10px; left: 10px; width: 16px; height: auto; opacity: .95; }
+  .achProg { display: block; height: 7px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+  .achProg i { display: block; height: 100%; border-radius: 999px; background: var(--ach-progress); }
+  .achCard.done .achProg i, .achDetail .done .achProg i { background: var(--accent); }
+  .achCount { display: block; font-size: 11px; font-weight: 700; color: var(--ink-soft); margin-top: 5px; }
+  .achDone {
+    display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 8px;
+    background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent);
+    font-size: 11.5px; font-weight: 800;
+  }
+  .achDone svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2.6; }
+  .achEmpty { font-size: 12px; color: var(--ink-soft); padding: 18px 0; grid-column: 1 / -1; text-align: center; }
+
+  .tierChip {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700;
+    padding: 3px 10px 3px 6px; border-radius: 999px; background: var(--surface-2);
+  }
+  .tierChip img { width: 15px; height: auto; }
+  .tierChip.common { color: var(--tier-common); } .tierChip.uncommon { color: var(--tier-uncommon); }
+  .tierChip.rare { color: var(--tier-rare); } .tierChip.legendary { color: var(--tier-legendary); }
+
+  .achDetail { text-align: left; }
+  .achDetail .top { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 4px 0 12px; }
+  .achDetail h4 { margin: 0; font-size: 20px; letter-spacing: -.01em; text-align: center; }
+  .achDetail .what { font-size: 12.5px; color: var(--ink-soft); line-height: 1.55; margin: 0 0 12px; text-align: center; }
+  .achDetail .state {
+    display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 10px; margin-bottom: 12px;
+    background: var(--surface-2); font-size: 12px;
+  }
+  .achDetail .state b { display: block; font-size: 13px; }
+  .achDetail .state.done { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--ink); }
+  .achDetail .state svg { width: 22px; height: 22px; flex: 0 0 auto; stroke: currentColor; fill: none; stroke-width: 2.2; }
+  .achDetail .state.done svg { stroke: var(--accent); }
+  .achDetail .pct { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; margin: 0 0 6px; }
+  .achDetail dl { margin: 12px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 7px 12px; font-size: 12px; }
+  .achDetail dt { color: var(--ink-soft); }
+  .achDetail dd { margin: 0; text-align: right; font-weight: 600; }
+
+  .achCats { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+  .achCat {
+    display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 11px 6px;
+    border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); color: var(--ink);
+    font: inherit; cursor: pointer; text-align: center; box-shadow: none;
+  }
+  .achCat[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-ring); }
+  .achCat svg { width: 24px; height: 24px; stroke: var(--accent); fill: none; stroke-width: 1.9; }
+  .achCat img { width: 26px; height: auto; }
+  .achCat b { font-size: 11.5px; line-height: 1.25; }
+  .achCat span { font-size: 10.5px; color: var(--ink-soft); }
+
+  .achTrack { padding: 4px 0 2px; }
+  .achTrack + .achTrack { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 14px; }
+  .achTrack .head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .achTrack .head img { width: 44px; height: auto; }
+  .achTrack .head b { display: block; font-size: 14px; }
+  .achTrack .head span { font-size: 11px; color: var(--ink-soft); }
+  .achTrack .lvl { margin-left: auto; text-align: right; }
+  .achTrack .lvl b { color: var(--accent); font-size: 13px; }
+  .achTrack .lvl b.none { color: var(--ink-soft); }
+  .achNodes { display: flex; align-items: flex-start; }
+  .achNode { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; position: relative; min-width: 0; }
+  .achNode::before {
+    content: ""; position: absolute; top: 11px; left: -50%; right: 50%; height: 3px; background: var(--line-strong);
+    z-index: 0;
+  }
+  .achNode:first-child::before { display: none; }
+  .achNode.got::before { background: var(--accent); }
+  .achNode i {
+    position: relative; z-index: 1; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+    font-style: normal; font-size: 8.5px; font-weight: 800; background: var(--surface-2); color: var(--ink-soft);
+    border: 2px solid var(--line-strong);
+  }
+  .achNode.got i { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .achNode.now i { box-shadow: 0 0 0 3px var(--accent-ring); }
+  .achNode small { font-size: 9px; color: var(--ink-soft); margin-top: 4px; white-space: nowrap; }
+
+  /* Someone else's, on the Users page: what they hold, compact. */
+  .achMini { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 8px; }
+  .achMini .achArt { --art: 52px; }
+  .achMini .achArt .ribbon { font-size: 9.5px; padding: 2px 6px; }
+  .achMini .locked { opacity: .5; }
+
+  /* A new one, announced once. */
+  #achToast {
+    position: fixed; right: 18px; bottom: 18px; z-index: 3000; width: min(360px, calc(100vw - 36px));
+    display: flex; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 14px;
+    background: #0d1a27; color: #fff; border: 1px solid color-mix(in srgb, var(--tier-legendary) 60%, transparent);
+    box-shadow: 0 14px 40px rgba(0,0,0,.45); cursor: pointer;
+  }
+  #achToast img { width: 52px; height: auto; flex: 0 0 auto; }
+  #achToast b { display: block; font-size: 14px; }
+  #achToast span { display: block; font-size: 12px; color: rgba(255,255,255,.78); }
+  #achToast button {
+    position: absolute; top: 6px; right: 8px; border: 0; background: transparent; color: rgba(255,255,255,.7);
+    font-size: 18px; padding: 2px 6px; box-shadow: none;
+  }
 
   /* ---- charts -------------------------------------------------------------- */
   .chart { height: 168px; display: flex; align-items: flex-end; gap: 5px; }
@@ -1485,18 +1597,32 @@
       </section>
 
       <section class="view" data-view="ach" hidden>
-        <div class="viewhead">
+        <div class="achHero">
           <h2>Achievements</h2>
-          <p>What sweeping has earned you so far, and what is closest to come next.</p>
+          <p>Track progress, unlock badges, and celebrate every milestone.</p>
+          <div class="achStats" id="achStats"></div>
         </div>
-        <div class="kpis" id="achKpis"></div>
-        <p class="eyebrow">Ladders <span class="tag" id="achLadderCount"></span></p>
-        <div class="achLadders" id="achLadders"></div>
-        <p class="eyebrow">Earned <span class="tag" id="achEarnedCount"></span></p>
-        <div class="achBadges" id="achEarned"></div>
-        <p class="eyebrow">Still to earn <span class="tag" id="achTodoCount"></span></p>
-        <div class="achBadges" id="achTodo"></div>
-        <p class="hint" id="achNote"></p>
+        <div class="achLayout">
+          <div class="achMain">
+            <div class="achBar">
+              <div class="achChips" id="achChips" role="group" aria-label="Show"></div>
+              <select id="achSort" title="Sort by">
+                <option value="progress">Sort by: Progress</option>
+                <option value="recent">Sort by: Recently unlocked</option>
+                <option value="rarity">Sort by: Rarest first</option>
+                <option value="name">Sort by: Name</option>
+              </select>
+            </div>
+            <div class="achGrid" id="achGrid"></div>
+            <p class="hint" id="achNote"></p>
+          </div>
+          <aside class="achAside">
+            <div class="achPanel achDetail" id="achDetail"></div>
+            <div class="achPanel"><h3>Achievement categories</h3><div class="achCats" id="achCats"></div></div>
+            <div class="achPanel"><h3>Rarity tiers</h3><div class="achCats" id="achTiers"></div></div>
+            <div class="achPanel"><h3>Ladders</h3><div id="achTracks"></div></div>
+          </aside>
+        </div>
       </section>
 
       <section class="view" data-view="board" hidden>
@@ -2566,6 +2692,7 @@ window.StreetSweepBases = {
 
   function paintMe(user) {
     me = user;
+    if (window.__ssAchCheck) window.__ssAchCheck();
     // The Admin tab only exists for someone who can use it. The server refuses the
     // routes behind it regardless; this is so nobody is offered a locked door.
     var isAdmin = user.role !== "admin" ? false : true;
@@ -3048,127 +3175,335 @@ window.StreetSweepBases = {
 
   var ROMAN = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
 
-  function rarityWord(pct) {
-    if (pct == null) return "";
-    if (pct <= 5) return "Legendary · " + pct + "%";
-    if (pct <= 20) return "Rare · " + pct + "%";
-    if (pct <= 50) return "Uncommon · " + pct + "%";
-    return "Common · " + pct + "%";
+  var ACH_CATEGORIES = [
+    { key: "progression", name: "Progression", icon: "road" },
+    { key: "areas", name: "Area Completion", icon: "map" },
+    { key: "exploration", name: "Exploration", icon: "compass" },
+    { key: "drives", name: "Drive Milestones", icon: "bolt" },
+    { key: "special", name: "Special", icon: "calendar" },
+  ];
+  var ACH_TIERS = ["common", "uncommon", "rare", "legendary"];
+  var TIER_NAME = { common: "Common", uncommon: "Uncommon", rare: "Rare", legendary: "Legendary" };
+  var ACH_TICK = "<svg viewBox='0 0 24 24'><path d='m5 12.5 4.5 4.5L19 7.5'/></svg>";
+  var ACH_LOCK = "<svg viewBox='0 0 24 24'><rect x='5' y='10.5' width='14' height='10' rx='2'/><path d='M8 10.5V8a4 4 0 0 1 8 0v2.5'/></svg>";
+  // A week counts as new: long enough to notice on the next visit, short enough to mean it.
+  var ACH_FRESH_MS = 7 * 24 * 60 * 60 * 1000;
+
+  function tierChip(tier) {
+    return "<span class='tierChip " + tier + "'><img src='/ach-tier_" + tier + ".webp' alt=''>" + TIER_NAME[tier] + "</span>";
   }
 
-  function renderAchievements(node, countNode, d) {
-    countNode.textContent = d.earnedCount + " / " + d.total;
-    var ladders = d.ladders.map(function (l) {
-      var has = l.level > 0;
-      var value = l.unit === "miles" ? l.value.toLocaleString() + " mi" : l.value.toLocaleString();
-      return "<div class='ladder" + (has ? " has" : "") + "'>" +
-        "<span class='medal'>" + (ACH_ICON[l.icon] || ACH_ICON.trophy) +
-          (has ? "<span class='lv'>" + ROMAN[l.level] + "</span>" : "") + "</span>" +
-        "<span class='body'><b>" + escapeHtml(l.name) +
-          (has ? " " + ROMAN[l.level] : "") + "</b>" +
-        "<span>" + (l.next
-          ? value + " of " + (l.unit === "miles"
-              ? l.next.toLocaleString() + " mi" : l.next.toLocaleString()) +
-            " to " + ROMAN[l.level + 1]
-          : value + " · every level") + "</span>" +
-        "<span class='bar'><i style='width:" + l.progress + "%'></i></span></span></div>";
-    }).join("");
-
-    var badges = d.badges.map(function (b) {
-      return "<div class='badge2" + (b.earned ? " has" : "") + "' title='" +
-          escapeHtml(b.blurb) + (b.earned ? " — " + rarityWord(b.rarity) : "") + "'>" +
-        "<span class='disc'>" + (ACH_ICON[b.icon] || ACH_ICON.trophy) + "</span>" +
-        "<b>" + escapeHtml(b.name) + "</b>" +
-        "<span>" + (b.earned ? rarityWord(b.rarity) : "Not yet") + "</span></div>";
-    }).join("");
-
-    node.innerHTML = "<div class='ladders'>" + ladders + "</div>" +
-      "<div class='badges'>" + badges + "</div>";
+  function artHtml(item, size) {
+    return "<span class='achArt' style='--art:" + (size || 92) + "px'>" +
+      "<img src='/ach-" + item.art + ".webp' alt='' loading='lazy'>" +
+      "<span class='ribbon'>" + escapeHtml(item.name) + "</span>" +
+      (item.state === "locked" ? "<span class='lock'>" + ACH_LOCK + "</span>" : "") + "</span>";
   }
+
+  function unitText(unit, n) {
+    var v = Number(n).toLocaleString();
+    if (unit === "miles") return v + " mi";
+    if (unit === "percent") return v + "%";
+    return v;
+  }
+
+  /** What one ladder level asks for, in words. */
+  function stepBlurb(l, st) {
+    var n = st.need.toLocaleString();
+    if (l.code === "streets") return st.need === 1 ? "Record your first unique street" : "Record " + n + " unique streets";
+    if (l.code === "miles") return "Be first to cover " + n + (st.need === 1 ? " mile" : " miles") + " of street";
+    return st.need === 1 ? "Take your first area to 100% yourself" : "Take " + n + " areas to 100% yourself";
+  }
+
+  /**
+   * One flat list, as the page shows it: every level of every ladder is its own
+   * achievement with its own art and name, then the named badges.
+   */
+  function achItems(d) {
+    var now = Date.now(), items = [];
+    function state(it) {
+      if (it.earned) return it.earnedAt && now - it.earnedAt < ACH_FRESH_MS ? "fresh" : "done";
+      return it.value > 0 ? "progress" : "locked";
+    }
+    d.ladders.forEach(function (l) {
+      l.steps.forEach(function (st) {
+        var it = {
+          id: l.code + ":" + st.level, name: st.name, art: st.art, tier: st.tier, category: l.category,
+          blurb: stepBlurb(l, st), earned: st.earned, earnedAt: st.earnedAt, rarity: st.rarity,
+          value: Math.min(l.value, st.need), need: st.need, unit: l.unit, ladder: l, level: st.level,
+        };
+        it.state = state(it);
+        items.push(it);
+      });
+    });
+    d.badges.forEach(function (b) {
+      var p = b.progress;
+      var it = {
+        id: b.code, name: b.name, art: b.art, tier: b.tier, category: b.category, blurb: b.blurb,
+        earned: b.earned, earnedAt: b.earnedAt, rarity: b.rarity,
+        value: p ? p.value : 0, need: p ? p.need : 0,
+        unit: ["quarter_sweep", "halfway", "three_quarters", "almost_there", "so_close"].indexOf(b.code) >= 0
+          ? "percent" : b.code === "century_drive" ? "miles" : "",
+      };
+      it.state = state(it);
+      items.push(it);
+    });
+    return items;
+  }
+
+  function fraction(it) { return it.earned ? 1 : it.need ? Math.min(0.99, it.value / it.need) : 0; }
 
   // ---- the Achievements page ----
 
-  function achValue(l, v) {
-    return l.unit === "miles" ? Number(v).toLocaleString() + " mi" : Number(v).toLocaleString();
+  var achState = { data: null, items: [], filter: "all", sort: "progress", selected: null };
+
+  function achStatHtml(svg, big, label) {
+    return "<div class='achStat'>" + svg + "<div style='min-width:0'><b>" + big + "</b><span>" + label + "</span></div></div>";
   }
 
-  /** Rounded down, so 498 of 500 reads 99% rather than claiming it is done. */
-  function achPercent(l) {
-    return l.next ? Math.min(99, Math.floor((l.value / l.next) * 100)) : 100;
-  }
-
-  function achKpi(icon, k, n, sub, word) {
-    return '<div class="kpi"><span class="ico">' + (ACH_ICON[icon] || ACH_ICON.trophy) + "</span>" +
-      '<div class="body"><div class="k">' + k + '</div><div class="n' + (word ? " word" : "") + '">' + n + "</div>" +
-      (sub ? '<div class="sub">' + sub + "</div>" : "") + "</div></div>";
-  }
+  var STAT_ICON = {
+    trophy: "<svg viewBox='0 0 24 24' fill='#f2b632' stroke='#b9791a' stroke-width='1'><path d='M7 3.5h10v5.5a5 5 0 0 1-10 0Z'/><path d='M7 5.5H4.2a3.2 3.2 0 0 0 3.3 3.8M17 5.5h2.8a3.2 3.2 0 0 1-3.3 3.8' fill='none' stroke='#f2b632' stroke-width='1.8'/><path d='M10 14.5h4l.5 4h-5Z'/><rect x='7.5' y='18.5' width='9' height='2.5' rx='1'/></svg>",
+    bars: "<svg viewBox='0 0 24 24' fill='#45bd23'><rect x='4' y='13' width='4' height='8' rx='1'/><rect x='10' y='8' width='4' height='13' rx='1'/><rect x='16' y='3.5' width='4' height='17.5' rx='1'/></svg>",
+    star: "<svg viewBox='0 0 24 24' fill='#f2b632'><path d='m12 2.8 2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8Z'/></svg>",
+    people: "<svg viewBox='0 0 24 24' fill='#9cc3ff'><circle cx='9' cy='8' r='3.4'/><path d='M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6Z'/><circle cx='17' cy='9' r='2.6' opacity='.7'/><path d='M16 14.2c3.2.1 5.5 2.2 5.5 5.3h-4.4' opacity='.7'/></svg>",
+  };
 
   function renderAchievementsPage(d) {
-    var earned = d.badges.filter(function (b) { return b.earned; })
-      .sort(function (a, b) { return (b.earnedAt || 0) - (a.earnedAt || 0); });
-    var todo = d.badges.filter(function (b) { return !b.earned; });
-
-    // The rarest thing held, ladder levels included, and whatever is nearest to done next.
-    var held = earned.map(function (b) { return { name: b.name, rarity: b.rarity }; })
-      .concat(d.ladders.filter(function (l) { return l.level > 0; })
-        .map(function (l) { return { name: l.name + " " + ROMAN[l.level], rarity: l.rarity }; }));
-    var rarest = held.filter(function (h) { return h.rarity != null; })
+    achState.data = d;
+    achState.items = achItems(d);
+    var items = achState.items;
+    var held = items.filter(function (i) { return i.earned; });
+    var rarest = held.filter(function (i) { return i.rarity != null; })
       .sort(function (a, b) { return a.rarity - b.rarity; })[0];
-    var nearest = d.ladders.filter(function (l) { return l.next; })
-      .sort(function (a, b) { return b.progress - a.progress; })[0];
 
-    el("achKpis").innerHTML =
-      achKpi("trophy", "Earned", d.earnedCount + " <span style='font-size:15px;color:var(--ink-soft)'>of " + d.total + "</span>",
-        Math.round((d.earnedCount / Math.max(1, d.total)) * 100) + "% of everything there is") +
-      achKpi("compass", "Rarest you hold", rarest ? escapeHtml(rarest.name) : "—",
-        rarest ? rarityWord(rarest.rarity) + " of drivers have it" : "Nothing earned yet", true) +
-      achKpi("road", "Closest next", nearest ? escapeHtml(nearest.name) + " " + ROMAN[nearest.level + 1] : "—",
-        nearest ? achPercent(nearest) + "% there · " + achValue(nearest, nearest.value) + " of " + achValue(nearest, nearest.next) : "Every ladder finished", true);
+    el("achStats").innerHTML =
+      achStatHtml(STAT_ICON.trophy, d.earnedCount + " / " + d.total, "Achievements unlocked") +
+      achStatHtml(STAT_ICON.bars, Math.round((d.earnedCount / Math.max(1, d.total)) * 100) + "%", "Completion rate") +
+      achStatHtml(STAT_ICON.star, "#" + d.rank, "Rank of " + d.ranked + (d.ranked === 1 ? " driver" : " drivers")) +
+      achStatHtml(STAT_ICON.people, rarest ? rarest.rarity + "%" : "—",
+        rarest ? "Rarest held · " + escapeHtml(rarest.name) : "Rarest achievement");
 
-    el("achLadderCount").textContent = d.ladders.filter(function (l) { return l.level > 0; }).length + " / " + d.ladders.length;
-    el("achLadders").innerHTML = d.ladders.map(function (l) {
-      var has = l.level > 0;
-      var steps = l.levels.map(function (need, i) {
-        return "<i class='" + (i < l.level ? "got" : "") + "' title='" + achValue(l, need) + "'>" + ROMAN[i + 1] + "</i>";
-      }).join("");
-      return "<div class='ladder" + (has ? " has" : "") + "'>" +
-        "<span class='medal'>" + (ACH_ICON[l.icon] || ACH_ICON.trophy) +
-          (has ? "<span class='lv'>" + ROMAN[l.level] + "</span>" : "") + "</span>" +
-        "<span class='body'><b>" + escapeHtml(l.name) + (has ? " " + ROMAN[l.level] : "") + "</b>" +
-          "<span class='blurb'>" + escapeHtml(l.blurb || "") + "</span>" +
-          "<span>" + (l.next
-            ? achValue(l, l.value) + " of " + achValue(l, l.next) + " to reach " + ROMAN[l.level + 1]
-            : achValue(l, l.value) + " · every level reached") + "</span>" +
-          "<span class='bar'><i style='width:" + l.progress + "%'></i></span>" +
-          "<span class='steps'>" + steps + "</span></span></div>";
+    // Filters: every category and every tier, as the sheet lays them out.
+    var chips = [{ f: "all", label: "All" }]
+      .concat(ACH_CATEGORIES.map(function (c) { return { f: "cat:" + c.key, label: c.name }; }))
+      .concat(ACH_TIERS.map(function (t) { return { f: "tier:" + t, label: TIER_NAME[t], tier: t }; }));
+    el("achChips").innerHTML = chips.map(function (c) {
+      return "<button type='button' data-f='" + c.f + "'" + (c.tier ? " data-tier='" + c.tier + "'" : "") +
+        " aria-pressed='" + (achState.filter === c.f) + "'>" + c.label + "</button>";
     }).join("");
 
-    function badge(b) {
-      return "<div class='achBadge" + (b.earned ? " has" : "") + "'>" +
-        "<span class='disc'>" + (ACH_ICON[b.icon] || ACH_ICON.trophy) + "</span>" +
-        "<span style='min-width:0'><b>" + escapeHtml(b.name) + "</b>" +
-          "<span class='what'>" + escapeHtml(b.blurb || "") + "</span>" +
-          "<span class='when'>" + (b.earned
-            ? (b.earnedAt ? "Earned " + new Date(b.earnedAt).toLocaleDateString() + " · " : "") + rarityWord(b.rarity)
-            : !b.rarity ? "Nobody has this yet" : b.rarity + "% of drivers have it") + "</span></span></div>";
+    el("achCats").innerHTML = ACH_CATEGORIES.map(function (c) {
+      var mine = items.filter(function (i) { return i.category === c.key; });
+      return "<button type='button' class='achCat' data-f='cat:" + c.key + "' aria-pressed='" +
+        (achState.filter === "cat:" + c.key) + "'>" + (ACH_ICON[c.icon] || "") +
+        "<b>" + c.name + "</b><span>" + mine.filter(function (i) { return i.earned; }).length +
+        " of " + mine.length + "</span></button>";
+    }).join("");
+    el("achTiers").innerHTML = ACH_TIERS.map(function (t) {
+      var mine = items.filter(function (i) { return i.tier === t; });
+      return "<button type='button' class='achCat' data-f='tier:" + t + "' aria-pressed='" +
+        (achState.filter === "tier:" + t) + "'><img src='/ach-tier_" + t + ".webp' alt=''>" +
+        "<b>" + TIER_NAME[t] + "</b><span>" + mine.filter(function (i) { return i.earned; }).length +
+        " unlocked</span></button>";
+    }).join("");
+
+    el("achTracks").innerHTML = d.ladders.map(function (l) {
+      var current = l.steps[Math.max(0, l.level - 1)];
+      return "<div class='achTrack'><div class='head'><img src='/ach-" + current.art + ".webp' alt=''" +
+        (l.level ? "" : " style='filter:grayscale(1) brightness(.7)'") + "><div><b>" + escapeHtml(l.name) +
+        "</b><span>" + escapeHtml(l.blurb) + "</span></div><div class='lvl'><b" + (l.level ? "" : " class='none'") + ">" +
+        (l.level ? "Level " + ROMAN[l.level] : "Not started") + "</b><br><span>" +
+        (l.next ? unitText(l.unit === "miles" ? "miles" : "", l.value) + " / " + unitText(l.unit === "miles" ? "miles" : "", l.next)
+                : "Every level") + "</span></div></div>" +
+        "<div class='achNodes'>" + l.steps.map(function (st) {
+          var got = st.earned, now = st.level === l.level + 1;
+          return "<div class='achNode" + (got ? " got" : "") + (now ? " now" : "") + "' title='" +
+            escapeHtml(st.name) + "'><i>" + ROMAN[st.level] + "</i><small>" + shortNumber(st.need) + "</small></div>";
+        }).join("") + "</div></div>";
+    }).join("");
+
+    el("achNote").textContent = "Tier is how hard each one is to reach. Rarity is the share of the " +
+      d.eligible + (d.eligible === 1 ? " driver" : " drivers") + " on this server who hold it. " +
+      "Only what was actually driven counts: marking a street complete by hand does not.";
+
+    if (!achState.selected || !items.some(function (i) { return i.id === achState.selected; })) {
+      var first = items.filter(function (i) { return i.state === "fresh"; })[0] ||
+        items.filter(function (i) { return !i.earned; }).sort(function (a, b) { return fraction(b) - fraction(a); })[0] ||
+        items[0];
+      achState.selected = first && first.id;
     }
-    el("achEarnedCount").textContent = earned.length;
-    el("achEarned").innerHTML = earned.length ? earned.map(badge).join("")
-      : "<p class='achEmpty'>None yet. Your first drive earns the first one.</p>";
-    el("achTodoCount").textContent = todo.length;
-    el("achTodo").innerHTML = todo.length ? todo.map(badge).join("")
-      : "<p class='achEmpty'>Every badge earned.</p>";
-    el("achNote").textContent = "Rarity is the share of the " + d.eligible +
-      (d.eligible === 1 ? " driver" : " drivers") + " on this server who have driven at least once. " +
-      "Achievements are worked out from what was actually driven, so marking a street complete by hand does not count toward them.";
+    paintAchGrid();
+    paintAchDetail();
+    markAchSeen(d);
   }
 
-  window.__ssAchOpened = function () {
+  function shortNumber(n) {
+    if (n >= 1000) return (n % 1000 === 0 ? n / 1000 : (n / 1000).toFixed(1)) + "K";
+    return String(n);
+  }
+
+  function achVisible() {
+    var f = achState.filter;
+    var list = achState.items.filter(function (i) {
+      if (f === "all") return true;
+      if (f.indexOf("cat:") === 0) return i.category === f.slice(4);
+      if (f.indexOf("tier:") === 0) return i.tier === f.slice(5);
+      return true;
+    });
+    var byTier = function (i) { return ACH_TIERS.indexOf(i.tier); };
+    var sorts = {
+      // Done first, newest of those first; then the closest to done.
+      progress: function (a, b) {
+        if (a.earned !== b.earned) return a.earned ? -1 : 1;
+        if (a.earned) return (b.earnedAt || 0) - (a.earnedAt || 0);
+        return fraction(b) - fraction(a) || byTier(a) - byTier(b);
+      },
+      recent: function (a, b) { return (b.earnedAt || 0) - (a.earnedAt || 0) || fraction(b) - fraction(a); },
+      rarity: function (a, b) { return byTier(b) - byTier(a) || (a.rarity || 0) - (b.rarity || 0); },
+      name: function (a, b) { return a.name.localeCompare(b.name); },
+    };
+    return list.slice().sort(sorts[achState.sort] || sorts.progress);
+  }
+
+  function footHtml(it) {
+    if (it.earned) return "<span class='achDone'>" + ACH_TICK + "Complete</span>";
+    var pct = Math.round(fraction(it) * 100);
+    return "<span class='achProg'><i style='width:" + pct + "%'></i></span>" +
+      "<span class='achCount'>" + (it.need ? unitText(it.unit, it.value) + " / " + unitText(it.unit, it.need) : "Not yet") + "</span>";
+  }
+
+  function paintAchGrid() {
+    var list = achVisible();
+    el("achGrid").innerHTML = list.length ? list.map(function (it) {
+      return "<button type='button' class='achCard " + it.state + (it.id === achState.selected ? " selected" : "") +
+        (it.state === "locked" ? " locked" : "") + "' data-id='" + it.id + "'>" +
+        "<img class='tierdot' src='/ach-tier_" + it.tier + ".webp' alt='" + TIER_NAME[it.tier] + "' title='" + TIER_NAME[it.tier] + "'>" +
+        (it.state === "fresh" ? "<span class='newtag'>NEW</span>" : "") +
+        artHtml(it, 88) + "<span class='desc'>" + escapeHtml(it.blurb) + "</span>" +
+        "<span class='foot'>" + footHtml(it) + "</span></button>";
+    }).join("") : "<p class='achEmpty'>Nothing here yet.</p>";
+    Array.prototype.forEach.call(document.querySelectorAll("#achChips button, #achCats .achCat, #achTiers .achCat"), function (b) {
+      b.setAttribute("aria-pressed", String(b.getAttribute("data-f") === achState.filter));
+    });
+  }
+
+  function paintAchDetail() {
+    var it = achState.items.filter(function (i) { return i.id === achState.selected; })[0];
+    var box = el("achDetail");
+    if (!it) { box.innerHTML = "<p class='hint'>Pick an achievement to see it here.</p>"; return; }
+    var pct = Math.round(fraction(it) * 100);
+    var cat = ACH_CATEGORIES.filter(function (c) { return c.key === it.category; })[0];
+    var stateBox = it.earned
+      ? "<div class='state done'>" + ACH_TICK + "<div><b>Unlocked</b>" +
+          (it.earnedAt ? "Unlocked " + new Date(it.earnedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "") + "</div></div>"
+      : it.state === "progress"
+        ? "<div class='state'><svg viewBox='0 0 24 24'><circle cx='12' cy='12' r='8.5' stroke-dasharray='40 14'/></svg><div><b>In progress</b>" + pct + "% of the way there</div></div>"
+        : "<div class='state'>" + ACH_LOCK + "<div><b>Locked</b>Not started yet</div></div>";
+    box.innerHTML =
+      "<div class='top'>" + artHtml(it, 132) + "</div>" +
+      "<h4>" + escapeHtml(it.name) + "</h4>" +
+      "<div style='text-align:center;margin:8px 0 10px'>" + tierChip(it.tier) + "</div>" +
+      "<p class='what'>" + escapeHtml(it.blurb) + "</p>" + stateBox +
+      (it.need ? "<div class='" + (it.earned ? "done" : "") + "'><div class='pct'><span>Progress</span><span>" +
+        (it.earned ? 100 : pct) + "%</span></div><span class='achProg'><i style='width:" + (it.earned ? 100 : pct) +
+        "%'></i></span><span class='achCount'>" + unitText(it.unit, it.earned ? it.need : it.value) + " / " +
+        unitText(it.unit, it.need) + "</span></div>" : "") +
+      "<dl>" +
+        (it.ladder ? "<dt>Part of</dt><dd>" + escapeHtml(it.ladder.name) + " · Level " + ROMAN[it.level] + "</dd>" : "") +
+        (it.ladder ? "<dt>Your count</dt><dd>" + unitText(it.unit === "miles" ? "miles" : "", it.ladder.value) + "</dd>" : "") +
+        "<dt>Category</dt><dd>" + (cat ? cat.name : "—") + "</dd>" +
+        "<dt>Rarity</dt><dd>" + (it.rarity ? it.rarity + "% of drivers" : "Nobody yet") + "</dd>" +
+        "<dt>First unlocked</dt><dd>" + (it.earnedAt ? new Date(it.earnedAt).toLocaleDateString() : "—") + "</dd>" +
+      "</dl>";
+  }
+
+  el("achChips").addEventListener("click", achFilterClick);
+  el("achCats").addEventListener("click", achFilterClick);
+  el("achTiers").addEventListener("click", achFilterClick);
+  function achFilterClick(ev) {
+    var b = ev.target.closest("[data-f]");
+    if (!b) return;
+    var f = b.getAttribute("data-f");
+    // A second click on the category or tier already showing goes back to everything.
+    achState.filter = achState.filter === f && f !== "all" ? "all" : f;
+    paintAchGrid();
+  }
+  el("achSort").addEventListener("change", function () { achState.sort = el("achSort").value; paintAchGrid(); });
+  el("achGrid").addEventListener("click", function (ev) {
+    var c = ev.target.closest(".achCard");
+    if (!c) return;
+    achState.selected = c.getAttribute("data-id");
+    paintAchGrid();
+    paintAchDetail();
+    if (window.innerWidth < 1240) el("achDetail").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  window.__ssAchOpened = function (selectId) {
+    if (selectId) achState.selected = selectId;
     apiJson("/api/achievements").then(renderAchievementsPage).catch(function (err) {
-      el("achKpis").innerHTML = "";
+      el("achStats").innerHTML = "";
       el("achNote").textContent = "Could not load achievements: " + err.message;
     });
   };
+
+  // ---- "Achievement unlocked", once per achievement ----
+
+  function seenKey() { return "streetsweep.ach.seen." + (me ? me.id : "anon"); }
+
+  function earnedIds(d) {
+    return achItems(d).filter(function (i) { return i.earned; }).map(function (i) { return i.id; });
+  }
+
+  function markAchSeen(d) {
+    try { localStorage.setItem(seenKey(), JSON.stringify(earnedIds(d))); } catch (e) { /* private window */ }
+  }
+
+  var achChecked = false;
+  window.__ssAchCheck = function () {
+    if (achChecked || !me) return;
+    achChecked = true;
+    apiJson("/api/achievements").then(function (d) {
+      var seen = null;
+      try { seen = JSON.parse(localStorage.getItem(seenKey()) || "null"); } catch (e) { seen = null; }
+      // The first visit in this browser has nothing to compare with: everything so far
+      // is taken as already known, rather than announced all at once.
+      if (!Array.isArray(seen)) { markAchSeen(d); return; }
+      var fresh = achItems(d).filter(function (i) { return i.earned && seen.indexOf(i.id) < 0; })
+        .sort(function (a, b) { return ACH_TIERS.indexOf(b.tier) - ACH_TIERS.indexOf(a.tier); });
+      if (fresh.length) showAchToast(fresh[0], fresh.length - 1);
+    }).catch(function () { /* nothing to announce */ });
+  };
+
+  function showAchToast(it, more) {
+    var t = el("achToast");
+    t.innerHTML = "<img src='/ach-" + it.art + ".webp' alt=''><div><b>Achievement unlocked!</b>" +
+      "<span>You earned " + escapeHtml(it.name) + (more > 0 ? " and " + more + " more" : "") + "</span></div>" +
+      "<button type='button' aria-label='Dismiss'>&times;</button>";
+    t.hidden = false;
+    var timer = setTimeout(function () { t.hidden = true; }, 12000);
+    t.onclick = function (ev) {
+      clearTimeout(timer);
+      t.hidden = true;
+      if (ev.target.closest("button")) return;
+      window.StreetSweepViews.show("ach");
+      window.__ssAchOpened(it.id);
+    };
+  }
+
+  // ---- someone else's, on the Users page ----
+
+  function renderAchievements(node, countNode, d) {
+    countNode.textContent = d.earnedCount + " / " + d.total;
+    var items = achItems(d).sort(function (a, b) {
+      if (a.earned !== b.earned) return a.earned ? -1 : 1;
+      return ACH_TIERS.indexOf(b.tier) - ACH_TIERS.indexOf(a.tier) || fraction(b) - fraction(a);
+    });
+    node.innerHTML = "<div class='achMini'>" + items.map(function (it) {
+      return "<div class='" + (it.earned ? "" : "locked") + "' title='" + escapeHtml(it.blurb) +
+        (it.earned ? "" : " — " + Math.round(fraction(it) * 100) + "% there") + "' style='text-align:center'>" +
+        artHtml({ name: it.name, art: it.art, state: it.earned ? "done" : "" }, 52) + "</div>";
+    }).join("") + "</div>";
+  }
 
   function loadAchievements(userId, node, countNode) {
     return apiJson("/api/achievements" + (userId ? "/" + userId : ""))
@@ -5658,5 +5993,6 @@ window.StreetSweepBases = {
   })();
 })();
 </script>
+<div id="achToast" hidden role="status" aria-live="polite"></div>
 </body>
 </html>
