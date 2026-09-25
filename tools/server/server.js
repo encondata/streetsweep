@@ -1602,13 +1602,16 @@ async function handle(req, res) {
     const { rows } = await pool.query(
       `SELECT v.id, v.name, v.plate, v.active,
               count(d.*) AS drives, COALESCE(sum(d.distance_m), 0) AS meters,
-              COALESCE(max(d.started_at), 0) AS last_drive
+              COALESCE(max(d.started_at), 0) AS last_drive,
+              (SELECT u.name FROM drives d2 JOIN users u ON u.id = d2.user_id
+                WHERE d2.vehicle_id = v.id ORDER BY d2.started_at DESC LIMIT 1) AS last_driver
          FROM vehicles v LEFT JOIN drives d ON d.vehicle_id = v.id
         GROUP BY v.id ORDER BY COALESCE(sum(d.distance_m), 0) DESC, lower(v.name)`);
     return sendJson(res, 200, {
       vehicles: rows.map((r) => ({
         id: Number(r.id), name: r.name, plate: r.plate, active: r.active,
         drives: Number(r.drives), meters: Number(r.meters), lastDriveAt: Number(r.last_drive),
+        lastDriver: r.last_driver || null,
       })),
     });
   }

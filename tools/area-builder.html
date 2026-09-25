@@ -475,6 +475,12 @@
   #dashCols > div > .eyebrow:first-child,
   #peopleCols > div > .eyebrow:first-child { margin-top: 6px; }
 
+  /* The Users page's two tabs: people (and their phones), and vehicles. */
+  .chips.peopleTabs { border-bottom: none; padding: 0 0 6px; margin-top: 14px; }
+  .peopleTabs .tag { margin-left: 4px; }
+  .vehList li .fig { min-width: 92px; }
+  .vehForm { margin-top: 10px; max-width: 640px; }
+
   .viewhead.withaction {
     display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
   }
@@ -1666,7 +1672,7 @@
 
           <p class="eyebrow">Completion by area</p>
           <ul class="board plain" id="udAreas"></ul>
-          <p class="hint" id="udAreasEmpty" hidden>This person has not reported an area yet.</p>
+          <p class="hint" id="udAreasEmpty" hidden>This person has not driven in any area yet.</p>
 
           <p class="eyebrow">Recent drives</p>
           <ul class="board plain" id="udDrives"></ul>
@@ -1681,6 +1687,11 @@
           <h2>Users</h2>
           <p>Who can sign in, what they may do, the vehicles they drive and the phones they carry.</p>
         </div>
+        <div class="chips peopleTabs" role="tablist" aria-label="Show">
+          <button type="button" role="tab" data-ptab="users" aria-pressed="true">Users <span class="tag" id="ptUsers"></span></button>
+          <button type="button" role="tab" data-ptab="vehicles" aria-pressed="false">Vehicles <span class="tag" id="ptVehicles"></span></button>
+        </div>
+        <div data-ppane="users">
         <div id="peopleCols">
           <div>
             <p class="eyebrow">People</p>
@@ -1698,18 +1709,23 @@
             </form>
           </div>
           <div>
-            <p class="eyebrow">Vehicles</p>
-            <ul id="vehList" class="board plain"></ul>
-            <form id="vehForm" class="row" style="margin-top:9px">
-              <input type="text" id="vName" placeholder="Truck 3" style="flex:2 1 120px">
-              <input type="text" id="vPlate" placeholder="Plate" style="flex:1 1 80px">
-              <button type="submit" class="primary" style="flex:0 0 auto">Add</button>
-            </form>
-
             <p class="eyebrow">Phones</p>
             <ul id="devList" class="board plain"></ul>
             <p class="hint" id="devEmpty" hidden>No phone has signed in yet.</p>
           </div>
+        </div>
+        </div>
+
+        <div data-ppane="vehicles" hidden>
+          <p class="eyebrow">Vehicles</p>
+          <ul id="vehList" class="board plain vehList"></ul>
+          <p class="hint" id="vehListEmpty" hidden>No vehicles yet. Add one so drives can say which car they were in.</p>
+          <form id="vehForm" class="row vehForm">
+            <input type="text" id="vName" placeholder="Name, e.g. Truck 3" style="flex:2 1 160px">
+            <input type="text" id="vPlate" placeholder="Plate" style="flex:1 1 100px">
+            <button type="submit" class="primary" style="flex:0 0 auto">Add vehicle</button>
+          </form>
+          <p class="hint">A phone is issued for a vehicle when it signs in, so its drives are credited to both the person and the vehicle.</p>
         </div>
         </div>
         <p class="hint" id="peopleMsg" hidden></p>
@@ -3793,6 +3809,7 @@ window.StreetSweepBases = {
 
   function loadUsers() {
     return apiJson("/api/users").then(function (d) {
+      el("ptUsers").textContent = d.users.length;
       el("userList").innerHTML = d.users.map(function (u) {
         return "<li data-user='" + u.id + "'" + (u.active ? "" : " class='off'") + ">" +
           "<span class='main open' role='button' tabindex='0'><b>" + escapeHtml(u.name) +
@@ -3809,17 +3826,64 @@ window.StreetSweepBases = {
     });
   }
 
+  /**
+   * The Vehicles tab: each vehicle with how much it has been driven, when last and by
+   * whom, and which phones are signed in for it.
+   */
   function loadVehicles() {
-    return apiJson("/api/vehicles").then(function (d) {
-      el("vehList").innerHTML = d.vehicles.map(function (v) {
+    return Promise.all([
+      apiJson("/api/vehicles"),
+      apiJson("/api/admin/vehicle-stats").catch(function () { return { vehicles: [] }; }),
+      apiJson("/api/devices").catch(function () { return { devices: [] }; }),
+    ]).then(function (got) {
+      var list = got[0].vehicles;
+      var stats = {};
+      got[1].vehicles.forEach(function (v) { stats[v.id] = v; });
+      var phones = {};
+      got[2].devices.forEach(function (x) {
+        if (x.revokedAt || x.vehicleId == null) return;
+        (phones[x.vehicleId] = phones[x.vehicleId] || []).push(x);
+      });
+      el("ptVehicles").textContent = list.length;
+      el("vehListEmpty").hidden = list.length > 0;
+      el("vehList").innerHTML = list.map(function (v) {
+        var st = stats[v.id] || { drives: 0, meters: 0 };
+        var ph = phones[v.id] || [];
+        var bits = [v.plate ? escapeHtml(v.plate) : "no plate"];
+        if (st.drives) {
+          bits.push(st.drives + (st.drives === 1 ? " drive" : " drives"));
+          if (st.lastDriveAt) bits.push("last " + new Date(st.lastDriveAt).toLocaleDateString() +
+            (st.lastDriver ? " by " + escapeHtml(st.lastDriver) : ""));
+        } else bits.push("not driven yet");
+        bits.push(ph.length ? ph.length + (ph.length === 1 ? " phone: " : " phones: ") +
+          ph.map(function (x) { return escapeHtml(x.label); }).join(", ") : "no phone signed in");
         return "<li data-vehicle='" + v.id + "'" + (v.active ? "" : " class='off'") + ">" +
-          "<span class='main'><b>" + escapeHtml(v.name) + "</b><span>" +
-            (v.plate ? escapeHtml(v.plate) : "no plate") + "</span></span>" +
+          "<span class='main'><b>" + escapeHtml(v.name) + "</b><span>" + bits.join(" · ") + "</span></span>" +
+          "<span class='fig'><b>" + fmtDistance(st.meters || 0) + "</b><span>driven</span></span>" +
           "<span class='acts'><button type='button' data-act='rename'>Rename</button>" +
           "<button type='button' data-act='remove'>Remove</button></span></li>";
       }).join("");
     });
   }
+
+  // ---- the Users page's tabs ----
+  var peopleTab = "users";
+  try { peopleTab = localStorage.getItem("streetsweep.peopleTab") || "users"; } catch (e) { /* private window */ }
+  function showPeopleTab(tab) {
+    peopleTab = tab === "vehicles" ? "vehicles" : "users";
+    try { localStorage.setItem("streetsweep.peopleTab", peopleTab); } catch (e) { /* ignore */ }
+    Array.prototype.forEach.call(document.querySelectorAll(".peopleTabs [data-ptab]"), function (b) {
+      b.setAttribute("aria-pressed", String(b.getAttribute("data-ptab") === peopleTab));
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-ppane]"), function (p) {
+      p.hidden = p.getAttribute("data-ppane") !== peopleTab;
+    });
+  }
+  document.querySelector(".peopleTabs").addEventListener("click", function (ev) {
+    var b = ev.target.closest("[data-ptab]");
+    if (b) showPeopleTab(b.getAttribute("data-ptab"));
+  });
+  showPeopleTab(peopleTab);
 
   function loadDevices() {
     return apiJson("/api/devices").then(function (d) {
@@ -3978,7 +4042,7 @@ window.StreetSweepBases = {
     if (!confirm("Revoke " + label + "?\n\nIt stops syncing at once and has to sign in again. " +
                  "Everything it already sent stays.")) return;
     apiJson("/api/devices/" + id, "DELETE")
-      .then(function () { adminSay("Revoked."); return Promise.all([loadDevices(), loadServer()]); })
+      .then(function () { adminSay("Revoked."); return Promise.all([loadDevices(), loadVehicles(), loadServer()]); })
       .catch(function (err) { adminSay(err.message || "Could not revoke it.", true); });
   });
 
