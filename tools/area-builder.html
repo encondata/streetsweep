@@ -5106,6 +5106,8 @@ window.StreetSweepBases = {
     if (big) {
       state.loadView = function () { loadView(a, state, token_, say); };
       state.loadView();
+      state.pollProgress = function () { pollProgress(a, state, token_); };
+      state.pollProgress();
       return;
     }
     Promise.all([networkFor(a), edits]).then(function (got) {
@@ -5458,6 +5460,7 @@ window.StreetSweepBases = {
       ctx.say();
       tool.undo = { label: label, run: undo };
       showUndo();
+      if (ctx.state.pollProgress) setTimeout(ctx.state.pollProgress, 2500);
       status(label + ". Phones pick it up on their next sync.");
     }).catch(function (err) {
       status("Could not change that: " + err.message, "bad");
@@ -5654,6 +5657,7 @@ window.StreetSweepBases = {
       if (streetCtx !== ctx) return;
       paintHandEdits();
       ctx.say();
+      if (ctx.state.pollProgress) setTimeout(ctx.state.pollProgress, 2500);
       status("Undone: " + u.label + ".");
     }).catch(function (err) { status("Could not undo that: " + err.message, "bad"); });
   });
@@ -5720,6 +5724,7 @@ window.StreetSweepBases = {
   function liveProgressFor(a) {
     if (!ctxLive() || streetCtx.area !== a) return null;
     var st = streetCtx.state;
+    if (st.network === "view") return serverProgressFor(a, st.serverProgress);
     if (st.driven == null || st.network !== "done" || !st.net || !st.net.ids) return null;
     var t = liveTotals();
     var rep = reported[a.name];
@@ -5734,11 +5739,55 @@ window.StreetSweepBases = {
     };
   }
 
+  /**
+   * A large area's totals, as the server works them out from every street in it (it is
+   * too big for the page to). While a newer count runs, the last one stays up.
+   */
+  function serverProgressFor(a, sp) {
+    if (!sp) return null;
+    var working = sp.status === "working" || sp.status === "queued";
+    var cells = sp.cellsTotal ? " (" + sp.cellsDone.toLocaleString() + " of " + sp.cellsTotal.toLocaleString() + " map cells)" : "";
+    if (sp.total == null) {
+      return { pending: true, caption: sp.status === "failed"
+        ? "The server could not add up this area yet: " + (sp.error || "unknown error") + ". It tries again shortly."
+        : "Adding up every street in this area on the server" + cells + ". The first time takes a few minutes for a large area; after that, seconds." };
+    }
+    var pct = sp.metersTotal > 0 ? Math.round((sp.metersDriven / sp.metersTotal) * 100) : 0;
+    var rep = reported[a.name], phone = rep ? percentOf(rep) : null;
+    return {
+      percent: pct, done: sp.done, total: sp.total,
+      caption: working
+        ? "Updating on the server" + cells + ". Showing the last count, from " + new Date(sp.computedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + "."
+        : "Worked out on the server from all " + sp.total.toLocaleString() + " streets in the area, hand edits included" +
+          (sp.excluded ? " (" + sp.excluded.toLocaleString() + " gated or excluded left out)" : "") +
+          (sp.status === "failed" ? ". Some map cells could not be fetched, so this may be short" : "") +
+          (phone !== null && phone !== pct ? ". The phones last reported " + phone + "%." : "."),
+    };
+  }
+
   function paintLiveProgress() {
     if (!ctxLive()) return;
     var live = liveProgressFor(streetCtx.area);
     var box = el("areaProgress");
-    if (live && box) box.innerHTML = progressHtml(live.percent, live.done, live.total, live.caption);
+    if (!live || !box) return;
+    box.innerHTML = live.pending
+      ? '<p class="hint" style="margin:0">' + escapeHtml(live.caption) + "</p>"
+      : progressHtml(live.percent, live.done, live.total, live.caption);
+  }
+
+  /** Asks the server for a large area's totals, and keeps asking while it works them out. */
+  function pollProgress(a, state, token_) {
+    clearTimeout(state.progressTimer);
+    apiJson("/api/areas/" + a.serverId + "/progress").then(function (p) {
+      if (shownStreetsFor !== token_) return;
+      state.serverProgress = p;
+      paintLiveProgress();
+      if (p.status === "working" || p.status === "queued") {
+        state.progressTimer = setTimeout(function () { pollProgress(a, state, token_); }, 3000);
+      }
+    }).catch(function () {
+      if (shownStreetsFor === token_) state.progressTimer = setTimeout(function () { pollProgress(a, state, token_); }, 10000);
+    });
   }
 
   function figure(n, label) {

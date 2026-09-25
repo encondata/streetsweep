@@ -13,6 +13,7 @@ const achievements = require("./achievements");
 const networks = require("./networks");
 const streets = require("./streets");
 const completions = require("./completions");
+const progress = require("./progress");
 const photos = require("./photos");
 
 const PORT = Number(process.env.PORT || 80);
@@ -1607,6 +1608,7 @@ async function handle(req, res) {
     });
     // The only moment the figures can have moved. Failing here must not fail the sync:
     // a badge is not worth losing a drive over.
+    progress.changed(pool);
     result.awarded = await achievements.evaluate(pool, who.user.id).catch((err) => {
       console.error("could not work out achievements", err.message);
       return 0;
@@ -1673,6 +1675,17 @@ async function handle(req, res) {
    * Every street to sweep in an area, fetched from OpenStreetMap once and kept. The first
    * person to click an area waits for Overpass; everyone after that does not.
    */
+  /**
+   * The area's totals from every street in it, worked out on the server in the background.
+   * For areas too big for the page to add up; it polls this while the work runs.
+   */
+  const areaProgress = route.match(/^\/api\/areas\/(\d+)\/progress$/);
+  if (areaProgress && req.method === "GET") {
+    const p = await progress.forArea(pool, Number(areaProgress[1]));
+    if (!p) return sendJson(res, 404, { error: "No such area" });
+    return sendJson(res, 200, p);
+  }
+
   const areaNetwork = route.match(/^\/api\/areas\/(\d+)\/network$/);
   if (areaNetwork && req.method === "GET") {
     const { rows } = await pool.query(
@@ -1722,6 +1735,8 @@ async function handle(req, res) {
     const at = Date.now();
     const taken = await completions.apply(pool,
       ids.map((wayId) => ({ wayId, marked: body.marked !== false, updatedAt: at })), who.user.id);
+    // A single edit from the page: someone is looking at the totals, so do not keep them waiting.
+    progress.changed(pool, 1500);
     return sendJson(res, 200, { marked: body.marked !== false, streets: taken });
   }
 
@@ -1739,6 +1754,7 @@ async function handle(req, res) {
     const taken = await completions.applyExclusions(pool, ids.map((wayId) => ({
       wayId, excluded, reason: body.reason, note: body.note, updatedAt: at,
     })), who.user.id);
+    progress.changed(pool, 1500);
     return sendJson(res, 200, { excluded, streets: taken });
   }
 
@@ -1853,6 +1869,7 @@ waitForDatabase()
   .then(() => networks.ensureSchema(pool))
   .then(() => streets.ensureSchema(pool))
   .then(() => completions.ensureSchema(pool))
+  .then(() => progress.ensureSchema(pool))
   .then(readyPhotos)
   .then(() => {
     // Expired rows are dead weight; clear them at boot and once a day after.
