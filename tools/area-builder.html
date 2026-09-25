@@ -3833,6 +3833,13 @@ window.StreetSweepBases = {
     if (name !== "map" && typeof clearStreets === "function") {
       clearStreets();
       el("streetNote").hidden = true;
+      status("");
+    }
+    // Back on the map with an area still in the panel: its streets and tools come back
+    // with it, rather than leaving a panel for an area the map no longer shows.
+    if (name === "map" && detailArea && areas.indexOf(detailArea) >= 0 && !shownStreetsFor) {
+      detailFor(detailArea);
+      showStreets(detailArea);
     }
     var wantsCoverage = name === "stats";
     var wantsDrives = name === "drives";
@@ -4406,6 +4413,7 @@ window.StreetSweepBases = {
   // The street tools (further down) act on whichever area is shown; declared here because
   // clearing the streets, which can happen before they are set up, resets them.
   var streetCtx = null;
+  var detailArea = null;                    // the area the map panel is describing
   var tool = { mode: "inspect", reason: "NOT_DRIVABLE", undo: null };
   var networkCache = {};                    // area id -> array of [lat, lng] lines
   var shownStreetsFor = null;
@@ -4440,6 +4448,22 @@ window.StreetSweepBases = {
       networkCache[a.id] = d;
       return d;
     });
+  }
+
+  /**
+   * Every street marked complete or excluded, from the server each time an area opens.
+   * These are hand edits, so a few hundred rows at most, and asking afresh is what makes an
+   * edit made a minute ago — or on someone's phone — show. Null from a server without them.
+   */
+  function handEditsFor() {
+    return Promise.all([apiJson("/api/street-completions"), apiJson("/api/street-exclusions")])
+      .then(function (r) {
+        return {
+          completed: (r[0].completions || []).filter(function (c) { return c.marked; }),
+          excluded: (r[1].exclusions || []).filter(function (x) { return x.excluded; }),
+        };
+      })
+      .catch(function () { return null; });
   }
 
   function clearStreets() {
@@ -4522,11 +4546,8 @@ window.StreetSweepBases = {
           (state.stale ? " (an older copy — OpenStreetMap could not be reached just now)" : "") + ".");
         if (state.net && state.net.ids) {
           var t = liveTotals();
-          parts.push("On this map, " + t.done.toLocaleString() + " of " + t.total.toLocaleString() +
-            " are done" +
-            (t.marked ? ", " + t.marked.toLocaleString() + " of them marked complete by hand" : "") +
-            (t.excluded ? ", with " + t.excluded.toLocaleString() + " excluded" : "") +
-            ". The percentage above is the phones' and catches up at their next sync.");
+          if (t.marked) parts.push(t.marked.toLocaleString() + " marked complete by hand.");
+          if (t.excluded) parts.push(t.excluded.toLocaleString() + " gated or excluded.");
         }
         if (state.phoneTotal && Math.abs(state.phoneTotal - state.count) > 2) {
           parts.push("The phone counts " + state.phoneTotal.toLocaleString() +
@@ -4535,6 +4556,7 @@ window.StreetSweepBases = {
         }
       }
       note.textContent = parts.join(" ");
+      paintLiveProgress();
     }
     say();
 
@@ -4562,13 +4584,22 @@ window.StreetSweepBases = {
     });
 
     if (big) return;
-    networkFor(a).then(function (net) {
+    Promise.all([networkFor(a), handEditsFor()]).then(function (got) {
+      var net = got[0], edits = got[1];
       if (shownStreetsFor !== token_) return;
       state.net = net;
       state.marked = {};
       state.excluded = {};
-      (net.completed || []).forEach(function (c) { state.marked[c.wayId] = c; });
-      (net.excluded || []).forEach(function (x) { state.excluded[x.wayId] = x; });
+      // Never from the cached network: that is the area as it was on the first click, and
+      // any edit made since — here or on a phone — would vanish on coming back to it.
+      var ids = {};
+      (net.ids || []).forEach(function (id) { ids[id] = true; });
+      (edits ? edits.completed : net.completed || []).forEach(function (c) {
+        if (ids[c.wayId]) state.marked[c.wayId] = c;
+      });
+      (edits ? edits.excluded : net.excluded || []).forEach(function (x) {
+        if (ids[x.wayId]) state.excluded[x.wayId] = x;
+      });
       state.lengths = net.lines.map(lineMeters);
       net.lines.forEach(function (line, i) {
         L.polyline(line, {
@@ -4661,14 +4692,19 @@ window.StreetSweepBases = {
   /** Street totals as this map sees them, hand edits included, for the panel. */
   function liveTotals() {
     var st = streetCtx.state, net = st.net;
-    var total = 0, done = 0, marked = 0, excluded = 0;
+    var total = 0, done = 0, marked = 0, excluded = 0, metersTotal = 0, metersDriven = 0;
     net.ids.forEach(function (id, i) {
       if (st.excluded[id]) { excluded++; return; }
+      var length = st.lengths[i];
       total++;
-      if (st.marked[id]) { marked++; done++; return; }
-      if (st.lengths[i] > 0 && (st.drivenByWay[id] || 0) / st.lengths[i] >= DONE_FRACTION) done++;
+      metersTotal += length;
+      if (st.marked[id]) { marked++; done++; metersDriven += length; return; }
+      var driven = Math.min(length, st.drivenByWay[id] || 0);
+      metersDriven += driven;
+      if (length > 0 && driven / length >= DONE_FRACTION) done++;
     });
-    return { total: total, done: done, marked: marked, excluded: excluded };
+    return { total: total, done: done, marked: marked, excluded: excluded,
+             metersTotal: metersTotal, metersDriven: metersDriven };
   }
 
   // Shared by every tool: send the change, apply it here, offer to take it back.
@@ -4905,30 +4941,21 @@ window.StreetSweepBases = {
   });
 
   function detailFor(a) {
+    detailArea = a;
     var stats = reported[a.name];
     var box = el("areaDetail");
     el("mapTitle").textContent = a.name;
     el("mapSubtitle").textContent = [a.city, levelLabel(a.level)].filter(Boolean).join(" · ");
     box.hidden = false;
 
-    var percent = stats ? percentOf(stats) : null;
-    var done = stats ? (stats.done || 0) : 0;
-    var total = stats ? (stats.total || 0) : 0;
+    var live = liveProgressFor(a);
+    var percent = live ? live.percent : stats ? percentOf(stats) : null;
+    var done = live ? live.done : stats ? (stats.done || 0) : 0;
+    var total = live ? live.total : stats ? (stats.total || 0) : 0;
 
     box.innerHTML =
-      '<div class="card">' +
-        (percent === null
-          ? '<p class="hint" style="margin:0">The phone has not reported on this one yet.</p>'
-          : '<div style="display:flex;align-items:baseline;gap:8px">' +
-              '<span style="font-size:26px;font-weight:700;letter-spacing:-.02em">' + percent + "%</span>" +
-              '<span style="font-size:12px;color:var(--ink-soft)">Complete</span></div>' +
-            '<div class="bar" style="margin-top:9px"><span style="width:' + Math.min(100, percent) + '%"></span></div>' +
-            '<div class="figures" style="margin-top:14px">' +
-              figure(done, "Driven streets") +
-              figure(Math.max(0, total - done), "Still to drive") +
-              figure(total, "Total streets") +
-            "</div>") +
-      "</div>" +
+      '<div class="card" id="areaProgress">' +
+        progressHtml(percent, done, total, live ? live.caption : "") +      "</div>" +
       '<div class="card">' +
         '<dl class="kv">' +
           kv("City", a.city || "—") +
@@ -4949,6 +4976,50 @@ window.StreetSweepBases = {
     });
   }
 
+  /** The progress card's contents. */
+  function progressHtml(percent, done, total, caption) {
+    if (percent === null) return '<p class="hint" style="margin:0">The phone has not reported on this one yet.</p>';
+    return '<div style="display:flex;align-items:baseline;gap:8px">' +
+        '<span style="font-size:26px;font-weight:700;letter-spacing:-.02em">' + percent + "%</span>" +
+        '<span style="font-size:12px;color:var(--ink-soft)">Complete</span></div>' +
+      '<div class="bar" style="margin-top:9px"><span style="width:' + Math.min(100, percent) + '%"></span></div>' +
+      '<div class="figures" style="margin-top:14px">' +
+        figure(done, "Driven streets") +
+        figure(Math.max(0, total - done), "Still to drive") +
+        figure(total, "Total streets") +
+      "</div>" +
+      (caption ? '<p class="hint" style="margin:10px 0 0">' + escapeHtml(caption) + "</p>" : "");
+  }
+
+  /**
+   * Progress worked out here from the streets on the map, the driven segments and every
+   * hand edit — so marking a street complete or gated moves it at once, instead of waiting
+   * for a phone to sync and report. Null until the map has everything it needs.
+   */
+  function liveProgressFor(a) {
+    if (!ctxLive() || streetCtx.area !== a) return null;
+    var st = streetCtx.state;
+    if (st.driven == null || st.network !== "done" || !st.net || !st.net.ids) return null;
+    var t = liveTotals();
+    var rep = reported[a.name];
+    var phone = rep ? percentOf(rep) : null;
+    return {
+      percent: t.metersTotal > 0 ? Math.round((t.metersDriven / t.metersTotal) * 100) : 0,
+      done: t.done, total: t.total,
+      caption: "Worked out from this map, hand edits included" +
+        (t.excluded ? " (" + t.excluded + " gated or excluded left out)" : "") +
+        (phone !== null && phone !== Math.round((t.metersDriven / Math.max(1, t.metersTotal)) * 100)
+          ? ". The phones last reported " + phone + "%." : "."),
+    };
+  }
+
+  function paintLiveProgress() {
+    if (!ctxLive()) return;
+    var live = liveProgressFor(streetCtx.area);
+    var box = el("areaProgress");
+    if (live && box) box.innerHTML = progressHtml(live.percent, live.done, live.total, live.caption);
+  }
+
   function figure(n, label) {
     return '<div class="figure"><div class="n">' + Number(n).toLocaleString() + '</div><div class="t">' + label + "</div></div>";
   }
@@ -4956,6 +5027,7 @@ window.StreetSweepBases = {
   function levelLabel(level) { return LEVELS[level] || LEVELS.NEIGHBORHOOD; }
 
   function clearDetail() {
+    detailArea = null;
     el("areaDetail").hidden = true;
     el("mapTitle").textContent = "Pick an area";
     el("mapSubtitle").textContent =
