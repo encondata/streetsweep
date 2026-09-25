@@ -906,7 +906,9 @@
   }
   /* The status line moves below the bar rather than sitting on it. */
   #mapwrap.hasTools #status { top: auto; bottom: 26px; left: auto; right: 14px; transform: none; max-width: 60%; }
-  #mapwrap.toolActive .leaflet-sweepHits-pane path { cursor: crosshair; }
+  .leaflet-container.overStreet, .leaflet-container.overStreet path.leaflet-interactive { cursor: pointer; }
+  #mapwrap.toolActive .leaflet-container.overStreet,
+  #mapwrap.toolActive .leaflet-container.overStreet path.leaflet-interactive { cursor: crosshair; }
   #mapwrap.cardOpen #legend, #mapwrap.cardOpen #status { visibility: hidden; }
   #legend .key.dashes {
     height: 0; border-top: 3px dotted #c2410c; border-radius: 0;
@@ -2128,8 +2130,12 @@ window.StreetSweepBases = {
         addDraftCorner(ev.latlng);
         return;
       }
+      // Streets inside an outline are clicked through it.
+      if (tryStreetClick(ev.latlng)) return;
       // Handles belong to the Areas view; elsewhere a click just reads the area.
       if (window.StreetSweepViews.current() === "areas") select(area.id);
+      // Already showing: a click that missed a street is not a reason to load it all again.
+      if (window.StreetSweepViews.current() === "map" && streetCtx && streetCtx.area === area && ctxLive()) return;
       detailFor(area);
       if (window.StreetSweepViews.current() === "map") showStreets(area);
     });
@@ -4827,14 +4833,15 @@ window.StreetSweepBases = {
   function drawRoad(line, layer, paint, scale) {
     var p = paint || roadPaint();
     var k = scale || 1;
+    var extra = p.renderer ? { renderer: p.renderer, interactive: false } : {};
     if (p.casing) {
-      L.polyline(line, {
+      L.polyline(line, L.extend({
         color: p.casing, weight: p.casingWeight * k, opacity: 0.95, lineCap: "round", lineJoin: "round",
-      }).addTo(layer);
+      }, extra)).addTo(layer);
     }
-    L.polyline(line, {
+    L.polyline(line, L.extend({
       color: p.core, weight: p.coreWeight * k, opacity: p.opacity, lineCap: "round", lineJoin: "round",
-    }).addTo(layer);
+    }, extra)).addTo(layer);
   }
 
   function paintLegend() {
@@ -4883,12 +4890,16 @@ window.StreetSweepBases = {
   // in, keeps it underneath however late it turns up.
   map.createPane("sweepNetwork");
   map.getPane("sweepNetwork").style.zIndex = 395;
-  // Wide, invisible copies of every street, above the drawn ones, so a click anywhere on
-  // a street finds it — including on the green part of one only partly driven.
-  map.createPane("sweepHits");
-  map.getPane("sweepHits").style.zIndex = 405;
+  // Driven, marked and excluded streets sit just above the area outlines.
+  map.createPane("sweepDriven");
+  map.getPane("sweepDriven").style.zIndex = 401;
+  // Drawn on canvas, which keeps up with tens of thousands of streets where SVG does not.
+  // Neither canvas takes clicks: a click finds its street by distance (streetNear), so
+  // the outlines underneath keep working and nothing has to be drawn twice to be hit.
+  ["sweepNetwork", "sweepDriven"].forEach(function (p) { map.getPane(p).style.pointerEvents = "none"; });
+  var networkRenderer = L.canvas({ pane: "sweepNetwork", padding: 0.3 });
+  var drivenRenderer = L.canvas({ pane: "sweepDriven", padding: 0.3 });
   var markedLayer = L.layerGroup();
-  var hitLayer = L.layerGroup();
   var excludedLayer = L.layerGroup();
   // The street tools (further down) act on whichever area is shown; declared here because
   // clearing the streets, which can happen before they are set up, resets them.
@@ -4951,9 +4962,8 @@ window.StreetSweepBases = {
     networkLayer.clearLayers();
     markedLayer.clearLayers();
     excludedLayer.clearLayers();
-    hitLayer.clearLayers();
     hideToolbar();
-    [streetLayer, networkLayer, markedLayer, excludedLayer, hitLayer].forEach(function (l) {
+    [streetLayer, networkLayer, markedLayer, excludedLayer].forEach(function (l) {
       if (map.hasLayer(l)) map.removeLayer(l);
     });
     map.closePopup();
@@ -4996,22 +5006,23 @@ window.StreetSweepBases = {
     networkLayer.clearLayers();
     markedLayer.clearLayers();
     excludedLayer.clearLayers();
-    hitLayer.clearLayers();
     map.closePopup();
     networkLayer.addTo(map);
     streetLayer.addTo(map);
     markedLayer.addTo(map);
     excludedLayer.addTo(map);
-    hitLayer.addTo(map);
     el("keyMonthRow").hidden = false;
     el("keyDrivenText").textContent = "Driven before this month";
 
     var monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+    // Too big to load whole: its streets come a screenful at a time instead (loadView).
     var big = cellCount(a.latlngs) > NETWORK_CELL_LIMIT;
-    el("keyUndrivenRow").hidden = big;
+    el("keyUndrivenRow").hidden = false;
 
-    var state = { driven: null, month: 0, network: big ? "big" : "loading", count: 0, error: "",
-                  edgesByWay: {}, summedByWay: {}, coveredByNet: [], marked: {}, excluded: {}, net: null, lengths: [] };
+    var state = { driven: null, month: 0, network: big ? "view" : "loading", count: 0, error: "",
+                  edgesByWay: {}, summedByWay: {}, coveredByNet: [], marked: {}, excluded: {},
+                  net: { ids: [], lines: [], names: [] }, index: {}, lengths: [], boxes: [],
+                  loaded: {}, pending: {}, toolsReady: false };
     var note = el("streetNote");
     function say() {
       if (shownStreetsFor !== token_) return;
@@ -5022,7 +5033,14 @@ window.StreetSweepBases = {
         parts.push(state.driven.toLocaleString() + " driven segments" +
           (state.month ? ", " + state.month + " of them this month" : "") + ".");
       }
-      if (state.network === "big") parts.push("Too large to draw every street at once, so only the driven ones are shown.");
+      if (state.network === "view") {
+        parts.push(state.net.ids.length
+          ? state.net.ids.length.toLocaleString() + " streets loaded for this part of the map. The area is large, so its streets load as you move around it."
+          : "The area is large, so its streets load for the part of the map you are looking at. Zoom in to see them.");
+        var tv = liveTotals();
+        if (tv.marked) parts.push(tv.marked.toLocaleString() + " marked complete by hand here.");
+        if (tv.excluded) parts.push(tv.excluded.toLocaleString() + " gated or excluded here.");
+      }
       else if (state.network === "loading") parts.push("Loading the streets still to sweep…");
       else if (state.network === "failed") parts.push("The undriven streets could not be loaded: " + state.error + ". Click the area again to retry.");
       else {
@@ -5042,11 +5060,11 @@ window.StreetSweepBases = {
       note.textContent = parts.join(" ");
       paintLiveProgress();
     }
-    say();
-
-    // The street tools act on whichever area is shown; this is how they reach it.
+    // The street tools act on whichever area is shown; this is how they reach it. Set
+    // before anything is said, since saying it counts the area's streets.
     streetCtx = { token: token_, state: state, say: say, area: a };
-    toolbarFor(big ? "big" : "loading");
+    say();
+    toolbarFor(big ? (map.getZoom() < VIEW_MIN_ZOOM ? "zoom" : "loading") : "loading");
 
     // What the server has, drawn the moment it arrives — never held up by OpenStreetMap.
     apiJson("/api/areas/" + a.serverId + "/streets").then(function (d) {
@@ -5055,6 +5073,7 @@ window.StreetSweepBases = {
                      core: onImagery ? "#6fb6ff" : "#1f6fe0", coreWeight: onImagery ? 3.5 : 4,
                      opacity: 0.95 };
       var older = roadPaint();
+      older.renderer = recent.renderer = drivenRenderer;
       d.edges.forEach(function (e) {
         if (e.wayId != null) {
           (state.edgesByWay[e.wayId] = state.edgesByWay[e.wayId] || []).push(e.shape);
@@ -5071,40 +5090,32 @@ window.StreetSweepBases = {
       if (shownStreetsFor === token_) status("Could not read the streets: " + err.message, "bad");
     });
 
-    if (big) return;
-    Promise.all([networkFor(a), handEditsFor()]).then(function (got) {
-      var net = got[0], edits = got[1];
+    // Hand edits come fresh every time, never from a cached network: that is the area as
+    // it was on the first click, and an edit made since would vanish on coming back.
+    var edits = handEditsFor().then(function (e) {
       if (shownStreetsFor !== token_) return;
-      state.net = net;
-      state.marked = {};
-      state.excluded = {};
-      // Never from the cached network: that is the area as it was on the first click, and
-      // any edit made since — here or on a phone — would vanish on coming back to it.
-      var ids = {};
-      (net.ids || []).forEach(function (id) { ids[id] = true; });
-      (edits ? edits.completed : net.completed || []).forEach(function (c) {
-        if (ids[c.wayId]) state.marked[c.wayId] = c;
-      });
-      (edits ? edits.excluded : net.excluded || []).forEach(function (x) {
-        if (ids[x.wayId]) state.excluded[x.wayId] = x;
-      });
-      state.lengths = net.lines.map(lineMeters);
-      net.lines.forEach(function (line, i) {
-        L.polyline(line, {
-          pane: "sweepNetwork",
-          color: onImagery ? "#ffffff" : "#8f99a5",
-          weight: onImagery ? 2.5 : 3, opacity: onImagery ? 0.55 : 0.7,
-          lineCap: "round", lineJoin: "round", interactive: false,
-        }).addTo(networkLayer);
-        if (!net.ids) return;               // an older server: nothing to click
-        L.polyline(line, {
-          pane: "sweepHits", color: "#000", opacity: 0, weight: 16,
-          lineCap: "round", lineJoin: "round",
-        }).on("click", function (ev) {
-          L.DomEvent.stop(ev);
-          streetClicked(i, ev.latlng);
-        }).addTo(hitLayer);
-      });
+      if (e) {
+        e.completed.forEach(function (c) { state.marked[c.wayId] = c; });
+        e.excluded.forEach(function (x) { state.excluded[x.wayId] = x; });
+      }
+      paintHandEdits();
+      say();
+      return e;
+    });
+
+    if (big) {
+      state.loadView = function () { loadView(a, state, token_, say); };
+      state.loadView();
+      return;
+    }
+    Promise.all([networkFor(a), edits]).then(function (got) {
+      var net = got[0], e = got[1];
+      if (shownStreetsFor !== token_) return;
+      if (!e) {
+        (net.completed || []).forEach(function (c) { state.marked[c.wayId] = c; });
+        (net.excluded || []).forEach(function (x) { state.excluded[x.wayId] = x; });
+      }
+      addNetwork(state, net);
       paintHandEdits();
       state.network = "done"; state.count = net.streets; state.stale = net.stale;
       // The phone keeps its own copy of each outline. When the two have drifted apart the
@@ -5120,6 +5131,149 @@ window.StreetSweepBases = {
       say();
     });
   }
+
+  /** Streets from a network answer, added once each however many answers they arrive in. */
+  function addNetwork(state, net) {
+    var added = 0;
+    if (!net.ids) {                         // an older server: draw them, nothing to click
+      net.lines.forEach(function (line) { drawNetworkLine(line); });
+      return 0;
+    }
+    net.ids.forEach(function (id, j) {
+      if (state.index[id] != null) return;  // a street crossing a cell edge comes twice
+      var line = net.lines[j];
+      state.index[id] = state.net.ids.length;
+      state.net.ids.push(id);
+      state.net.lines.push(line);
+      state.net.names.push(net.names ? net.names[j] : null);
+      state.lengths.push(lineMeters(line));
+      state.boxes.push(lineBox(line));
+      drawNetworkLine(line);
+      added++;
+    });
+    return added;
+  }
+
+  function drawNetworkLine(line) {
+    L.polyline(line, {
+      renderer: networkRenderer, interactive: false,
+      color: onImagery ? "#ffffff" : "#8f99a5",
+      weight: onImagery ? 2.5 : 3, opacity: onImagery ? 0.55 : 0.7,
+      lineCap: "round", lineJoin: "round",
+    }).addTo(networkLayer);
+  }
+
+  function lineBox(line) {
+    var s = 90, w = 180, n = -90, e = -180;
+    line.forEach(function (p) {
+      if (p[0] < s) s = p[0]; if (p[0] > n) n = p[0];
+      if (p[1] < w) w = p[1]; if (p[1] > e) e = p[1];
+    });
+    return [s, w, n, e];
+  }
+
+  // ---- large areas, a screenful at a time ----
+
+  // Below this zoom a screen spans too many cells to be worth loading street by street.
+  var VIEW_MIN_ZOOM = 13;
+
+  /** The area's map cells that the screen (and a margin round it) covers. */
+  function cellsInView(a) {
+    var v = map.getBounds().pad(0.15), box = areaBox(a);
+    var s = Math.max(v.getSouth(), box.s), n = Math.min(v.getNorth(), box.n);
+    var w = Math.max(v.getWest(), box.w), e = Math.min(v.getEast(), box.e);
+    if (s > n || w > e) return [];
+    var keys = [];
+    for (var la = Math.floor(s / CELL_DEG); la <= Math.floor(n / CELL_DEG); la++) {
+      for (var lo = Math.floor(w / CELL_DEG); lo <= Math.floor(e / CELL_DEG); lo++) keys.push(la + "_" + lo);
+    }
+    return keys;
+  }
+
+  function loadView(a, state, token_, say) {
+    if (shownStreetsFor !== token_) return;
+    if (map.getZoom() < VIEW_MIN_ZOOM) {
+      if (!state.toolsReady) toolbarFor("zoom");
+      // The tools still work on what has loaded; say why nothing more is arriving.
+      else el("stHint").textContent = "Zoom in to load the streets here. This area loads a screenful at a time.";
+      say();
+      return;
+    }
+    if (state.toolsReady) el("stHint").textContent = TOOL_HINT[tool.mode];
+    var want = cellsInView(a).filter(function (k) { return !state.loaded[k] && !state.pending[k]; });
+    if (!want.length) return;
+    if (!state.toolsReady) toolbarFor("loading-view");
+    for (var i = 0; i < want.length; i += 4) {
+      (function (batch) {
+        batch.forEach(function (k) { state.pending[k] = true; });
+        apiJson("/api/areas/" + a.serverId + "/network?cells=" + batch.join(",")).then(function (net) {
+          batch.forEach(function (k) { state.loaded[k] = true; delete state.pending[k]; });
+          if (shownStreetsFor !== token_) return;
+          addNetwork(state, net);
+          if (!state.toolsReady && net.ids) { state.toolsReady = true; toolbarFor("ready"); }
+          paintHandEdits();
+          say();
+        }).catch(function (err) {
+          batch.forEach(function (k) { delete state.pending[k]; });
+          if (shownStreetsFor === token_) status("Could not load the streets here: " + err.message + ". Move the map to try again.", "bad");
+        });
+      })(want.slice(i, i + 4));
+    }
+  }
+
+  map.on("moveend", function () {
+    if (ctxLive() && streetCtx.state.loadView) streetCtx.state.loadView();
+  });
+
+
+  // ---- finding the street under a click ----
+
+  /** The shown street nearest `latlng`, within about 10 pixels, or -1. */
+  function streetNear(latlng) {
+    if (!ctxLive()) return -1;
+    var st = streetCtx.state;
+    if (!st.net || !st.net.ids.length) return -1;
+    var tol = 10, p = map.latLngToLayerPoint(latlng);
+    var corner = map.layerPointToLatLng(p.add([tol, tol]));
+    var dLat = Math.abs(corner.lat - latlng.lat), dLng = Math.abs(corner.lng - latlng.lng);
+    var best = -1, bestPx = tol;
+    for (var i = 0; i < st.boxes.length; i++) {
+      var b = st.boxes[i];
+      if (latlng.lat < b[0] - dLat || latlng.lat > b[2] + dLat ||
+          latlng.lng < b[1] - dLng || latlng.lng > b[3] + dLng) continue;
+      var line = st.net.lines[i], prev = map.latLngToLayerPoint(line[0]);
+      for (var k = 1; k < line.length; k++) {
+        var cur = map.latLngToLayerPoint(line[k]);
+        var d = L.LineUtil.pointToSegmentDistance(p, prev, cur);
+        if (d < bestPx) { bestPx = d; best = i; }
+        prev = cur;
+      }
+    }
+    return best;
+  }
+
+  /** A click on a street, from the map or from the area outline it falls inside. */
+  function tryStreetClick(latlng) {
+    if (window.StreetSweepViews.current() !== "map") return false;
+    var i = streetNear(latlng);
+    if (i < 0) return false;
+    streetClicked(i, latlng);
+    return true;
+  }
+
+  map.on("click", function (ev) { if (!drawing) tryStreetClick(ev.latlng); });
+
+  // A pointer over a street says it can be clicked; checked once a frame at most.
+  var hoverQueued = false, hoverAt = null;
+  map.on("mousemove", function (ev) {
+    hoverAt = ev.latlng;
+    if (hoverQueued) return;
+    hoverQueued = true;
+    requestAnimationFrame(function () {
+      hoverQueued = false;
+      map.getContainer().classList.toggle("overStreet", !drawing && streetNear(hoverAt) >= 0);
+    });
+  });
 
   // ---- street tools ----------------------------------------------------------
   //
@@ -5237,17 +5391,17 @@ window.StreetSweepBases = {
       if (st.excluded[id]) {
         anyExcluded = true;
         L.polyline(net.lines[i], {
+          renderer: drivenRenderer, interactive: false,
           color: onImagery ? "#ffb38a" : "#c2410c", weight: onImagery ? 3.5 : 3.5, opacity: 0.95,
-          dashArray: "1 7", lineCap: "round", interactive: false,
+          dashArray: "1 7", lineCap: "round",
         }).addTo(excludedLayer);
       } else if (st.marked[id]) {
         anyMarked = true;
         drawRoad(net.lines[i], markedLayer, onImagery
-          ? { casing: "#022b26", casingWeight: 7, core: "#3ff2d6", coreWeight: 3.5, opacity: 1 }
-          : { casing: null, casingWeight: 0, core: "#0f9f8f", coreWeight: 4, opacity: 0.95 }, 1);
+          ? { casing: "#022b26", casingWeight: 7, core: "#3ff2d6", coreWeight: 3.5, opacity: 1, renderer: drivenRenderer }
+          : { casing: null, casingWeight: 0, core: "#0f9f8f", coreWeight: 4, opacity: 0.95, renderer: drivenRenderer }, 1);
       }
     });
-    markedLayer.eachLayer(function (l) { l.options.interactive = false; });
     el("keyMarkedRow").hidden = !anyMarked;
     el("keyExcludedRow").hidden = !anyExcluded;
   }
@@ -5474,7 +5628,8 @@ window.StreetSweepBases = {
     el("stReasonWrap").hidden = true;
     el("stHint").textContent =
       phase === "loading" ? "Loading this area's streets…" :
-      phase === "big" ? "This area is too large to edit street by street. Open a neighborhood or city inside it." :
+      phase === "zoom" ? "This area is large, so its streets load for the part of the map in view. Zoom in to load them and edit." :
+      phase === "loading-view" ? "Loading the streets for this part of the map…" :
       phase === "old" ? "The server needs updating before streets can be edited here." :
       "The streets could not be loaded, so they cannot be edited just now.";
   }

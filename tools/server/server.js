@@ -1679,8 +1679,18 @@ async function handle(req, res) {
       "SELECT id, polygon, min_lat, min_lng, max_lat, max_lng FROM areas WHERE id=$1",
       [Number(areaNetwork[1])]);
     if (!rows[0]) return sendJson(res, 404, { error: "No such area" });
+    // ?cells=303_-956,303_-957 asks for just those of the area's cells: how the map loads
+    // a county or a big city, a screenful at a time, instead of all of it at once.
+    let only = null;
+    if (url.searchParams.has("cells")) {
+      const asked = String(url.searchParams.get("cells")).split(",").filter((k) => streets.parseKey(k));
+      if (!asked.length || asked.length > 12) {
+        return sendJson(res, 400, { error: "Ask for between 1 and 12 map cells at a time" });
+      }
+      only = new Set(asked);
+    }
     try {
-      const got = await networks.forArea(pool, rows[0]);
+      const got = await networks.forArea(pool, rows[0], only);
       const wayIds = got.lines.map((l) => l.id);
       const marked = await completions.markedAmong(pool, wayIds);
       const excluded = await completions.excludedAmong(pool, wayIds);
@@ -1690,7 +1700,7 @@ async function handle(req, res) {
         // driven segments to it.
         ids: got.lines.map((l) => l.id), names: got.lines.map((l) => l.name),
         completed: marked, excluded,
-        fetchedAt: got.fetchedAt, cached: got.cached, stale: Boolean(got.stale),
+        fetchedAt: got.fetchedAt, cached: got.cached, stale: Boolean(got.stale), cells: got.cells,
       });
     } catch (err) {
       return sendJson(res, 502, { error: err.message || "OpenStreetMap could not be reached" });

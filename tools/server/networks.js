@@ -43,8 +43,10 @@ async function ensureSchema() { /* nothing of its own now; the cells live in str
  * request for a cell nobody has asked for yet waits for OpenStreetMap, on the server's
  * one queue.
  */
-async function forArea(pool, area) {
-  const keys = streets.cellsFor(area.min_lat, area.min_lng, area.max_lat, area.max_lng);
+async function forArea(pool, area, only) {
+  let keys = streets.cellsFor(area.min_lat, area.min_lng, area.max_lat, area.max_lng);
+  // A large area is loaded a few cells at a time, for the part of the map in view.
+  if (only) keys = keys.filter((k) => only.has(k));
   const seen = new Set();
   const lines = [];
   let fetchedAt = Date.now(), cached = true, stale = false;
