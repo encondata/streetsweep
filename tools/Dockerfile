@@ -1,4 +1,8 @@
-FROM node:22-alpine
+# Debian rather than Alpine for osmium-tool, which reads OpenStreetMap map files for the
+# monthly street import (streets-import.js); Alpine does not package it.
+FROM node:22-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends osmium-tool ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY server/package.json ./

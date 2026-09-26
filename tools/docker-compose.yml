@@ -43,6 +43,12 @@ services:
       # the one below, start it (docker compose --profile valhalla up -d) and set
       # VALHALLA_URL=http://valhalla:8002 in .env.
       VALHALLA_URL: ${VALHALLA_URL:-}
+      # A Geofabrik extract to fill the street store from, once a month, instead of asking
+      # Overpass cell by cell, e.g.
+      #   https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf
+      # Empty keeps using Overpass. Cells outside the file still come from Overpass.
+      OSM_EXTRACT_URL: ${OSM_EXTRACT_URL:-}
+      OSM_EXTRACT_DIR: /data/osm
     volumes:
       # Deliberately not photo-data. That volume holds MinIO's own layout —
       # .minio.sys and the bucket directory — and mounting it here would leave the
@@ -52,6 +58,7 @@ services:
       # be dropped in one go once migrate-photos.js has run.
       - photo-files:/data/photos
       - tile-cache:/data/tiles
+      - osm-extract:/data/osm
     # Plain HTTP for a reverse proxy in front to forward to. Set BIND_ADDRESS to
     # 127.0.0.1 in .env when that proxy runs on this same host.
     ports:
@@ -85,6 +92,7 @@ volumes:
   areas-data:
   photo-files:
   tile-cache:
+  osm-extract:
   valhalla-data:
   # The old MinIO data. Nothing mounts it any more; it is declared so Compose does
   # not treat it as an orphan, and so removing it stays a deliberate act:

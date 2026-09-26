@@ -17,6 +17,7 @@ const completions = require("./completions");
 const progress = require("./progress");
 const tiles = require("./tiles");
 const matching = require("./matching");
+const importer = require("./streets-import");
 const photos = require("./photos");
 
 const PORT = Number(process.env.PORT || 80);
@@ -1663,6 +1664,17 @@ async function handle(req, res) {
     return sendJson(res, 200, matching.status());
   }
 
+  /** The map-file import: where it is, and a way to start one now. */
+  if (route === "/api/admin/street-import" && req.method === "GET") {
+    return sendJson(res, 200, await importer.status(pool));
+  }
+  if (route === "/api/admin/street-import" && req.method === "POST") {
+    if (!importer.enabled()) return sendJson(res, 400, { error: "Set OSM_EXTRACT_URL to import from a map file" });
+    importer.importNow(pool, () => progress.storeReplaced(pool))
+      .catch((err) => console.error("could not import the map file", err.message));
+    return sendJson(res, 202, await importer.status(pool));
+  }
+
   /** The map tile cache: how much it holds and how often it has saved a trip upstream. */
   if (route === "/api/admin/tile-cache" && req.method === "GET") {
     return sendJson(res, 200, await tiles.cacheStatus());
@@ -2019,13 +2031,28 @@ waitForDatabase()
   .then(() => streets.ensureSchema(pool))
   .then(() => completions.ensureSchema(pool))
   .then(() => progress.ensureSchema(pool))
-  .then(() => progress.catchUp(pool).then((n) => n && console.log(`Counting ${n} areas in the background.`)))
+  .then(() => importer.ensureSchema(pool))
+  .then(() => {
+    const countAll = () => progress.catchUp(pool)
+      .then((n) => n && console.log(`Counting ${n} areas in the background.`));
+    if (!importer.enabled()) return countAll();
+    // With a map file to import from, the areas are counted after it, not before: counting
+    // first would fetch every missing cell from Overpass, which is what the file replaces.
+    const replaced = () => progress.storeReplaced(pool);
+    importer.importIfDue(pool, replaced)
+      .then((did) => { if (did) console.log("Streets imported from the map file."); else return countAll(); })
+      .catch((err) => { console.error("could not import the map file", err.message); return countAll(); });
+    setInterval(() => {
+      importer.importIfDue(pool, replaced).catch((err) => console.error("could not import the map file", err.message));
+    }, 24 * 60 * 60 * 1000).unref();
+  })
   .then(() => {
     // A refreshed cell may have gained or lost streets: the areas over it are counted afresh.
     streets.onRefresh((key) => progress.cellRefreshed(pool, key));
     // Stale cells (over a month old) are fetched again a few at a time, every few hours,
     // rather than all at once when someone happens to need them.
-    setInterval(() => {
+    // With a map file, its monthly import keeps the store fresh instead.
+    if (!importer.enabled()) setInterval(() => {
       streets.refreshStale(pool, 40)
         .then((n) => n && console.log(`Refreshed ${n} street cells.`))
         .catch((err) => console.error("could not refresh street cells", err.message));

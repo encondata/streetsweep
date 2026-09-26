@@ -484,4 +484,14 @@ function touched(pool, areaId) {
     [areaId]).then(() => enqueue(pool, Number(areaId))).catch(() => {});
 }
 
-module.exports = { ensureSchema, forArea, changed, cellRefreshed, catchUp, touched, coveredLength };
+/**
+ * The whole street store was rewritten (a map-file import): every area's street list is
+ * rebuilt and every area counted again.
+ */
+async function storeReplaced(pool) {
+  shapeCache.clear();
+  await pool.query("UPDATE area_progress SET needs_full = true, dirty = true");
+  return catchUp(pool);
+}
+
+module.exports = { ensureSchema, forArea, changed, cellRefreshed, storeReplaced, catchUp, touched, coveredLength };
