@@ -95,7 +95,7 @@ class ValhallaClient(
     }
 
     companion object {
-        const val DEFAULT_BASE_URL = "https://valhalla1.openstreetmap.de"
+        const val DEFAULT_BASE_URL = "https://valhalla.hackspacelabs.com"
         const val USER_AGENT = "StreetSweep/1.0 (personal street-coverage app)"
         private val ATTRIBUTES = listOf(
             "edge.way_id", "edge.names", "edge.length", "edge.road_class",

@@ -17,13 +17,51 @@ const crypto = require("crypto");
 const PUBLIC = "https://valhalla1.openstreetmap.de";
 const BASE = (process.env.VALHALLA_URL || PUBLIC).replace(/\/+$/, "");
 const IS_PUBLIC = /openstreetmap\.de/.test(BASE);
+// Where to go while your own Valhalla is not answering — building its tiles, restarting —
+// so drives are still matched. The public server unless set otherwise; "none" for nowhere.
+const FALLBACK = IS_PUBLIC ? null : (() => {
+  const f = (process.env.VALHALLA_FALLBACK_URL || PUBLIC).replace(/\/+$/, "");
+  return f === "none" ? null : f;
+})();
 // The community server is fair use: one request at a time, a breath between them. Your
 // own can take a few together.
 const PARALLEL = IS_PUBLIC ? 1 : Number(process.env.VALHALLA_PARALLEL) || 4;
 const PAUSE_MS = IS_PUBLIC ? 500 : 0;
 const USER_AGENT = "StreetSweep/1.0 (self-hosted street coverage server)";
 
-const stats = { asked: 0, remembered: 0, failed: 0, since: Date.now() };
+const stats = { asked: 0, remembered: 0, failed: 0, fellBack: 0, since: Date.now() };
+
+async function post(base, bodyText) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 45000);
+  try {
+    const r = await fetch(base + "/trace_attributes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": USER_AGENT },
+      body: bodyText, signal: ctl.signal,
+    });
+    return { status: r.status, text: await r.text() };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// The public server keeps its fair-use terms even as a fallback: one request at a time,
+// with a breath between, however many your own Valhalla would take together.
+let fallbackTail = Promise.resolve();
+function viaFallback(bodyText) {
+  const run = fallbackTail.then(async () => {
+    try { return await post(FALLBACK, bodyText); }
+    finally { await new Promise((r) => setTimeout(r, 500)); }
+  });
+  fallbackTail = run.catch(() => {});
+  return run;
+}
+
+/** Not answering at all, as opposed to answering "no match": worth trying elsewhere. */
+function unavailable(answer) {
+  return !answer || answer.status === 502 || answer.status === 503 || answer.status === 504;
+}
 
 // Recent answers by the exact request, so a retried batch is answered from here.
 const answers = new Map();
@@ -54,18 +92,13 @@ async function traceAttributes(bodyText) {
     return answers.get(key);
   }
   const answer = await limited(async () => {
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), 45000);
-    try {
-      const r = await fetch(BASE + "/trace_attributes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "User-Agent": USER_AGENT },
-        body: bodyText, signal: ctl.signal,
-      });
-      return { status: r.status, text: await r.text() };
-    } finally {
-      clearTimeout(timer);
+    let first = null;
+    try { first = await post(BASE, bodyText); } catch (err) { first = null; }
+    if (!unavailable(first) || !FALLBACK) {
+      return first || { status: 502, text: JSON.stringify({ error: "The matching server could not be reached" }) };
     }
+    stats.fellBack++;
+    return viaFallback(bodyText);
   });
   stats.asked++;
   // Only good answers are remembered; a failure should be asked again.
@@ -79,7 +112,7 @@ async function traceAttributes(bodyText) {
 }
 
 function status() {
-  return { base: BASE, public: IS_PUBLIC, parallel: PARALLEL, queued: waiting.length, ...stats };
+  return { base: BASE, public: IS_PUBLIC, fallback: FALLBACK, parallel: PARALLEL, queued: waiting.length, ...stats };
 }
 
 module.exports = { traceAttributes, status };

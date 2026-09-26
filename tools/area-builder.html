@@ -3220,7 +3220,8 @@ window.StreetSweepBases = {
             : "no map tiles served yet");
           return apiJson("/api/admin/matching").then(function (m) {
             el("srvLine").textContent += " · drives matched by " + (m.public ? "the public Valhalla server" : m.base) +
-              " (" + m.asked.toLocaleString() + " asked, " + m.remembered.toLocaleString() + " answered from memory)";
+              " (" + m.asked.toLocaleString() + " asked, " + m.remembered.toLocaleString() + " answered from memory" +
+              (m.fellBack ? ", " + m.fellBack.toLocaleString() + " sent to the public server while yours was not answering" : "") + ")";
           });
         });
       }).catch(function () { /* an older server */ });

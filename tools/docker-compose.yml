@@ -39,10 +39,11 @@ services:
       TILE_DIR: /data/tiles
       TILE_TTL_DAYS: ${TILE_TTL_DAYS:-30}
       TILE_URL_OSM: ${TILE_URL_OSM:-}
-      # Where drives are matched to streets. Empty uses the public Valhalla server; to use
-      # the one below, start it (docker compose --profile valhalla up -d) and set
-      # VALHALLA_URL=http://valhalla:8002 in .env.
-      VALHALLA_URL: ${VALHALLA_URL:-}
+      # Where drives are matched to streets: the Valhalla below, through the reverse proxy.
+      # While it is not answering (its first start builds routing tiles for an hour or
+      # more) drives go to the public server instead; VALHALLA_FALLBACK_URL=none stops that.
+      VALHALLA_URL: ${VALHALLA_URL:-https://valhalla.hackspacelabs.com}
+      VALHALLA_FALLBACK_URL: ${VALHALLA_FALLBACK_URL:-}
       # A Geofabrik extract to fill the street store from, once a month, instead of asking
       # Overpass cell by cell, e.g.
       #   https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf
@@ -68,15 +69,16 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # Optional: a Valhalla of your own, built from a Geofabrik extract, so matching drives
-  # never touches the public server. Not started unless asked for:
-  #   docker compose --profile valhalla up -d
-  # The first start downloads the extract and builds routing tiles — for Texas, about
-  # 700 MB to download, several GB of disk and an hour or more. Later starts reuse them.
+  # A Valhalla of your own, built from a Geofabrik extract, so matching drives never
+  # touches the public server. Published on port 8002 for the reverse proxy in front
+  # (valhalla.hackspacelabs.com). The first start downloads the extract and builds routing
+  # tiles — for Texas, about 700 MB to download, several GB of disk and an hour or more;
+  # later starts reuse them. Watch it with: docker compose logs -f valhalla
   valhalla:
     image: ghcr.io/valhalla/valhalla-scripted:latest
     container_name: streetsweep-valhalla
-    profiles: ["valhalla"]
+    ports:
+      - "${VALHALLA_BIND_ADDRESS:-0.0.0.0}:${VALHALLA_PORT:-8002}:8002"
     environment:
       tile_urls: ${VALHALLA_PBF_URL:-https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf}
       use_tiles_ignore_pbf: "True"

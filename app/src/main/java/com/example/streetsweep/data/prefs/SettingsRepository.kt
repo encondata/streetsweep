@@ -57,7 +57,8 @@ data class TrackingSettings(
         val GPS_INTERVAL_CHOICES = listOf(1, 2, 5, 15)
         val BACKUP_DAY_CHOICES = listOf(0, 1, 7)
         val IDLE_STOP_CHOICES = listOf(0, 15, 30, 60)
-        const val DEFAULT_VALHALLA_URL = "https://valhalla1.openstreetmap.de"
+        /** Our own Valhalla, behind the reverse proxy. Signed in, drives go through the server instead. */
+        const val DEFAULT_VALHALLA_URL = "https://valhalla.hackspacelabs.com"
         const val DEFAULT_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
         const val DEFAULT_PORTAL_URL = "https://streetsweep.hackspacelabs.com"
     }
