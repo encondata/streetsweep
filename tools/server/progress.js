@@ -29,7 +29,8 @@ const PARTIAL_FRACTION = 0.02;
 const ON_STREET_METERS = 30;
 const TIE_METERS = 2;
 // How long after the last change (a sync batch, a marked street) the totals are redone.
-const CHANGE_SETTLE_MS = Number(process.env.PROGRESS_SETTLE_MS) || 15000;
+// Recounts are a database read now, so there is little reason to wait long.
+const CHANGE_SETTLE_MS = Number(process.env.PROGRESS_SETTLE_MS) || 4000;
 
 async function ensureSchema(pool) {
   await pool.query(`
@@ -50,6 +51,16 @@ async function ensureSchema(pool) {
     ALTER TABLE area_progress ADD COLUMN IF NOT EXISTS top_user_id BIGINT;
     -- Each person's own share of each area: what they drove themselves, overlap once.
     -- Marks by hand are left out on purpose — they are shared, not anyone's driving.
+    -- Which streets are in which area (see rebuildMembership), and when that needs redoing.
+    CREATE TABLE IF NOT EXISTS area_street (
+      area_id  BIGINT NOT NULL REFERENCES areas(id) ON DELETE CASCADE,
+      way_id   BIGINT NOT NULL,
+      length_m DOUBLE PRECISION NOT NULL,
+      cell     TEXT NOT NULL,
+      PRIMARY KEY (area_id, way_id)
+    );
+    CREATE INDEX IF NOT EXISTS area_street_way ON area_street (way_id);
+    ALTER TABLE area_progress ADD COLUMN IF NOT EXISTS needs_full BOOLEAN NOT NULL DEFAULT true;
     CREATE TABLE IF NOT EXISTS area_user_progress (
       area_id       BIGINT NOT NULL REFERENCES areas(id) ON DELETE CASCADE,
       user_id       BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -129,28 +140,50 @@ function coveredLength(line, shapes) {
 
 // ---- the work ------------------------------------------------------------------------
 
-async function compute(pool, areaId) {
-  const { rows } = await pool.query(
-    "SELECT id, polygon, min_lat, min_lng, max_lat, max_lng, updated_at FROM areas WHERE id = $1", [areaId]);
-  const area = rows[0];
-  if (!area) return;
-  const keys = streets.cellsFor(area.min_lat, area.min_lng, area.max_lat, area.max_lng);
-  await pool.query(
-    `UPDATE area_progress SET status = 'working', dirty = false, cells_total = $2, cells_done = 0, error = NULL
-      WHERE area_id = $1`, [areaId, keys.length]);
+// ---- which streets are in which area -------------------------------------------------
+//
+// Worked out once per area — when it is new, redrawn, or a cell's streets are refreshed —
+// and kept in area_street, so an ordinary recount (after a sync or a marked street) is a
+// database read rather than a walk through hundreds of cells. It also says which areas a
+// changed street belongs to, so only those are recounted.
 
-  // Every street in the outline, once.
-  const found = new Map();
+/** Parsed cells kept in memory: key -> Map(way id -> [[lat, lng], ...]). */
+const shapeCache = new Map();
+const SHAPE_CACHE_CELLS = Number(process.env.SHAPE_CACHE_CELLS) || 400;
+
+async function cellShapes(pool, key) {
+  if (shapeCache.has(key)) {
+    const hit = shapeCache.get(key);
+    shapeCache.delete(key); shapeCache.set(key, hit);        // most recently used last
+    return hit;
+  }
+  const c = await streets.cell(pool, key);
+  const shapes = new Map();
+  for (const way of c.elements) shapes.set(Number(way.id), way.geometry.map((g) => [g.lat, g.lon]));
+  shapeCache.set(key, shapes);
+  while (shapeCache.size > SHAPE_CACHE_CELLS) shapeCache.delete(shapeCache.keys().next().value);
+  return shapes;
+}
+
+/** A street's cell, for finding its shape again: the cell holding its first point. */
+function cellOf(shape) {
+  return `${Math.floor(shape[0][0] / 0.1)}_${Math.floor(shape[0][1] / 0.1)}`;
+}
+
+async function rebuildMembership(pool, area, keys) {
+  const areaId = Number(area.id);
+  const ids = [], lengths = [], cells = [];
+  const seen = new Set();
   let failed = null;
   for (let i = 0; i < keys.length; i++) {
     try {
-      const c = await streets.cell(pool, keys[i]);
-      for (const way of c.elements) {
-        if (found.has(way.id)) continue;
-        const shape = way.geometry.map((g) => [g.lat, g.lon]);
+      const shapes = await cellShapes(pool, keys[i]);
+      for (const [id, shape] of shapes) {
+        if (seen.has(id)) continue;
+        seen.add(id);
         const [cLat, cLng] = networks.boxCentre(shape);
-        if (!networks.inside(area.polygon, cLat, cLng)) { found.set(way.id, null); continue; }
-        found.set(way.id, { shape, length: lineLength(shape) });
+        if (!networks.inside(area.polygon, cLat, cLng)) continue;
+        ids.push(id); lengths.push(lineLength(shape)); cells.push(cellOf(shape));
       }
     } catch (err) {
       failed = failed || err.message || "OpenStreetMap could not be reached";
@@ -159,51 +192,102 @@ async function compute(pool, areaId) {
     // should see each one land rather than sit at the same number.
     await pool.query("UPDATE area_progress SET cells_done = $2 WHERE area_id = $1", [areaId, i + 1]);
   }
-  const ids = [...found].filter(([, w]) => w).map(([id]) => id);
-
-  // What was driven on them, and what was said about them by hand.
-  const shapesByWay = new Map(), summed = new Map();
-  // The same, person by person: user id -> way id -> [shapes].
-  const byUser = new Map();
-  for (let i = 0; i < ids.length; i += 5000) {
-    const batch = ids.slice(i, i + 5000);
-    const { rows: edges } = await pool.query(
-      "SELECT way_id, user_id, length_m, shape FROM driven_edges WHERE way_id = ANY($1::bigint[])", [batch]);
-    for (const e of edges) {
-      const id = Number(e.way_id);
-      if (!shapesByWay.has(id)) shapesByWay.set(id, []);
-      shapesByWay.get(id).push(e.shape);
-      summed.set(id, (summed.get(id) || 0) + Number(e.length_m));
-      if (e.user_id == null) continue;
-      const u = Number(e.user_id);
-      if (!byUser.has(u)) byUser.set(u, new Map());
-      const mine = byUser.get(u);
-      if (!mine.has(id)) mine.set(id, { shapes: [], summed: 0 });
-      mine.get(id).shapes.push(e.shape);
-      mine.get(id).summed += Number(e.length_m);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM area_street WHERE area_id = $1", [areaId]);
+    for (let i = 0; i < ids.length; i += 20000) {
+      await client.query(
+        `INSERT INTO area_street (area_id, way_id, length_m, cell)
+         SELECT $1, * FROM unnest($2::bigint[], $3::float8[], $4::text[])`,
+        [areaId, ids.slice(i, i + 20000), lengths.slice(i, i + 20000), cells.slice(i, i + 20000)]);
     }
+    // A failed cell leaves the list short, so it is built again next time.
+    await client.query("UPDATE area_progress SET needs_full = $2 WHERE area_id = $1", [areaId, Boolean(failed)]);
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
   }
-  const marked = new Set(), excluded = new Set();
-  for (let i = 0; i < ids.length; i += 5000) {
-    const batch = ids.slice(i, i + 5000);
-    const [m, x] = await Promise.all([
-      pool.query("SELECT way_id FROM street_completions WHERE marked AND way_id = ANY($1::bigint[])", [batch]),
-      pool.query("SELECT way_id FROM street_exclusions WHERE excluded AND way_id = ANY($1::bigint[])", [batch]),
-    ]);
-    m.rows.forEach((r) => marked.add(Number(r.way_id)));
-    x.rows.forEach((r) => excluded.add(Number(r.way_id)));
+  return failed;
+}
+
+// ---- the work ------------------------------------------------------------------------
+
+async function compute(pool, areaId) {
+  const { rows } = await pool.query(
+    `SELECT a.id, a.polygon, a.min_lat, a.min_lng, a.max_lat, a.max_lng, a.updated_at,
+            p.needs_full, p.area_updated_at
+       FROM areas a LEFT JOIN area_progress p ON p.area_id = a.id WHERE a.id = $1`, [areaId]);
+  const area = rows[0];
+  if (!area) return;
+  const keys = streets.cellsFor(area.min_lat, area.min_lng, area.max_lat, area.max_lng);
+  const full = area.needs_full !== false || !area.area_updated_at ||
+    new Date(area.updated_at) > new Date(area.area_updated_at);
+  await pool.query(
+    `UPDATE area_progress SET status = 'working', dirty = false, cells_total = $2,
+            cells_done = CASE WHEN $3 THEN 0 ELSE $2 END, error = NULL
+      WHERE area_id = $1`, [areaId, keys.length, full]);
+
+  const failed = full ? await rebuildMembership(pool, area, keys) : null;
+
+  // Every street in the area, with what was said about it by hand.
+  const { rows: members } = await pool.query(
+    `SELECT s.way_id, s.length_m, s.cell, x.way_id IS NOT NULL AS excluded, c.way_id IS NOT NULL AS marked
+       FROM area_street s
+       LEFT JOIN street_exclusions x ON x.way_id = s.way_id AND x.excluded
+       LEFT JOIN street_completions c ON c.way_id = s.way_id AND c.marked
+      WHERE s.area_id = $1`, [areaId]);
+  const found = new Map();
+  for (const r of members) {
+    found.set(Number(r.way_id), { length: Number(r.length_m), cell: r.cell, excluded: r.excluded, marked: r.marked });
+  }
+
+  // What was driven on them — everyone's, and person by person.
+  const shapesByWay = new Map(), summed = new Map();
+  const byUser = new Map();
+  const { rows: edges } = await pool.query(
+    `SELECT e.way_id, e.user_id, e.length_m, e.shape FROM driven_edges e
+       JOIN area_street s ON s.way_id = e.way_id AND s.area_id = $1`, [areaId]);
+  for (const e of edges) {
+    const id = Number(e.way_id);
+    if (!shapesByWay.has(id)) shapesByWay.set(id, []);
+    shapesByWay.get(id).push(e.shape);
+    summed.set(id, (summed.get(id) || 0) + Number(e.length_m));
+    if (e.user_id == null) continue;
+    const u = Number(e.user_id);
+    if (!byUser.has(u)) byUser.set(u, new Map());
+    const mine = byUser.get(u);
+    if (!mine.has(id)) mine.set(id, { shapes: [], summed: 0 });
+    mine.get(id).shapes.push(e.shape);
+    mine.get(id).summed += Number(e.length_m);
+  }
+
+  // Shapes are only needed for the streets someone drove: their cells, from memory.
+  const neededCells = new Set();
+  for (const id of shapesByWay.keys()) { const w = found.get(id); if (w) neededCells.add(w.cell); }
+  const shapeOf = new Map();
+  for (const key of neededCells) {
+    try {
+      const shapes = await cellShapes(pool, key);
+      for (const id of shapesByWay.keys()) if (shapes.has(id)) shapeOf.set(id, shapes.get(id));
+    } catch (err) { /* its streets count as their summed length, below */ }
+  }
+  function drivenOn(id, shapes, sum, length) {
+    const shape = shapeOf.get(id);
+    return Math.min(shape ? coveredLength(shape, shapes) : sum, sum, length);
   }
 
   let total = 0, done = 0, partial = 0, nExcluded = 0, nMarked = 0, metersTotal = 0, metersDriven = 0;
-  for (const id of ids) {
-    const w = found.get(id);
-    if (excluded.has(id)) { nExcluded++; continue; }
+  for (const [id, w] of found) {
+    if (w.excluded) { nExcluded++; continue; }
     total++;
     metersTotal += w.length;
-    if (marked.has(id)) { nMarked++; done++; metersDriven += w.length; continue; }
+    if (w.marked) { nMarked++; done++; metersDriven += w.length; continue; }
     const shapes = shapesByWay.get(id);
-    const driven = shapes
-      ? Math.min(coveredLength(w.shape, shapes), summed.get(id) || 0, w.length) : 0;
+    const driven = shapes ? drivenOn(id, shapes, summed.get(id) || 0, w.length) : 0;
     metersDriven += driven;
     const f = w.length > 0 ? driven / w.length : 0;
     if (f >= DONE_FRACTION) done++;
@@ -216,8 +300,8 @@ async function compute(pool, areaId) {
     let uDone = 0, uPartial = 0, uMeters = 0;
     for (const [id, w] of ways) {
       const street = found.get(id);
-      if (!street || excluded.has(id)) continue;
-      const driven = Math.min(coveredLength(street.shape, w.shapes), w.summed, street.length);
+      if (!street || street.excluded) continue;
+      const driven = drivenOn(id, w.shapes, w.summed, street.length);
       uMeters += driven;
       const f = street.length > 0 ? driven / street.length : 0;
       if (f >= DONE_FRACTION) uDone++;
@@ -240,7 +324,10 @@ async function compute(pool, areaId) {
     }
     await client.query(
       `UPDATE area_progress SET status = $2, total = $3, done = $4, partial = $5, excluded = $6, marked = $7,
-              meters_total = $8, meters_driven = $9, computed_at = now(), area_updated_at = $10, error = $11,
+              meters_total = $8, meters_driven = $9, computed_at = now(), error = $11,
+              -- Straight from the table: through JavaScript it loses its microseconds and
+              -- every area then looks redrawn since it was counted.
+              area_updated_at = (SELECT updated_at FROM areas WHERE id = $1 AND $10::timestamptz IS NOT NULL),
               -- Kept from the first time it was complete; cleared if it stops being (a redraw).
               completed_at = CASE WHEN $12 THEN COALESCE(completed_at, now()) ELSE NULL END,
               top_user_id = $13
@@ -328,19 +415,48 @@ async function forArea(pool, areaId) {
  * excluded. Every area already worked out is redone, in the background.
  */
 let changeTimer = null;
-function changed(pool, settleMs) {
-  // A phone's push arrives as several requests; redo everything once, after the last.
+let changedWays = new Set();
+let changedAll = false;
+/**
+ * Streets changed — driven in a sync, marked or excluded by hand. Only the areas holding
+ * them are recounted; `wayIds` null means anything may have changed (a full resend).
+ */
+function changed(pool, wayIds, settleMs) {
+  if (wayIds == null) changedAll = true;
+  else for (const id of wayIds) { const n = Number(id); if (Number.isSafeInteger(n)) changedWays.add(n); }
+  // A phone's push arrives as several requests; recount once, after the last.
   clearTimeout(changeTimer);
   changeTimer = setTimeout(async () => {
+    const ids = [...changedWays], all = changedAll;
+    changedWays = new Set(); changedAll = false;
     try {
-      const { rows } = await pool.query(
-        "UPDATE area_progress SET dirty = true WHERE status IN ('done', 'failed') RETURNING area_id");
+      const { rows } = all
+        ? await pool.query("UPDATE area_progress SET dirty = true RETURNING area_id")
+        : await pool.query(
+            `UPDATE area_progress SET dirty = true WHERE area_id IN
+               (SELECT DISTINCT area_id FROM area_street WHERE way_id = ANY($1::bigint[]))
+             RETURNING area_id`, [ids]);
       rows.forEach((r) => enqueue(pool, Number(r.area_id)));
       await catchUp(pool);
     } catch (err) {
       console.error("could not queue progress updates", err.message);
     }
   }, settleMs != null ? settleMs : CHANGE_SETTLE_MS);
+}
+
+/**
+ * A cell's streets were fetched afresh (the monthly refresh): every area over it has its
+ * street list rebuilt, since streets may have been added, removed or reshaped.
+ */
+async function cellRefreshed(pool, key) {
+  shapeCache.delete(key);
+  const b = streets.cellBounds(key);
+  if (!b) return;
+  const { rows } = await pool.query(
+    `UPDATE area_progress p SET needs_full = true, dirty = true FROM areas a
+      WHERE a.id = p.area_id AND a.max_lat >= $1 AND a.min_lat <= $3 AND a.max_lng >= $2 AND a.min_lng <= $4
+      RETURNING p.area_id`, b);
+  rows.forEach((r) => enqueue(pool, Number(r.area_id)));
 }
 
 /**
@@ -351,7 +467,7 @@ function changed(pool, settleMs) {
 async function catchUp(pool) {
   const { rows } = await pool.query(
     `SELECT a.id FROM areas a LEFT JOIN area_progress p ON p.area_id = a.id
-      WHERE p.area_id IS NULL OR p.status <> 'done' OR p.dirty
+      WHERE p.area_id IS NULL OR p.status <> 'done' OR p.dirty OR p.needs_full
          OR p.area_updated_at IS NULL OR a.updated_at > p.area_updated_at
       ORDER BY (a.max_lat - a.min_lat) * (a.max_lng - a.min_lng)`);   // small ones first
   for (const r of rows) {
@@ -363,8 +479,9 @@ async function catchUp(pool) {
 
 /** An area was added, redrawn or renamed: count it again, soon. */
 function touched(pool, areaId) {
-  pool.query("INSERT INTO area_progress (area_id) VALUES ($1) ON CONFLICT (area_id) DO UPDATE SET dirty = true",
+  pool.query(`INSERT INTO area_progress (area_id) VALUES ($1)
+              ON CONFLICT (area_id) DO UPDATE SET dirty = true, needs_full = true`,
     [areaId]).then(() => enqueue(pool, Number(areaId))).catch(() => {});
 }
 
-module.exports = { ensureSchema, forArea, changed, catchUp, touched, coveredLength };
+module.exports = { ensureSchema, forArea, changed, cellRefreshed, catchUp, touched, coveredLength };

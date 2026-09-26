@@ -145,6 +145,11 @@ function trim(elements) {
 
 const inFlight = new Map();
 
+// Told when a cell that was already stored is fetched afresh, so what depends on it (which
+// streets are in which area) can be redone.
+const refreshListeners = [];
+function onRefresh(fn) { refreshListeners.push(fn); }
+
 /**
  * The streets in one cell: from the store when fresh, otherwise fetched on the queue and
  * stored. A stale copy is served, and said to be stale, if OpenStreetMap cannot be reached.
@@ -178,6 +183,7 @@ async function cell(pool, key) {
       `INSERT INTO street_cells (key, fetched_at, elements) VALUES ($1, now(), $2)
        ON CONFLICT (key) DO UPDATE SET fetched_at = now(), elements = EXCLUDED.elements`,
       [key, JSON.stringify(elements)]);
+    if (held) refreshListeners.forEach((fn) => Promise.resolve(fn(key)).catch(() => {}));
     return { key, elements, fetchedAt: Date.now(), cached: false };
   })();
 
@@ -185,4 +191,52 @@ async function cell(pool, key) {
   try { return await job; } finally { inFlight.delete(key); }
 }
 
-module.exports = { ensureSchema, cell, cellsFor, cellBounds, parseKey, SERVERS };
+// ---- the store as a whole ---------------------------------------------------------------
+//
+// The server keeps every street every area needs, so phones and the web never ask
+// OpenStreetMap themselves. Counting areas (progress.js) fetches any cell that is missing;
+// this keeps the stored ones from going stale, a few at a time, in the background.
+
+/** Every cell some area covers. */
+async function neededCells(pool) {
+  const { rows } = await pool.query("SELECT min_lat, min_lng, max_lat, max_lng FROM areas");
+  const keys = new Set();
+  for (const a of rows) cellsFor(a.min_lat, a.min_lng, a.max_lat, a.max_lng).forEach((k) => keys.add(k));
+  return keys;
+}
+
+/** How complete the store is, for the admin dashboard. */
+async function storeStatus(pool) {
+  const needed = await neededCells(pool);
+  const { rows } = await pool.query(
+    `SELECT key, fetched_at < now() - interval '30 days' AS stale, jsonb_array_length(elements) AS ways,
+            pg_column_size(elements) AS bytes FROM street_cells`);
+  let stored = 0, stale = 0, ways = 0, bytes = 0;
+  for (const r of rows) {
+    ways += r.ways; bytes += r.bytes;
+    if (!needed.has(r.key)) continue;
+    stored++;
+    if (r.stale) stale++;
+  }
+  return { needed: needed.size, stored, stale, missing: needed.size - stored, ways, bytes,
+           queued: inFlight.size, servers: SERVERS.length };
+}
+
+/** Refreshes up to `max` stale cells that an area still needs, oldest first, on the queue. */
+async function refreshStale(pool, max) {
+  const needed = await neededCells(pool);
+  const { rows } = await pool.query(
+    `SELECT key FROM street_cells WHERE fetched_at < now() - interval '30 days' ORDER BY fetched_at LIMIT $1`,
+    [max * 4]);
+  let n = 0;
+  for (const r of rows) {
+    if (n >= max) break;
+    if (!needed.has(r.key)) continue;
+    try { await cell(pool, r.key); n++; } catch (err) { /* tried again next round */ }
+  }
+  return n;
+}
+
+module.exports = {
+  ensureSchema, cell, cellsFor, cellBounds, parseKey, SERVERS, onRefresh, storeStatus, refreshStale,
+};

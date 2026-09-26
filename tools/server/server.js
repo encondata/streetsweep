@@ -7,6 +7,7 @@ const crypto = require("crypto");
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const zlib = require("zlib");
 const { Pool } = require("pg");
 const identity = require("./identity");
 const achievements = require("./achievements");
@@ -505,6 +506,9 @@ function bbox(points) {
  */
 async function applySync(body, by) {
   const result = { areas: 0, edges: 0, drives: 0, pois: 0, completions: 0, skipped: 0 };
+  // Which streets this push touched, so only the areas holding them are recounted.
+  const touchedWays = [];
+  Object.defineProperty(result, "touchedWays", { value: touchedWays, enumerable: false });
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -548,6 +552,7 @@ async function applySync(body, by) {
         const points = shapePoints(e.shape);
         const key = String(e.key || "").trim();
         if (!points || points.length < 2 || !key) { result.skipped++; continue; }
+        if (e.wayId != null) touchedWays.push(Number(e.wayId));
         const box = bbox(points);
         await client.query(
           `INSERT INTO driven_edges
@@ -641,10 +646,12 @@ async function applySync(body, by) {
       // Streets marked complete on the phone. Not scoped to the sender like the rest:
       // a street is finished for everyone, and the newer edit wins whoever made it.
       result.completions = await completions.apply(client, body.completions, by.userId);
+      body.completions.forEach((c) => touchedWays.push(Number(c.wayId)));
     }
     if (Array.isArray(body.exclusions)) {
       // Streets excluded on the phone: gated, private, not drivable. Shared the same way.
       result.exclusions = await completions.applyExclusions(client, body.exclusions, by.userId);
+      body.exclusions.forEach((x) => touchedWays.push(Number(x.wayId)));
     }
 
     await client.query("COMMIT");
@@ -812,8 +819,22 @@ async function coverage(edgeLimit) {
 
 // --------------------------------------------------------------- plumbing
 
+/**
+ * JSON, compressed when the caller accepts it and it is worth it. Street cells are most of
+ * what phones download — a dense one is 2.5 MB of JSON — and compress about eightfold.
+ * Browsers and Android's HttpURLConnection both ask for gzip and unpack it themselves.
+ */
 function sendJson(res, code, body) {
   const text = JSON.stringify(body);
+  const accepts = /\bgzip\b/.test(String((res.req && res.req.headers["accept-encoding"]) || ""));
+  if (accepts && text.length > 2048) {
+    const packed = zlib.gzipSync(text, { level: 6 });
+    res.writeHead(code, {
+      "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store",
+      "Content-Encoding": "gzip", "Vary": "Accept-Encoding", "Content-Length": packed.length,
+    });
+    return res.end(packed);
+  }
   res.writeHead(code, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
   res.end(text);
 }
@@ -1615,6 +1636,11 @@ async function handle(req, res) {
   }
 
   /** The same, by vehicle rather than by person. */
+  /** The street store: how many of the cells the areas need are held, stale or missing. */
+  if (route === "/api/admin/street-store" && req.method === "GET") {
+    return sendJson(res, 200, await streets.storeStatus(pool));
+  }
+
   if (route === "/api/admin/vehicle-stats" && req.method === "GET") {
     const { rows } = await pool.query(
       `SELECT v.id, v.name, v.plate, v.active,
@@ -1678,7 +1704,8 @@ async function handle(req, res) {
         return { created: [], redrawn: [] };
       });
     }
-    progress.changed(pool);
+    // Only the areas holding the streets this push touched; everything after a full resend.
+    progress.changed(pool, body_.resetEdges ? null : result.touchedWays);
     result.awarded = await achievements.evaluate(pool, who.user.id).catch((err) => {
       console.error("could not work out achievements", err.message);
       return 0;
@@ -1749,6 +1776,26 @@ async function handle(req, res) {
    * The area's totals from every street in it, worked out on the server in the background.
    * For areas too big for the page to add up; it polls this while the work runs.
    */
+  /**
+   * Every area's figures as the server counts them, for a phone to show: it may hold only
+   * part of a big area's streets, and the web is the record anyway.
+   */
+  if (route === "/api/areas/progress" && req.method === "GET") {
+    const { rows } = await pool.query(
+      `SELECT a.name, p.total, p.done, p.partial, p.excluded, p.marked, p.meters_total, p.meters_driven,
+              p.computed_at, p.status, p.dirty
+         FROM areas a JOIN area_progress p ON p.area_id = a.id WHERE p.total IS NOT NULL`);
+    return sendJson(res, 200, {
+      areas: rows.map((r) => ({
+        name: r.name, total: r.total, done: r.done, partial: r.partial, excluded: r.excluded,
+        marked: r.marked, metersTotal: Number(r.meters_total), metersDriven: Number(r.meters_driven),
+        computedAt: r.computed_at ? new Date(r.computed_at).getTime() : null,
+        // Still being brought up to date: a phone asks again shortly.
+        pending: r.status !== "done" || r.dirty,
+      })),
+    });
+  }
+
   const areaProgress = route.match(/^\/api\/areas\/(\d+)\/progress$/);
   if (areaProgress && req.method === "GET") {
     const p = await progress.forArea(pool, Number(areaProgress[1]));
@@ -1806,7 +1853,7 @@ async function handle(req, res) {
     const taken = await completions.apply(pool,
       ids.map((wayId) => ({ wayId, marked: body.marked !== false, updatedAt: at })), who.user.id);
     // A single edit from the page: someone is looking at the totals, so do not keep them waiting.
-    progress.changed(pool, 1500);
+    progress.changed(pool, ids, 1500);
     return sendJson(res, 200, { marked: body.marked !== false, streets: taken });
   }
 
@@ -1824,7 +1871,7 @@ async function handle(req, res) {
     const taken = await completions.applyExclusions(pool, ids.map((wayId) => ({
       wayId, excluded, reason: body.reason, note: body.note, updatedAt: at,
     })), who.user.id);
-    progress.changed(pool, 1500);
+    progress.changed(pool, ids, 1500);
     return sendJson(res, 200, { excluded, streets: taken });
   }
 
@@ -1941,6 +1988,17 @@ waitForDatabase()
   .then(() => completions.ensureSchema(pool))
   .then(() => progress.ensureSchema(pool))
   .then(() => progress.catchUp(pool).then((n) => n && console.log(`Counting ${n} areas in the background.`)))
+  .then(() => {
+    // A refreshed cell may have gained or lost streets: the areas over it are counted afresh.
+    streets.onRefresh((key) => progress.cellRefreshed(pool, key));
+    // Stale cells (over a month old) are fetched again a few at a time, every few hours,
+    // rather than all at once when someone happens to need them.
+    setInterval(() => {
+      streets.refreshStale(pool, 40)
+        .then((n) => n && console.log(`Refreshed ${n} street cells.`))
+        .catch((err) => console.error("could not refresh street cells", err.message));
+    }, 6 * 60 * 60 * 1000).unref();
+  })
   .then(readyPhotos)
   .then(() => {
     // Expired rows are dead weight; clear them at boot and once a day after.

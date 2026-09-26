@@ -3199,6 +3199,17 @@ window.StreetSweepBases = {
         " · Postgres " + d.database.version + " · " + bytes(d.server.memoryBytes) + " in use · " +
         d.photos.files + (d.photos.files === 1 ? " photo" : " photos") +
         (d.photos.on ? "" : " (photo storage is off)");
+      // The street store: every street every area needs, held here for the phones.
+      return apiJson("/api/admin/street-store").then(function (st) {
+        el("srvGrid").innerHTML +=
+          cell(st.stored.toLocaleString() + " / " + st.needed.toLocaleString(), "Street cells stored") +
+          cell(st.ways.toLocaleString(), "Streets stored") +
+          cell(bytes(st.bytes), "Street store");
+        el("srvLine").textContent += " · " + (st.missing
+          ? st.missing.toLocaleString() + " street cells still to fetch from OpenStreetMap"
+          : "every area's streets are stored") +
+          (st.stale ? ", " + st.stale.toLocaleString() + " due a refresh" : "");
+      }).catch(function () { /* an older server */ });
     });
   }
 
