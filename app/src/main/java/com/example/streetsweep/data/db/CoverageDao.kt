@@ -232,6 +232,46 @@ interface CoverageDao {
     )
     fun observeStatsFor(areaId: Long): Flow<AreaStatsRow>
 
+    /** The same, read once, for filling the kept figures in the background. */
+    @Query(
+        """
+        SELECT COUNT(*) AS total,
+               SUM(w.lengthMeters) AS meters,
+               SUM(MIN(w.lengthMeters, (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END))) AS drivenMeters,
+               SUM(CASE WHEN (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END) >= w.minDoneFraction * w.lengthMeters THEN 1 ELSE 0 END) AS done,
+               SUM(CASE WHEN (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END) > 0.02 * w.lengthMeters AND (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END) < w.minDoneFraction * w.lengthMeters THEN 1 ELSE 0 END) AS partial,
+               (SELECT COUNT(*) FROM area_ways aw2 JOIN street_exclusions x2 ON x2.wayId = aw2.wayId AND x2.active = 1 WHERE aw2.areaId = :areaId) AS excluded
+        FROM area_ways aw
+        JOIN osm_ways w ON w.id = aw.wayId
+        LEFT JOIN (SELECT wayId, drivenMeters AS m FROM way_coverage) d ON d.wayId = w.id
+        LEFT JOIN street_completions c ON c.wayId = w.id AND c.marked = 1
+        WHERE aw.areaId = :areaId AND NOT EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id AND x.active = 1)
+        """,
+    )
+    suspend fun statsForNow(areaId: Long): AreaStatsRow
+
+    // ---- kept figures (area_stats) ----
+    @Query("SELECT * FROM area_stats WHERE areaId = :areaId")
+    fun observeCachedStats(areaId: Long): Flow<AreaStatsCache?>
+
+    @Query("SELECT * FROM area_stats")
+    suspend fun allCachedStats(): List<AreaStatsCache>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertCachedStats(rows: List<AreaStatsCache>)
+
+    @Query("SELECT DISTINCT areaId FROM area_ways WHERE wayId IN (:wayIds)")
+    suspend fun areaIdsForWays(wayIds: List<Long>): List<Long>
+
+    @Query("SELECT * FROM areas WHERE onDemand = 1")
+    suspend fun onDemandAreas(): List<CoverageArea>
+
+    @Query("SELECT `key` FROM street_chunks WHERE `key` IN (:keys) AND loadedAt > :freshAfter")
+    suspend fun freshChunkKeys(keys: List<String>, freshAfter: Long): List<String>
+
+    @Query("UPDATE areas SET onDemand = :onDemand, chunksTotal = :total, chunksDone = :done, lastError = NULL, streetsLoadedAt = :loadedAt WHERE id = :id")
+    suspend fun setOnDemand(id: Long, onDemand: Boolean, total: Int, done: Int, loadedAt: Long?)
+
     // ---- driven edges ----
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertDrivenEdges(edges: List<DrivenEdge>): List<Long>

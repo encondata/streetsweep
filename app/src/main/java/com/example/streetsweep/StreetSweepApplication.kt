@@ -26,6 +26,8 @@ class StreetSweepApplication : Application() {
         // a backup, or anything else that arrived with segments but no coverage.
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             runCatching { container.coverageRepository.ensureWayCoverage() }
+            // Areas with no figures kept yet (just upgraded, or new) get them now.
+            runCatching { container.coverageRepository.fillMissingStats() }
         }
     }
 }

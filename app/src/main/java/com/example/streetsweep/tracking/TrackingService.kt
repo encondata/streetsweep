@@ -437,6 +437,8 @@ class TrackingService : LifecycleService() {
             return
         }
         val point = LatLngPoint(location.latitude, location.longitude)
+        // Streets for a big area arrive as the car reaches them.
+        com.example.streetsweep.data.osm.NearbyStreets.near(this, point)
         val accuracy = if (location.hasAccuracy()) location.accuracy else 0f
         val now = System.currentTimeMillis()
         when (filter.evaluate(point, accuracy, lastStored)) {

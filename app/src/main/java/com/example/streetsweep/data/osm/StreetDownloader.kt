@@ -42,6 +42,7 @@ class StreetDownloadWorker(context: Context, params: WorkerParameters) : Corouti
         // Nothing here may return failure. On a queue, a failed job fails every job behind
         // it, so one bad area would take every other area's download down with it. A problem
         // with this area is written on the area, where it shows, and the queue moves on.
+        inputData.getString(KEY_CELLS)?.let { return loadCells(it.split(',').filter { k -> k.isNotBlank() }) }
         val areaId = inputData.getLong(KEY_AREA_ID, -1L)
         if (areaId < 0) return Result.success()
         val container = applicationContext.appContainer
@@ -49,6 +50,13 @@ class StreetDownloadWorker(context: Context, params: WorkerParameters) : Corouti
         val area = repo.getArea(areaId) ?: return Result.success()   // deleted since it was queued
 
         val cells = ChunkGrid.cellsFor(area.bounds)
+        // A big area, with a server to load from as needed, is not downloaded whole: its
+        // streets arrive as the phone drives through it and as its map is looked at.
+        if (cells.size > WHOLE_AREA_CELLS && serverSet()) {
+            val held = repo.freshChunkCount(cells.map { it.key }, System.currentTimeMillis() - CHUNK_TTL_MS)
+            repo.setOnDemand(areaId, cells.size, held)
+            return Result.success()
+        }
         if (cells.size > MAX_CELLS) {
             repo.setProgress(areaId, cells.size, 0, error = "Area too large (${cells.size} cells; limit $MAX_CELLS). Split it into cities.")
             return Result.success()
@@ -78,7 +86,7 @@ class StreetDownloadWorker(context: Context, params: WorkerParameters) : Corouti
                         Result.success()
                     }
                 }
-                delay(PAUSE_BETWEEN_CELLS_MS)
+                delay(pauseBetweenCells())
             }
             done++
             repo.setProgress(areaId, cells.size, done)
@@ -108,6 +116,36 @@ class StreetDownloadWorker(context: Context, params: WorkerParameters) : Corouti
         }
         return container.overpass.streetsIn(cell.bounds)
     }
+
+    /**
+     * The streets near where the phone is, or of the map on screen, for areas that load on
+     * demand. No area progress to write: each on-demand area's count of cells held is
+     * brought up to date at the end instead.
+     */
+    private suspend fun loadCells(keys: List<String>): Result {
+        val repo = applicationContext.appContainer.coverageRepository
+        val now = System.currentTimeMillis()
+        for (key in keys) {
+            val cell = ChunkGrid.cellForKey(key) ?: continue
+            val existing = repo.getChunk(key)
+            if (existing != null && now - existing.loadedAt <= CHUNK_TTL_MS) continue
+            try {
+                repo.storeChunk(key, fetchWithRetry(cell))
+            } catch (e: Exception) {
+                Log.w(TAG, "nearby cell $key failed: ${e.message}")
+                // Asked for again the next time the phone is near it.
+            }
+            delay(pauseBetweenCells())
+        }
+        repo.refreshOnDemandCounts(now - CHUNK_TTL_MS)
+        return Result.success()
+    }
+
+    private suspend fun serverSet(): Boolean = applicationContext.appContainer.settings.current()
+        .let { !it.portalUrl.isNullOrBlank() && !it.portalToken.isNullOrBlank() }
+
+    /** A breath between cells: a long one for OpenStreetMap itself, a short one for our server. */
+    private suspend fun pauseBetweenCells(): Long = if (serverSet()) PAUSE_FROM_SERVER_MS else PAUSE_BETWEEN_CELLS_MS
 
     private suspend fun fetchWithRetry(cell: ChunkGrid.Cell): List<OsmStreet> {
         var last: Exception? = null
@@ -141,6 +179,11 @@ class StreetDownloadWorker(context: Context, params: WorkerParameters) : Corouti
     companion object {
         private const val TAG = "StreetDownload"
         const val KEY_AREA_ID = "areaId"
+        const val KEY_CELLS = "cells"
+        /** Over this many cells, an area on a server loads as needed rather than whole. */
+        const val WHOLE_AREA_CELLS = 12
+        private const val PAUSE_FROM_SERVER_MS = 250L
+        private const val NEARBY_QUEUE = "street-nearby"
         const val KEY_DONE = "done"
         const val KEY_TOTAL = "total"
         const val MAX_CELLS = 400
@@ -170,6 +213,19 @@ class StreetDownloadWorker(context: Context, params: WorkerParameters) : Corouti
         }
 
         private fun areaTag(id: Long) = "area-$id"
+
+        /**
+         * Cells to load now, for on-demand areas: on a queue of their own, so the streets
+         * round the car are not stuck behind a long area download.
+         */
+        fun enqueueCells(context: Context, keys: Collection<String>) {
+            if (keys.isEmpty()) return
+            val request = OneTimeWorkRequestBuilder<StreetDownloadWorker>()
+                .setInputData(Data.Builder().putString(KEY_CELLS, keys.joinToString(",")).build())
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .build()
+            WorkManager.getInstance(context).enqueueUniqueWork(NEARBY_QUEUE, ExistingWorkPolicy.APPEND_OR_REPLACE, request)
+        }
 
         /**
          * Queues each area not already waiting, and returns how many were added. Checking

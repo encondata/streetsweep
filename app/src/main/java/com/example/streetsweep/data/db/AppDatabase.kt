@@ -14,9 +14,9 @@ import com.example.streetsweep.domain.RoadShape
     entities = [
         TrackSession::class, TrackPoint::class, SnappedPoint::class,
         CoverageArea::class, AreaWay::class, OsmWay::class, StreetChunk::class, DrivenEdge::class,
-        Poi::class, StreetExclusion::class, StreetCompletion::class, WayCoverage::class,
+        Poi::class, StreetExclusion::class, StreetCompletion::class, WayCoverage::class, AreaStatsCache::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -200,10 +200,28 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v14: areas can load their streets on demand, and every area's figures are kept in
+         * area_stats instead of being added up on every change. Both start empty: the
+         * figures are filled in the background and from the server at the next sync.
+         */
+        @JvmField
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `areas` ADD COLUMN `onDemand` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `area_stats` (`areaId` INTEGER NOT NULL, `total` INTEGER NOT NULL, " +
+                        "`done` INTEGER NOT NULL, `partial` INTEGER NOT NULL, `excluded` INTEGER NOT NULL, " +
+                        "`metersTotal` REAL NOT NULL, `metersDriven` REAL NOT NULL, `source` TEXT NOT NULL, " +
+                        "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`areaId`))",
+                )
+            }
+        }
+
         /** Hand-written migrations, oldest first. Add one for each version bump. */
         val MIGRATIONS: Array<Migration> =
             arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
-                MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+                MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
 
         fun build(context: Context): AppDatabase =
             // The phone now holds real drives and areas. Every schema change from version 4 on

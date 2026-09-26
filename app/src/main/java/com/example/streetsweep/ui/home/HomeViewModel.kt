@@ -84,7 +84,11 @@ class HomeViewModel(private val container: AppContainer, private val context: Co
 
     // ---- viewport-driven data ----
     private val viewport = MutableStateFlow<Viewport?>(null)
-    fun onViewport(bounds: Bounds, zoom: Double) { viewport.value = Viewport(bounds, zoom) }
+    fun onViewport(bounds: Bounds, zoom: Double) {
+        viewport.value = Viewport(bounds, zoom)
+        // Looking at part of a big area loads its streets, as driving through it does.
+        com.example.streetsweep.data.osm.NearbyStreets.inView(context, bounds, zoom)
+    }
     val currentViewport: Viewport? get() = viewport.value
 
     private val debouncedViewport = viewport.debounce(200)

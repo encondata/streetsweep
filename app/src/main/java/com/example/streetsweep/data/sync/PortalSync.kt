@@ -98,6 +98,31 @@ class PortalSync(
         return AreaPull(added, updated, kept, same)
     }
 
+    /** Run after every push; AppContainer uses it to take the web's figures again shortly. */
+    var afterPush: (() -> Unit)? = null
+
+    /**
+     * Every area's figures as the web counts them, kept for the screens to show. Returns
+     * whether any were still being recounted, so the caller can look again.
+     */
+    suspend fun pullAreaStats(): Boolean {
+        val body = client.getJson("/api/areas/progress")
+        val rows = JSONObject(body).optJSONArray("areas") ?: return false
+        val figures = (0 until rows.length()).map { i ->
+            val r = rows.getJSONObject(i)
+            com.example.streetsweep.data.ServerAreaFigures(
+                name = r.optString("name"), total = r.optInt("total"), done = r.optInt("done"),
+                partial = r.optInt("partial"), excluded = r.optInt("excluded"),
+                metersTotal = r.optDouble("metersTotal", 0.0), metersDriven = r.optDouble("metersDriven", 0.0),
+                computedAt = r.optLong("computedAt", System.currentTimeMillis()),
+                pending = r.optBoolean("pending", false),
+            )
+        }
+        val applied = coverage.applyServerStats(figures)
+        Log.d(TAG, "took the web's figures for $applied areas")
+        return figures.any { it.pending }
+    }
+
     /** The key the server gives a marked place, so the phone can address one. */
     private fun poiKey(p: com.example.streetsweep.data.db.Poi): String =
         "%d:%.6f:%.6f".format(java.util.Locale.US, p.timestamp, p.latitude, p.longitude)
@@ -207,6 +232,13 @@ class PortalSync(
         if (areaPull.changedAnything) {
             Log.i(TAG, "areas from the portal: ${areaPull.added.size} added, ${areaPull.updated.size} reshaped")
         }
+
+        // The web's figures for every area: the record, and the only full count of an area
+        // this phone holds only part of. The server recounts a few seconds after a push, so
+        // they are taken again shortly as well.
+        runCatching { pullAreaStats() }
+            .onFailure { Log.w(TAG, "could not take the web's area figures: ${it.message}") }
+        afterPush?.invoke()
 
         settings.setLastPortalPushAt(startedAt)
         return PushResult(areas.size, sent, drives.size, pois.size, areaPull)

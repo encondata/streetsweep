@@ -25,6 +25,7 @@ class WayCoverageBuilder(private val db: AppDatabase) {
             val gone = batch.filter { edges[it] == null }
             if (gone.isNotEmpty()) dao.deleteCoverage(gone)
         }
+        listener?.invoke(wayIds)
     }
 
     /** Everything, for a database that has segments but no coverage worked out for them. */
@@ -35,6 +36,12 @@ class WayCoverageBuilder(private val db: AppDatabase) {
 
     companion object {
         private const val CHUNK = 400
+
+        /**
+         * Told which streets were re-measured — a drive recorded or deleted, streets
+         * downloaded — so the areas holding them can have their figures redone.
+         */
+        @Volatile var listener: ((Collection<Long>) -> Unit)? = null
 
         /**
          * The street's driven length. Without its shape (streets not downloaded yet) the

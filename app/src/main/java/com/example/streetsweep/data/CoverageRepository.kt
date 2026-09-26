@@ -29,6 +29,7 @@ import com.example.streetsweep.domain.LatLngPoint
 import com.example.streetsweep.domain.Polygon
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -80,6 +81,12 @@ data class StreetStatus(
     }
 }
 
+/** One area's figures as the web counts them (GET /api/areas/progress). */
+data class ServerAreaFigures(
+    val name: String, val total: Int, val done: Int, val partial: Int, val excluded: Int,
+    val metersTotal: Double, val metersDriven: Double, val computedAt: Long, val pending: Boolean,
+)
+
 data class AreaStats(
     /** Counts and lengths are over countable streets only; [excluded] are left out of them. */
     val total: Int,
@@ -88,7 +95,12 @@ data class AreaStats(
     val metersTotal: Double,
     val metersDriven: Double,
     val excluded: Int,
+    /** "server" (the web's count, pulled at sync) or "phone" (worked out here). */
+    val source: String = "phone",
+    /** When these figures were worked out; 0 if never. */
+    val updatedAt: Long = 0,
 ) {
+    val fromServer: Boolean get() = source == "server"
     val percent: Int get() = if (metersTotal <= 0) 0 else (metersDriven / metersTotal * 100).roundToInt()
     val remaining: Int get() = (total - done).coerceAtLeast(0)
 
@@ -98,6 +110,11 @@ data class AreaStats(
             total = r.total, done = r.done ?: 0, partial = r.partial ?: 0,
             metersTotal = r.meters ?: 0.0, metersDriven = r.drivenMeters ?: 0.0,
             excluded = r.excluded ?: 0,
+        )
+
+        fun fromCache(c: com.example.streetsweep.data.db.AreaStatsCache) = AreaStats(
+            total = c.total, done = c.done, partial = c.partial, metersTotal = c.metersTotal,
+            metersDriven = c.metersDriven, excluded = c.excluded, source = c.source, updatedAt = c.updatedAt,
         )
     }
 }
@@ -160,6 +177,10 @@ class CoverageRepository(private val db: AppDatabase) {
     private val dao get() = db.coverageDao()
     private val coverageBuilder = WayCoverageBuilder(db)
 
+    init {
+        WayCoverageBuilder.listener = { ids -> statsChangedForWays(ids) }
+    }
+
     /** Works out any street coverage a restored or older database arrived without. */
     suspend fun ensureWayCoverage() = coverageBuilder.rebuildIfMissing()
 
@@ -172,7 +193,89 @@ class CoverageRepository(private val db: AppDatabase) {
         dao.getAreas().filter { it.streetsLoadedAt == null }.map { it.id }
     suspend fun getArea(id: Long): CoverageArea? = dao.getArea(id)
 
-    fun observeStats(areaId: Long): Flow<AreaStats> = dao.observeStatsFor(areaId).map { AreaStats.fromRow(it) }
+    /**
+     * An area's figures, from what is kept (area_stats) — never added up on the spot. For a
+     * metro that is a few hundred thousand streets, and every screen showing an area would
+     * otherwise redo it every time a driven street was recorded.
+     */
+    fun observeStats(areaId: Long): Flow<AreaStats> =
+        dao.observeCachedStats(areaId).map { it?.let(AreaStats::fromCache) ?: AreaStats.EMPTY }
+
+    // ---- keeping the figures ----
+
+    /**
+     * Whether this phone takes its figures from a server. Set by AppContainer; when true,
+     * an area the server has figures for is left to the server (the record), and only areas
+     * it does not know are worked out here.
+     */
+    @Volatile var serverBacked: suspend () -> Boolean = { false }
+
+    private val statsScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+    private val pendingStats = HashSet<Long>()
+    private var statsJob: kotlinx.coroutines.Job? = null
+
+    /** Streets changed: the figures of the areas holding them are worked out again, soon. */
+    fun statsChangedForWays(wayIds: Collection<Long>) {
+        if (wayIds.isEmpty()) return
+        statsScope.launch {
+            val ids = wayIds.distinct().chunked(WAY_LOOKUP_CHUNK).flatMap { dao.areaIdsForWays(it) }
+            statsChanged(ids)
+        }
+    }
+
+    /** Waits a moment for more changes, then redoes each named area once. */
+    fun statsChanged(areaIds: Collection<Long>) {
+        if (areaIds.isEmpty()) return
+        synchronized(pendingStats) { pendingStats.addAll(areaIds) }
+        statsJob?.cancel()
+        statsJob = statsScope.launch {
+            kotlinx.coroutines.delay(STATS_SETTLE_MS)
+            val ids = synchronized(pendingStats) { pendingStats.toList().also { pendingStats.clear() } }
+            runCatching { recomputeStats(ids) }
+        }
+    }
+
+    private suspend fun recomputeStats(ids: List<Long>, force: Boolean = false) {
+        val server = serverBacked()
+        val kept = dao.allCachedStats().associateBy { it.areaId }
+        val now = System.currentTimeMillis()
+        val rows = ids.distinct().mapNotNull { id ->
+            if (!force && server && kept[id]?.source == SOURCE_SERVER) return@mapNotNull null
+            val r = dao.statsForNow(id)
+            com.example.streetsweep.data.db.AreaStatsCache(
+                areaId = id, total = r.total, done = r.done ?: 0, partial = r.partial ?: 0,
+                excluded = r.excluded ?: 0, metersTotal = r.meters ?: 0.0, metersDriven = r.drivenMeters ?: 0.0,
+                source = SOURCE_PHONE, updatedAt = now,
+            )
+        }
+        if (rows.isNotEmpty()) dao.upsertCachedStats(rows)
+    }
+
+    /** Areas with no figures kept yet (new, or just upgraded) get them, in the background. */
+    suspend fun fillMissingStats() {
+        val kept = dao.allCachedStats().map { it.areaId }.toSet()
+        val missing = dao.getAreas().map { it.id }.filter { it !in kept }
+        if (missing.isNotEmpty()) recomputeStats(missing, force = true)
+    }
+
+    /**
+     * The web's figures, matched to this phone's areas by name. They replace whatever was
+     * worked out here: the web counts everyone's driving and every street, which a phone
+     * holding part of a metro cannot.
+     */
+    suspend fun applyServerStats(rows: List<ServerAreaFigures>): Int {
+        val byName = dao.getAreas().associateBy { it.name.lowercase() }
+        val out = rows.mapNotNull { f ->
+            val a = byName[f.name.lowercase()] ?: return@mapNotNull null
+            com.example.streetsweep.data.db.AreaStatsCache(
+                areaId = a.id, total = f.total, done = f.done, partial = f.partial, excluded = f.excluded,
+                metersTotal = f.metersTotal, metersDriven = f.metersDriven,
+                source = SOURCE_SERVER, updatedAt = f.computedAt,
+            )
+        }
+        if (out.isNotEmpty()) dao.upsertCachedStats(out)
+        return out.size
+    }
 
     /** Every area with its live numbers, largest level first. */
     fun observeAreasWithStats(): Flow<List<AreaWithStats>> = dao.observeAreas().flatMapLatest { areas ->
@@ -294,10 +397,29 @@ class CoverageRepository(private val db: AppDatabase) {
             dao.clearMembership(area.id)
             if (inside.isNotEmpty()) dao.insertMembership(inside)
         }
+        statsChanged(listOf(area.id))
     }
 
-    private suspend fun refreshMembershipTouching(b: Bounds) {
-        dao.getAreasIntersecting(b.south, b.west, b.north, b.east).forEach { refreshMembership(it) }
+    /**
+     * A cell's streets arrived: each area over it gains the ones inside it. Only the new
+     * streets are tested — re-testing every street a metro already has, against a county
+     * outline of thousands of corners, for each cell loaded during a drive, would be most of
+     * the phone's time.
+     */
+    private suspend fun addMembershipFor(streets: List<OsmStreet>, b: Bounds) {
+        val areas = dao.getAreasIntersecting(b.south, b.west, b.north, b.east)
+        if (areas.isEmpty() || streets.isEmpty()) return
+        val centres = streets.mapNotNull { s -> Bounds.of(s.shape)?.center?.let { s.id to it } }
+        val rows = ArrayList<AreaWay>()
+        for (area in areas) {
+            val poly = area.vertices
+            val box = area.bounds
+            for ((id, c) in centres) {
+                if (box.contains(c) && Polygon.contains(poly, c)) rows += AreaWay(area.id, id)
+            }
+        }
+        if (rows.isNotEmpty()) dao.insertMembership(rows)
+        statsChanged(areas.map { it.id })
     }
 
     // ---- exclusions ----
@@ -309,12 +431,14 @@ class CoverageRepository(private val db: AppDatabase) {
         dao.insertExclusions(wayIds.distinct().map {
             StreetExclusion(it, reason.name, note, now, active = true, updatedAt = now, sent = false)
         })
+        statsChangedForWays(wayIds)
     }
 
     suspend fun include(wayIds: List<Long>) {
         if (wayIds.isEmpty()) return
         val now = System.currentTimeMillis()
         wayIds.distinct().chunked(500).forEach { dao.removeExclusions(it, now) }
+        statsChangedForWays(wayIds)
     }
 
     suspend fun unsentExclusions(): List<StreetExclusion> = dao.unsentExclusions()
@@ -344,6 +468,7 @@ class CoverageRepository(private val db: AppDatabase) {
         if (wayIds.isEmpty()) return
         val now = System.currentTimeMillis()
         dao.upsertCompletions(wayIds.distinct().map { StreetCompletion(it, marked, now, sent = false) })
+        statsChangedForWays(wayIds)
     }
 
     suspend fun unsentCompletions(): List<StreetCompletion> = dao.unsentCompletions()
@@ -528,6 +653,26 @@ class CoverageRepository(private val db: AppDatabase) {
     // ---- street network ----
     suspend fun getChunk(key: String): StreetChunk? = dao.getChunk(key)
 
+    suspend fun freshChunkKeys(keys: List<String>, freshAfter: Long): List<String> =
+        keys.chunked(WAY_LOOKUP_CHUNK).flatMap { dao.freshChunkKeys(it, freshAfter) }
+
+    suspend fun freshChunkCount(keys: List<String>, freshAfter: Long): Int =
+        keys.chunked(WAY_LOOKUP_CHUNK).sumOf { dao.freshChunkKeys(it, freshAfter).size }
+
+    /** Marks an area as loading its streets as needed, with how many of its cells are here. */
+    suspend fun setOnDemand(id: Long, cells: Int, held: Int) =
+        dao.setOnDemand(id, true, cells, held, System.currentTimeMillis())
+
+    suspend fun onDemandAreas(): List<CoverageArea> = dao.onDemandAreas()
+
+    /** After nearby cells arrive: each on-demand area's count of cells held. */
+    suspend fun refreshOnDemandCounts(freshAfter: Long) {
+        for (a in dao.onDemandAreas()) {
+            val keys = com.example.streetsweep.domain.ChunkGrid.cellsFor(a.bounds).map { it.key }
+            dao.setOnDemand(a.id, true, keys.size, freshChunkCount(keys, freshAfter), a.streetsLoadedAt ?: System.currentTimeMillis())
+        }
+    }
+
     suspend fun storeChunk(key: String, streets: List<OsmStreet>) = db.withTransaction {
         val now = System.currentTimeMillis()
         dao.insertWays(
@@ -550,7 +695,7 @@ class CoverageRepository(private val db: AppDatabase) {
         // with the shape, it can be measured properly.
         coverageBuilder.refresh(streets.map { it.id })
     }.also {
-        Bounds.of(streets.flatMap { s -> listOf(s.shape.first(), s.shape.last()) })?.let { refreshMembershipTouching(it) }
+        Bounds.of(streets.flatMap { s -> listOf(s.shape.first(), s.shape.last()) })?.let { addMembershipFor(streets, it) }
     }
 
     fun observeWayCount(): Flow<Int> = dao.observeWayCount()
@@ -596,6 +741,10 @@ class CoverageRepository(private val db: AppDatabase) {
 
     companion object {
         const val AREA_STREET_LIMIT = 5_000
+        const val SOURCE_SERVER = "server"
+        const val SOURCE_PHONE = "phone"
+        /** Changes are gathered this long before an area's figures are redone. */
+        private const val STATS_SETTLE_MS = 3_000L
         const val GATE_SEARCH_METERS = 3_000.0
         const val GATE_WAY_LIMIT = 6_000
         const val GATE_ON_ROAD_METERS = 60.0

@@ -36,11 +36,16 @@ data class CoverageArea(
      * never quietly replaced by the next sync.
      */
     val pulledOutline: String? = null,
+    /**
+     * Too big to download whole (a metro): its streets load as the phone drives through it
+     * and as the map is looked at, cell by cell, from the server. See NearbyStreets.
+     */
+    @ColumnInfo(defaultValue = "0") val onDemand: Boolean = false,
 ) {
     val bounds: Bounds get() = Bounds(south, west, north, east)
     val vertices: List<LatLngPoint> get() = ShapeText.decode(polygon)
     val areaLevel: AreaLevel get() = AreaLevel.fromOrdinal(level)
-    val isDownloading: Boolean get() = streetsLoadedAt == null && lastError == null && chunksTotal > 0
+    val isDownloading: Boolean get() = !onDemand && streetsLoadedAt == null && lastError == null && chunksTotal > 0
 }
 
 /** Which streets fall inside which area (by centroid, point-in-polygon). Recomputed on download or redraw. */
@@ -157,6 +162,26 @@ data class StreetCompletion(
 data class WayCoverage(
     @PrimaryKey val wayId: Long,
     val drivenMeters: Double,
+)
+
+/**
+ * An area's figures, kept rather than worked out each time a screen asks. Adding up every
+ * street of a metro on every change during a drive is far too much work for a phone.
+ *
+ * [source] "server" figures come from the web — the record — at each sync; "phone" ones are
+ * worked out here, in the background, for areas the server does not have.
+ */
+@Entity(tableName = "area_stats")
+data class AreaStatsCache(
+    @PrimaryKey val areaId: Long,
+    val total: Int,
+    val done: Int,
+    val partial: Int,
+    val excluded: Int,
+    val metersTotal: Double,
+    val metersDriven: Double,
+    val source: String,
+    val updatedAt: Long,
 )
 
 /** Row of the per-way coverage query. */

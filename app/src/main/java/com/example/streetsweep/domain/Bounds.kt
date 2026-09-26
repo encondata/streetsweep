@@ -49,6 +49,24 @@ object ChunkGrid {
             get() = Bounds(latIdx * SIZE_DEG, lngIdx * SIZE_DEG, (latIdx + 1) * SIZE_DEG, (lngIdx + 1) * SIZE_DEG)
     }
 
+    /** The cell a point is in. */
+    fun cellAt(p: LatLngPoint): Cell = Cell(floor(p.latitude / SIZE_DEG).toInt(), floor(p.longitude / SIZE_DEG).toInt())
+
+    /** The cell a key such as "303_-956" names, or null. */
+    fun cellForKey(key: String): Cell? {
+        val parts = key.split('_')
+        if (parts.size != 2) return null
+        val la = parts[0].toIntOrNull() ?: return null
+        val lo = parts[1].toIntOrNull() ?: return null
+        return Cell(la, lo)
+    }
+
+    /** The cell a point is in and the eight round it: about 20 by 17 miles. */
+    fun around(p: LatLngPoint): List<Cell> {
+        val c = cellAt(p)
+        return (-1..1).flatMap { dla -> (-1..1).map { dlo -> Cell(c.latIdx + dla, c.lngIdx + dlo) } }
+    }
+
     fun cellsFor(b: Bounds): List<Cell> {
         val out = ArrayList<Cell>()
         val lat0 = floor(b.south / SIZE_DEG).toInt()

@@ -27,7 +27,12 @@ class AppContainer(context: Context) {
 
     val database: AppDatabase by lazy { AppDatabase.build(appContext) }
     val trackRepository: TrackRepository by lazy { TrackRepository(database) }
-    val coverageRepository: CoverageRepository by lazy { CoverageRepository(database) }
+    val coverageRepository: CoverageRepository by lazy {
+        CoverageRepository(database).also { repo ->
+            // Signed in to a server: its figures are the record, and this phone leaves them be.
+            repo.serverBacked = { settings.current().let { !it.portalUrl.isNullOrBlank() && !it.portalToken.isNullOrBlank() } }
+        }
+    }
 
     /** The route being followed, shared by the phone screen and the car screen. */
     val route: RouteState by lazy { RouteState() }
@@ -39,7 +44,11 @@ class AppContainer(context: Context) {
     val portalClient: PortalClient by lazy {
         PortalClient({ settings.current().portalUrl }, { settings.current().portalToken })
     }
-    val portalSync: PortalSync by lazy { PortalSync(portalClient, trackRepository, coverageRepository, settings) }
+    val portalSync: PortalSync by lazy {
+        PortalSync(portalClient, trackRepository, coverageRepository, settings).also {
+            it.afterPush = { com.example.streetsweep.data.sync.AreaStatsPullWorker.enqueue(appContext) }
+        }
+    }
     val fusedLocationClient: FusedLocationProviderClient by lazy {
         LocationServices.getFusedLocationProviderClient(appContext)
     }

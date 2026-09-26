@@ -311,6 +311,24 @@ fun AreasScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
+                                // Where the figures come from, and for a big area, how much of
+                                // its street map is on this phone.
+                                val provenance = buildList {
+                                    if (a.stats.fromServer && a.stats.updatedAt > 0) {
+                                        add("From the web, " + java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT)
+                                            .format(java.util.Date(a.stats.updatedAt)))
+                                    }
+                                    if (a.area.onDemand) {
+                                        add("streets load as you drive (${a.area.chunksDone} of ${a.area.chunksTotal} map cells here)")
+                                    }
+                                }
+                                if (provenance.isNotEmpty()) {
+                                    Text(
+                                        provenance.joinToString(" · ").replaceFirstChar { it.uppercase() },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                                 // What is left, and a way straight to it. The street list
                                 // was previously only in the overflow menu.
                                 Spacer(Modifier.height(10.dp))
@@ -323,6 +341,7 @@ fun AreasScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Text(
+                                        if (a.stats.total == 0) "No streets counted yet" else
                                         if (a.stats.remaining == 0) "Every street driven" else
                                             "${a.stats.remaining} street${if (a.stats.remaining == 1) "" else "s"} remaining",
                                         style = MaterialTheme.typography.bodyMedium,
