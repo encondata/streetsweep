@@ -11,7 +11,9 @@
 set -euo pipefail
 
 REPO="${STREETSWEEP_REPO:-https://github.com/encondata/streetsweep.git}"
-DIR="${STREETSWEEP_DIR:-$HOME/streetsweep}"
+# On Unraid, on the array beside its data; anywhere else, the home directory.
+if [ -d /mnt/user ]; then DEFAULT_DIR=/mnt/user/streetsweep; else DEFAULT_DIR="$HOME/streetsweep"; fi
+DIR="${STREETSWEEP_DIR:-$DEFAULT_DIR}"
 BRANCH="${STREETSWEEP_BRANCH:-main}"
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
@@ -34,6 +36,10 @@ else
 fi
 
 cd "$DIR/tools"
+
+# An install elsewhere (such as /opt/streetsweep), or data still in Docker's own volumes,
+# is brought over first — before any settings are made, so its .env is the one kept.
+bash ./relocate.sh
 
 # A little randomness, from openssl when it is there and /dev/urandom when it is not.
 rand_hex() {
@@ -98,11 +104,21 @@ if [ -n "$ADMIN_EMAIL" ] && [ -n "$ADMIN_PASSWORD" ]; then
   [ "$CODE" = "200" ] && ADMIN_WORKS=yes
 fi
 
+# What the database holds, so a move can be seen to have brought everything with it.
+HELD="$(docker compose exec -T db psql -U streetsweep -d streetsweep -Atc \
+  "SELECT (SELECT count(*) FROM areas) || ' areas, ' || (SELECT count(*) FROM drives) || ' drives, ' ||
+          (SELECT count(*) FROM users) || ' accounts'" 2>/dev/null || true)"
+DATA_DIR="$(sed -n 's/^DATA_DIR=//p' .env | tail -1)"; DATA_DIR="${DATA_DIR:-$DIR/data}"
+
 say "StreetSweep server is up."
 cat <<SUMMARY
 
   Direct           $BASE   (plain HTTP, for your reverse proxy)
   Behind the proxy https://streetsweep.hackspacelabs.com
+
+  Installed in     $DIR
+  Data in          $DATA_DIR
+  Holding          ${HELD:-(could not read the database)}
 
   Access token     $TOKEN
 SUMMARY

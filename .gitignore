@@ -25,3 +25,6 @@ tools/.env
 # Caddy's certificates and state if ever bind-mounted
 tools/caddy-data/
 tools/caddy-config/
+
+# Server data (DATA_DIR default): database, photos, tile cache, map file, Valhalla.
+/data/

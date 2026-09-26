@@ -11,15 +11,23 @@ On the machine that will host it:
 curl -fsSL https://raw.githubusercontent.com/encondata/streetsweep/main/install.sh | bash
 ```
 
-That clones the repository to `~/streetsweep`, generates an access token, pulls the images and
-starts everything. Run it again any time to update: it pulls the latest code and leaves your
-token and database alone.
+That clones the repository to `/mnt/user/streetsweep` on Unraid (`~/streetsweep` elsewhere;
+set `STREETSWEEP_DIR` to choose), generates an access token, pulls the images and starts
+everything. Run it again any time to update: it pulls the latest code and leaves your token and
+database alone.
+
+Everything the server keeps is in plain folders under `data/` beside the code — `postgres`,
+`photos`, `tiles`, `osm` and `valhalla` — or wherever `DATA_DIR` in `tools/.env` points. An
+install from before, running from another directory (such as `/opt/streetsweep`) or keeping its
+data in Docker volumes, is moved on the next run by `tools/relocate.sh`: settings copied, data
+copied out of the volumes, old containers stopped. The old directory and volumes are left for you
+to remove once the new install checks out.
 
 To work from a checkout instead, copy `.env.example` to `.env`, put a token in it, then
 `docker compose up -d --build`.
 
-Two containers: `web` is a small Node server serving the page and the API, and `db` is Postgres
-with everything in a named volume. The schema is created on startup, so there is nothing to run
+Three containers: `web` is a small Node server serving the page and the API, `db` is Postgres,
+and `valhalla` matches drives to streets. The schema is created on startup, so there is nothing to run
 by hand. Stop it with `docker compose down`; add `-v` to throw the database away as well.
 
 ## Getting to it

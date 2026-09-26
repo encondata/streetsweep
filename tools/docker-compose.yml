@@ -7,7 +7,12 @@ services:
       POSTGRES_PASSWORD: streetsweep
       POSTGRES_DB: streetsweep
     volumes:
-      - areas-data:/var/lib/postgresql/data
+      # Everything the server keeps lives in plain folders under DATA_DIR (../data, beside
+      # the code: /mnt/user/streetsweep/data on Unraid), not in Docker's own volumes, so it
+      # sits on the array, is backed up with it, and does not fill docker.img. Postgres is
+      # happier on a cache-only share; point DATA_DIR there (e.g. /mnt/cache/streetsweep)
+      # if the array is slow.
+      - ${DATA_DIR:-../data}/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U streetsweep -d streetsweep"]
       interval: 5s
@@ -51,15 +56,9 @@ services:
       OSM_EXTRACT_URL: ${OSM_EXTRACT_URL:-}
       OSM_EXTRACT_DIR: /data/osm
     volumes:
-      # Deliberately not photo-data. That volume holds MinIO's own layout —
-      # .minio.sys and the bucket directory — and mounting it here would leave the
-      # photos tangled up with the thing they were moved out of: no way to reclaim
-      # the old space without deleting the new files, and a storage count that
-      # includes MinIO's bookkeeping. photo-data is kept below, untouched, so it can
-      # be dropped in one go once migrate-photos.js has run.
-      - photo-files:/data/photos
-      - tile-cache:/data/tiles
-      - osm-extract:/data/osm
+      - ${DATA_DIR:-../data}/photos:/data/photos
+      - ${DATA_DIR:-../data}/tiles:/data/tiles
+      - ${DATA_DIR:-../data}/osm:/data/osm
     # Plain HTTP for a reverse proxy in front to forward to. Set BIND_ADDRESS to
     # 127.0.0.1 in .env when that proxy runs on this same host.
     ports:
@@ -87,16 +86,9 @@ services:
       build_time_zones: "False"
       server_threads: ${VALHALLA_THREADS:-4}
     volumes:
-      - valhalla-data:/custom_files
+      - ${DATA_DIR:-../data}/valhalla:/custom_files
     restart: unless-stopped
 
-volumes:
-  areas-data:
-  photo-files:
-  tile-cache:
-  osm-extract:
-  valhalla-data:
-  # The old MinIO data. Nothing mounts it any more; it is declared so Compose does
-  # not treat it as an orphan, and so removing it stays a deliberate act:
-  #   docker compose down && docker volume rm tools_photo-data
-  photo-data:
+# No named volumes: see DATA_DIR above. An install from before kept its data in Docker
+# volumes (tools_areas-data and the rest); install.sh copies them into DATA_DIR once and
+# leaves the old volumes alone, to be removed by hand when the move has been checked.
