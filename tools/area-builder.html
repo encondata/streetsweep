@@ -1856,25 +1856,25 @@
 
 // ---- base maps ---------------------------------------------------------------
 //
-// OpenStreetMap has no aerial imagery, so there is no satellite here. These are the
-// three that exist: the standard rendering, and Carto's light and dark ones, which
-// are the same data drawn quietly enough to let the driven streets carry the colour.
+// All from this server's own tile cache (tiles.js), which fetches each tile from
+// OpenStreetMap or Esri once for every browser and phone, rather than each of them
+// asking those servers directly on every pan and zoom.
 
 window.StreetSweepBases = {
   standard: {
-    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    url: "/tiles/osm/{z}/{x}/{y}.png",
     attribution: "&copy; OpenStreetMap contributors",
     max: 19,
   },
   satellite: {
-    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    url: "/tiles/sat/{z}/{x}/{y}.jpg",
     attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics",
     max: 19,
   },
   hybrid: {
-    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    url: "/tiles/sat/{z}/{x}/{y}.jpg",
     // Place names and boundaries, drawn over the imagery so it can still be read.
-    overlay: "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+    overlay: "/tiles/ref/{z}/{x}/{y}.png",
     attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics",
     max: 19,
   },
@@ -3209,6 +3209,16 @@ window.StreetSweepBases = {
           ? st.missing.toLocaleString() + " street cells still to fetch from OpenStreetMap"
           : "every area's streets are stored") +
           (st.stale ? ", " + st.stale.toLocaleString() + " due a refresh" : "");
+      }).then(function () {
+        return apiJson("/api/admin/tile-cache").then(function (t) {
+          el("srvGrid").innerHTML +=
+            cell(t.files.toLocaleString(), "Map tiles cached") + cell(bytes(t.bytes), "Tile cache");
+          var asked = t.served;
+          el("srvLine").textContent += " · " + (asked
+            ? Math.round(((asked - t.fetched) / asked) * 100) + "% of " + asked.toLocaleString() +
+              " map tiles served from the cache since start-up"
+            : "no map tiles served yet");
+        });
       }).catch(function () { /* an older server */ });
     });
   }

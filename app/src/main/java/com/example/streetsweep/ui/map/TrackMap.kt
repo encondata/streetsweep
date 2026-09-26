@@ -493,7 +493,8 @@ fun TrackMap(
         modifier = modifier,
         factory = { ctx ->
             MapView(ctx).apply {
-                setTileSource(TileSourceFactory.MAPNIK)
+                // The server's tile cache when signed in; OpenStreetMap otherwise.
+                setTileSource(MapTiles.source())
                 setMultiTouchControls(true)
                 zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
                 isTilesScaledToDpi = true

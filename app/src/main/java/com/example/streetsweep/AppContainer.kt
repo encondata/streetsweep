@@ -17,6 +17,7 @@ import com.google.android.gms.location.LocationServices
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /** Hand-wired dependencies. Small enough that a DI framework would be more ceremony than help. */
 class AppContainer(context: Context) {
@@ -51,5 +52,13 @@ class AppContainer(context: Context) {
     }
     val fusedLocationClient: FusedLocationProviderClient by lazy {
         LocationServices.getFusedLocationProviderClient(appContext)
+    }
+
+    // Last in the class, so every property above is set up before it runs. Map tiles follow
+    // the sign-in: the server's cache when signed in, OpenStreetMap when not.
+    init {
+        applicationScope.launch {
+            settings.settings.collect { com.example.streetsweep.ui.map.MapTiles.update(it.portalUrl, it.portalToken) }
+        }
     }
 }

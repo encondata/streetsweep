@@ -68,11 +68,16 @@ class OsmTiles(
     }
 
     private fun download(key: Key): ByteArray? {
-        val conn = URL("$TILE_URL/${key.zoom}/${key.x}/${key.y}.png").openConnection() as HttpURLConnection
+        // The server's tile cache when signed in, so the car screen does not ask
+        // OpenStreetMap for tiles every phone and browser already has.
+        val conn = URL(com.example.streetsweep.ui.map.MapTiles.osmUrl(key.zoom, key.x, key.y)).openConnection() as HttpURLConnection
         return try {
             conn.connectTimeout = 10_000
             conn.readTimeout = 15_000
             conn.setRequestProperty("User-Agent", ValhallaClient.USER_AGENT)
+            com.example.streetsweep.ui.map.MapTiles.token
+                ?.takeIf { com.example.streetsweep.ui.map.MapTiles.serverBase != null }
+                ?.let { conn.setRequestProperty("Authorization", "Bearer $it") }
             if (conn.responseCode !in 200..299) null else conn.inputStream.use { it.readBytes() }
         } finally {
             conn.disconnect()

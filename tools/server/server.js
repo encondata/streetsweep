@@ -15,6 +15,7 @@ const networks = require("./networks");
 const streets = require("./streets");
 const completions = require("./completions");
 const progress = require("./progress");
+const tiles = require("./tiles");
 const photos = require("./photos");
 
 const PORT = Number(process.env.PORT || 80);
@@ -942,6 +943,17 @@ async function handle(req, res) {
     }
   }
 
+  // Map tiles, from the server's own cache (tiles.js). Signed-in only, like the data.
+  const tileMatch = route.match(tiles.ROUTE);
+  if (tileMatch && req.method === "GET") {
+    const viewer = await identity.identify(pool, req, { legacyToken: SYNC_TOKEN });
+    if (!viewer) {
+      res.writeHead(401, { "Content-Type": "text/plain", "WWW-Authenticate": "Bearer" });
+      return res.end("Please sign in");
+    }
+    return tiles.serve(req, res, tileMatch[1], Number(tileMatch[2]), Number(tileMatch[3]), Number(tileMatch[4]));
+  }
+
   if (route.length > 1 && ASSETS.has(route.slice(1))) {
     const file = route.slice(1);
     res.writeHead(200, {
@@ -1636,6 +1648,11 @@ async function handle(req, res) {
   }
 
   /** The same, by vehicle rather than by person. */
+  /** The map tile cache: how much it holds and how often it has saved a trip upstream. */
+  if (route === "/api/admin/tile-cache" && req.method === "GET") {
+    return sendJson(res, 200, await tiles.cacheStatus());
+  }
+
   /** The street store: how many of the cells the areas need are held, stale or missing. */
   if (route === "/api/admin/street-store" && req.method === "GET") {
     return sendJson(res, 200, await streets.storeStatus(pool));

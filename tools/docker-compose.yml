@@ -33,6 +33,12 @@ services:
       # large, read rarely, and nothing joins against them, so object storage was only
       # ever a second container holding files this one already streams out itself.
       PHOTO_DIR: /data/photos
+      # Map tiles, fetched from OpenStreetMap (and Esri, for satellite) once and kept here
+      # for every browser and phone. TILE_URL_OSM points the standard map at your own tile
+      # server instead, e.g. http://tiles.local/{z}/{x}/{y}.png.
+      TILE_DIR: /data/tiles
+      TILE_TTL_DAYS: ${TILE_TTL_DAYS:-30}
+      TILE_URL_OSM: ${TILE_URL_OSM:-}
     volumes:
       # Deliberately not photo-data. That volume holds MinIO's own layout —
       # .minio.sys and the bucket directory — and mounting it here would leave the
@@ -41,6 +47,7 @@ services:
       # includes MinIO's bookkeeping. photo-data is kept below, untouched, so it can
       # be dropped in one go once migrate-photos.js has run.
       - photo-files:/data/photos
+      - tile-cache:/data/tiles
     # Plain HTTP for a reverse proxy in front to forward to. Set BIND_ADDRESS to
     # 127.0.0.1 in .env when that proxy runs on this same host.
     ports:
@@ -53,6 +60,7 @@ services:
 volumes:
   areas-data:
   photo-files:
+  tile-cache:
   # The old MinIO data. Nothing mounts it any more; it is declared so Compose does
   # not treat it as an orphan, and so removing it stays a deliberate act:
   #   docker compose down && docker volume rm tools_photo-data
