@@ -38,7 +38,15 @@ class AppContainer(context: Context) {
     /** The route being followed, shared by the phone screen and the car screen. */
     val route: RouteState by lazy { RouteState() }
     val settings: SettingsRepository by lazy { SettingsRepository(appContext) }
-    val valhalla: ValhallaClient by lazy { ValhallaClient { settings.current().valhallaUrl } }
+    val valhalla: ValhallaClient by lazy {
+        ValhallaClient({ settings.current().valhallaUrl }) {
+            settings.current().let { s ->
+                val base = PortalClient.normalise(s.portalUrl)
+                val token = s.portalToken?.takeIf { it.isNotBlank() }
+                if (base != null && token != null) base to token else null
+            }
+        }
+    }
     val overpass: OverpassClient by lazy { OverpassClient { settings.current().overpassUrl } }
     val roadMatcher: RoadMatcher by lazy { RoadMatcher(valhalla, trackRepository, coverageRepository) }
     val backupManager: BackupManager by lazy { BackupManager(appContext, database, trackRepository, coverageRepository) }

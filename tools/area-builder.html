@@ -3218,6 +3218,10 @@ window.StreetSweepBases = {
             ? Math.round(((asked - t.fetched) / asked) * 100) + "% of " + asked.toLocaleString() +
               " map tiles served from the cache since start-up"
             : "no map tiles served yet");
+          return apiJson("/api/admin/matching").then(function (m) {
+            el("srvLine").textContent += " · drives matched by " + (m.public ? "the public Valhalla server" : m.base) +
+              " (" + m.asked.toLocaleString() + " asked, " + m.remembered.toLocaleString() + " answered from memory)";
+          });
         });
       }).catch(function () { /* an older server */ });
     });

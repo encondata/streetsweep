@@ -16,6 +16,7 @@ const streets = require("./streets");
 const completions = require("./completions");
 const progress = require("./progress");
 const tiles = require("./tiles");
+const matching = require("./matching");
 const photos = require("./photos");
 
 const PORT = Number(process.env.PORT || 80);
@@ -908,6 +909,7 @@ function rightFor(route, method) {
   if (route.startsWith("/api/pois") && method !== "GET") return "record";
   if (route.startsWith("/api/street-completions") && method !== "GET") return "record";
   if (route.startsWith("/api/street-exclusions") && method !== "GET") return "record";
+  if (route.startsWith("/api/match/")) return "record";
   return "read";
 }
 
@@ -1648,6 +1650,19 @@ async function handle(req, res) {
   }
 
   /** The same, by vehicle rather than by person. */
+  /**
+   * Drive matching, passed on to Valhalla (matching.js) so phones never ask the public
+   * server themselves, and so one setting can move them all to a Valhalla of your own.
+   */
+  if (route === "/api/match/trace_attributes" && req.method === "POST") {
+    const answer = await matching.traceAttributes(JSON.stringify(await readBody(req)));
+    res.writeHead(answer.status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+    return res.end(answer.text);
+  }
+  if (route === "/api/admin/matching" && req.method === "GET") {
+    return sendJson(res, 200, matching.status());
+  }
+
   /** The map tile cache: how much it holds and how often it has saved a trip upstream. */
   if (route === "/api/admin/tile-cache" && req.method === "GET") {
     return sendJson(res, 200, await tiles.cacheStatus());

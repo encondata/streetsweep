@@ -38,7 +38,15 @@ interface RoadMatchClient {
  * Map matching through Valhalla's `trace_attributes` endpoint (OpenStreetMap data).
  * Default server is the community instance run by FOSSGIS e.V.; fair use only.
  */
-class ValhallaClient(private val baseUrl: suspend () -> String) : RoadMatchClient {
+class ValhallaClient(
+    private val baseUrl: suspend () -> String,
+    /**
+     * The server to match through, and this phone's token for it — or null with no server.
+     * Signed in, drives go to the server (which passes them on, gently, to the Valhalla it
+     * is set to use) instead of to the public server directly.
+     */
+    private val viaServer: suspend () -> Pair<String, String>? = { null },
+) : RoadMatchClient {
 
     override suspend fun match(points: List<LatLngPoint>): MatchResult = withContext(Dispatchers.IO) {
         require(points.size >= 2) { "Need at least two points to match" }
@@ -52,20 +60,35 @@ class ValhallaClient(private val baseUrl: suspend () -> String) : RoadMatchClien
             put("units", "kilometers")
             put("filters", JSONObject().put("action", "include").put("attributes", JSONArray(ATTRIBUTES)))
         }
-        val url = URL(baseUrl().trimEnd('/') + "/trace_attributes")
-        val conn = url.openConnection() as HttpURLConnection
+        val server = viaServer()
+        if (server != null) {
+            val (code, text) = post(server.first.trimEnd('/') + "/api/match/trace_attributes", body.toString(), server.second)
+            // A server from before the relay: straight to Valhalla, as before.
+            if (code != 404) {
+                if (code !in 200..299) throw RoadMatchException(parseError(text) ?: "Matching HTTP $code")
+                return@withContext parse(text)
+            }
+        }
+        val (code, text) = post(baseUrl().trimEnd('/') + "/trace_attributes", body.toString(), null)
+        if (code !in 200..299) throw RoadMatchException(parseError(text) ?: "Valhalla HTTP $code")
+        parse(text)
+    }
+
+    private fun post(address: String, body: String, token: String?): Pair<Int, String> {
+        val conn = URL(address).openConnection() as HttpURLConnection
         try {
             conn.requestMethod = "POST"
             conn.connectTimeout = 15_000
-            conn.readTimeout = 30_000
+            // Through the server a batch can wait its turn behind other phones' drives.
+            conn.readTimeout = if (token != null) 60_000 else 30_000
             conn.doOutput = true
             conn.setRequestProperty("Content-Type", "application/json")
             conn.setRequestProperty("User-Agent", USER_AGENT)
-            conn.outputStream.use { it.write(body.toString().toByteArray()) }
+            token?.let { conn.setRequestProperty("Authorization", "Bearer $it") }
+            conn.outputStream.use { it.write(body.toByteArray()) }
             val code = conn.responseCode
             val text = (if (code in 200..299) conn.inputStream else conn.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (code !in 200..299) throw RoadMatchException(parseError(text) ?: "Valhalla HTTP $code")
-            parse(text)
+            return code to text
         } finally {
             conn.disconnect()
         }

@@ -39,6 +39,10 @@ services:
       TILE_DIR: /data/tiles
       TILE_TTL_DAYS: ${TILE_TTL_DAYS:-30}
       TILE_URL_OSM: ${TILE_URL_OSM:-}
+      # Where drives are matched to streets. Empty uses the public Valhalla server; to use
+      # the one below, start it (docker compose --profile valhalla up -d) and set
+      # VALHALLA_URL=http://valhalla:8002 in .env.
+      VALHALLA_URL: ${VALHALLA_URL:-}
     volumes:
       # Deliberately not photo-data. That volume holds MinIO's own layout —
       # .minio.sys and the bucket directory — and mounting it here would leave the
@@ -57,10 +61,31 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Optional: a Valhalla of your own, built from a Geofabrik extract, so matching drives
+  # never touches the public server. Not started unless asked for:
+  #   docker compose --profile valhalla up -d
+  # The first start downloads the extract and builds routing tiles — for Texas, about
+  # 700 MB to download, several GB of disk and an hour or more. Later starts reuse them.
+  valhalla:
+    image: ghcr.io/valhalla/valhalla-scripted:latest
+    container_name: streetsweep-valhalla
+    profiles: ["valhalla"]
+    environment:
+      tile_urls: ${VALHALLA_PBF_URL:-https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf}
+      use_tiles_ignore_pbf: "True"
+      build_elevation: "False"
+      build_admins: "False"
+      build_time_zones: "False"
+      server_threads: ${VALHALLA_THREADS:-4}
+    volumes:
+      - valhalla-data:/custom_files
+    restart: unless-stopped
+
 volumes:
   areas-data:
   photo-files:
   tile-cache:
+  valhalla-data:
   # The old MinIO data. Nothing mounts it any more; it is declared so Compose does
   # not treat it as an orphan, and so removing it stays a deliberate act:
   #   docker compose down && docker volume rm tools_photo-data
