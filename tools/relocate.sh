@@ -45,7 +45,8 @@ if [ "$MOVING" = yes ]; then
 fi
 
 # Where the data goes: DATA_DIR from .env, relative to this folder as Compose reads it.
-DATA_DIR="$(sed -n 's/^DATA_DIR=//p' "$TOOLS/.env" 2>/dev/null | tail -1)"
+# No .env yet on a fresh install: sed fails, and under pipefail that must not end the script.
+DATA_DIR="$( { sed -n 's/^DATA_DIR=//p' "$TOOLS/.env" 2>/dev/null || true; } | tail -1)"
 DATA_DIR="${DATA_DIR:-../data}"
 case "$DATA_DIR" in /*) mkdir -p "$DATA_DIR" ;; *) DATA_DIR="$(cd "$TOOLS" && mkdir -p "$DATA_DIR" && cd "$DATA_DIR" && pwd)" ;; esac
 

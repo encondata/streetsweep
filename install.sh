@@ -41,6 +41,16 @@ BRANCH="${STREETSWEEP_BRANCH:-main}"
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 die() { printf '\n\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
+# When something will not start: which containers are up, and the last words of each, so
+# the reason is on screen rather than behind another command.
+report() {
+  printf '\n\033[1mContainers:\033[0m\n' >&2
+  docker compose ps -a >&2 || true
+  for svc in db web valhalla; do
+    printf '\n\033[1mLast lines from %s:\033[0m\n' "$svc" >&2
+    docker compose logs --no-color --tail 25 "$svc" >&2 2>&1 || true
+  done
+}
 
 command -v git >/dev/null 2>&1 || die "git is not installed."
 command -v docker >/dev/null 2>&1 || die "docker is not installed. See https://docs.docker.com/get-docker/"
@@ -98,7 +108,16 @@ say "Pulling images"
 docker compose pull db
 
 say "Building and starting"
-docker compose up -d --build
+# The map server (valhalla) is started on its own below: its image is large and its first
+# start builds routing tiles for an hour or more, and neither should hold up the web server.
+if ! docker compose up -d --build db web; then
+  report
+  die "StreetSweep could not be started; the reason is above."
+fi
+if ! docker compose up -d valhalla; then
+  report
+  printf '\n\033[33m%s\033[0m\n' "The map server (valhalla) could not be started; the reason is above. The web server is running without it: drives are matched through VALHALLA_URL, or the public server while that does not answer. If port ${VALHALLA_PORT:-8002} is already in use, set VALHALLA_PORT in $DIR/tools/.env and run this again." >&2
+fi
 
 TOKEN="$(sed -n 's/^SYNC_TOKEN=//p' .env)"
 ADMIN_EMAIL="$(sed -n 's/^ADMIN_EMAIL=//p' .env)"
@@ -108,12 +127,15 @@ BASE="http://127.0.0.1:$PORT"
 
 printf '\nWaiting for the server'
 UP=no
-for _ in $(seq 1 60); do
+for _ in $(seq 1 90); do
   if curl -fsS "$BASE/api/health" >/dev/null 2>&1; then UP=yes; break; fi
   printf '.'; sleep 2
 done
 printf '\n'
-[ "$UP" = yes ] || die "The server did not come up. Check: docker compose -f $DIR/tools/docker-compose.yml logs"
+if [ "$UP" != yes ]; then
+  report
+  die "The server did not answer on $BASE within three minutes; the reason is above. Once it is fixed, run this again: your data is kept."
+fi
 
 # Rather than assume the account was created, try it. A 200 means these credentials are
 # live and worth printing; anything else means an administrator already existed with a
