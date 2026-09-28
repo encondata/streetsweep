@@ -137,12 +137,14 @@ private fun tree(areas: List<AreaWithStats>): List<Node> {
     val ids = areas.map { it.area.id }.toSet()
     val out = ArrayList<Node>()
     fun walk(parent: Long?, depth: Int) {
-        byParent[parent].orEmpty().sortedWith(compareByDescending<AreaWithStats> { it.area.level }.thenBy { it.name.lowercase() })
+        byParent[parent].orEmpty().sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
             .forEach { n -> out += Node(n, depth); walk(n.area.id, depth + 1) }
     }
     walk(null, 0)
     // Children whose parent was deleted still show, at the top level.
-    areas.filter { it.area.parentId != null && it.area.parentId !in ids }.forEach { out += Node(it, 0) }
+    areas.filter { it.area.parentId != null && it.area.parentId !in ids }
+        .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+        .forEach { out += Node(it, 0) }
     return out
 }
 

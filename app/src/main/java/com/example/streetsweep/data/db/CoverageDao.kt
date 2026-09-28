@@ -19,10 +19,10 @@ interface CoverageDao {
     @Query("SELECT * FROM areas WHERE id = :id")
     suspend fun getArea(id: Long): CoverageArea?
 
-    @Query("SELECT * FROM areas ORDER BY level DESC, name")
+    @Query("SELECT * FROM areas ORDER BY name COLLATE NOCASE")
     fun observeAreas(): Flow<List<CoverageArea>>
 
-    @Query("SELECT * FROM areas ORDER BY level DESC, name")
+    @Query("SELECT * FROM areas ORDER BY name COLLATE NOCASE")
     suspend fun getAreas(): List<CoverageArea>
 
     @Query("DELETE FROM areas WHERE id = :id")

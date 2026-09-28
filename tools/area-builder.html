@@ -1291,7 +1291,7 @@
           <strong>Show on the map</strong>
           <select id="showSort" title="Order the list">
             <option value="level">By level</option>
-            <option value="az">Name A–Z</option>
+            <option value="az" selected>Name A–Z</option>
             <option value="za">Name Z–A</option>
           </select>
         </div>
@@ -1680,10 +1680,10 @@
             <div class="achBar">
               <div class="achChips" id="achChips" role="group" aria-label="Show"></div>
               <select id="achSort" title="Sort by">
+                <option value="name" selected>Sort by: Name</option>
                 <option value="progress">Sort by: Progress</option>
-                <option value="recent">Sort by: Recently unlocked</option>
                 <option value="rarity">Sort by: Rarest first</option>
-                <option value="name">Sort by: Name</option>
+                <option value="recent">Sort by: Recently unlocked</option>
               </select>
             </div>
             <div class="achGrid" id="achGrid"></div>
@@ -1930,6 +1930,11 @@ window.StreetSweepBases = {
     NEIGHBORHOOD: "Neighborhood", CITY: "City", COUNTY: "County",
     METRO: "Metro area", REGION: "Region", STATE: "State", COUNTRY: "Country"
   };
+  /** Every list and dropdown reads A to Z: case ignored, and "Unit 2" before "Unit 10". */
+  function abc(x, y) {
+    return String(x || "").localeCompare(String(y || ""), undefined, { sensitivity: "base", numeric: true });
+  }
+  function abcName(x, y) { return abc(x.name, y.name); }
   var LEVEL_COLOR = {
     NEIGHBORHOOD: "#0b6b57", CITY: "#45607a", COUNTY: "#6f5aa8",
     METRO: "#b8762b", REGION: "#a4553d", STATE: "#7d4a63", COUNTRY: "#4f5d6b"
@@ -1943,7 +1948,7 @@ window.StreetSweepBases = {
 
   // The level picker is built here rather than in the markup so it cannot drift
   // from the ladder above. (el() is not assigned yet this early in the file.)
-  LEVEL_ORDER.forEach(function (name) {
+  LEVEL_ORDER.slice().sort(function (x, y) { return abc(LEVELS[x], LEVELS[y]); }).forEach(function (name) {
     var o = document.createElement("option");
     o.value = name; o.textContent = LEVELS[name];
     document.getElementById("fLevel").appendChild(o);
@@ -2372,9 +2377,7 @@ window.StreetSweepBases = {
     var bigger = areas.filter(function (a) {
       return a.id !== area.id && levelRank(a.level) > rank;
     });
-    bigger.sort(function (x, y) {
-      return levelRank(x.level) - levelRank(y.level) || x.name.localeCompare(y.name);
-    });
+    bigger.sort(abcName);
     bigger.forEach(function (a) {
       var o = document.createElement("option");
       o.value = a.name; o.textContent = a.name + " (" + LEVELS[a.level] + ")";
@@ -2517,7 +2520,7 @@ window.StreetSweepBases = {
   function renderList() {
     var list = el("areaList");
     list.innerHTML = "";
-    areas.forEach(function (a) {
+    areas.slice().sort(abcName).forEach(function (a) {
       var li = document.createElement("li");
       li.className = "area" + (a.id === selectedId ? " selected" : "");
       var cells = cellCount(a.latlngs);
@@ -2548,7 +2551,7 @@ window.StreetSweepBases = {
   var hiddenLevels = {};
   var hiddenAreas = {};
   var showQuery = "";          // what is typed in the panel's search box
-  var showSort = "level";      // level | az | za
+  var showSort = "az";         // az | za | level
 
   /** Stable across reloads once saved; a never-saved area falls back to its name. */
   function areaKey(a) { return a.serverId ? "id:" + a.serverId : "name:" + a.name; }
@@ -2558,14 +2561,16 @@ window.StreetSweepBases = {
       var raw = JSON.parse(localStorage.getItem(HIDE_KEY) || "{}");
       (raw.levels || []).forEach(function (l) { hiddenLevels[l] = true; });
       (raw.areas || []).forEach(function (k) { hiddenAreas[k] = true; });
-      if (raw.sort === "az" || raw.sort === "za" || raw.sort === "level") showSort = raw.sort;
+      // Saved as "order" since everything went alphabetical; an older "sort" is not read,
+      // so a list left on By level comes back A to Z.
+      if (raw.order === "az" || raw.order === "za" || raw.order === "level") showSort = raw.order;
     } catch (e) { /* a cleared or blocked store just means everything shows */ }
   }
 
   function saveHidden() {
     try {
       localStorage.setItem(HIDE_KEY, JSON.stringify({
-        levels: Object.keys(hiddenLevels), areas: Object.keys(hiddenAreas), sort: showSort
+        levels: Object.keys(hiddenLevels), areas: Object.keys(hiddenAreas), order: showSort
       }));
     } catch (e) { /* private window: the choice simply will not outlive the tab */ }
   }
@@ -2648,10 +2653,10 @@ window.StreetSweepBases = {
       return matchesQuery(a.name) || matchesQuery(LEVELS[a.level]);
     });
     out.sort(function (x, y) {
-      if (showSort === "az") return x.name.localeCompare(y.name);
-      if (showSort === "za") return y.name.localeCompare(x.name);
-      // Biggest place first, then alphabetically inside each level.
-      return levelRank(y.level) - levelRank(x.level) || x.name.localeCompare(y.name);
+      if (showSort === "za") return abcName(y, x);
+      // By level: biggest place first, then alphabetically inside each level.
+      if (showSort === "level") return levelRank(y.level) - levelRank(x.level) || abcName(x, y);
+      return abcName(x, y);
     });
     return out;
   }
@@ -2661,10 +2666,10 @@ window.StreetSweepBases = {
     levelBox.innerHTML = ""; areaBox.innerHTML = "";
     el("showEmpty").hidden = areas.length > 0;
 
-    // Only levels actually in use, biggest first, the way the list reads.
-    var levels = LEVEL_ORDER.slice().reverse().filter(function (level) {
+    // Only levels actually in use, A to Z.
+    var levels = LEVEL_ORDER.filter(function (level) {
       return areas.some(function (a) { return a.level === level; }) && matchesQuery(LEVELS[level]);
-    });
+    }).sort(function (x, y) { return abc(LEVELS[x], LEVELS[y]); });
     levels.forEach(function (level) {
       var mine = areas.filter(function (a) { return a.level === level; });
       levelBox.appendChild(showRow({
@@ -3404,7 +3409,7 @@ window.StreetSweepBases = {
 
   // ---- the Achievements page ----
 
-  var achState = { data: null, items: [], filter: "all", sort: "progress", selected: null };
+  var achState = { data: null, items: [], filter: "all", sort: "name", selected: null };
 
   function achStatHtml(svg, big, label) {
     return "<div class='achStat'>" + svg + "<div style='min-width:0'><b>" + big + "</b><span>" + label + "</span></div></div>";
@@ -3441,7 +3446,7 @@ window.StreetSweepBases = {
         " aria-pressed='" + (achState.filter === c.f) + "'>" + c.label + "</button>";
     }).join("");
 
-    el("achCats").innerHTML = ACH_CATEGORIES.map(function (c) {
+    el("achCats").innerHTML = ACH_CATEGORIES.slice().sort(abcName).map(function (c) {
       var mine = items.filter(function (i) { return i.category === c.key; });
       return "<button type='button' class='achCat' data-f='cat:" + c.key + "' aria-pressed='" +
         (achState.filter === "cat:" + c.key) + "'>" + (ACH_ICON[c.icon] || "") +
@@ -3456,7 +3461,7 @@ window.StreetSweepBases = {
         " unlocked</span></button>";
     }).join("");
 
-    el("achTracks").innerHTML = d.ladders.map(function (l) {
+    el("achTracks").innerHTML = d.ladders.slice().sort(abcName).map(function (l) {
       var current = l.steps[Math.max(0, l.level - 1)];
       return "<div class='achTrack'><div class='head'><img src='/ach-" + current.art + ".webp' alt=''" +
         (l.level ? "" : " style='filter:grayscale(1) brightness(.7)'") + "><div><b>" + escapeHtml(l.name) +
@@ -3509,9 +3514,9 @@ window.StreetSweepBases = {
       },
       recent: function (a, b) { return (b.earnedAt || 0) - (a.earnedAt || 0) || fraction(b) - fraction(a); },
       rarity: function (a, b) { return byTier(b) - byTier(a) || (a.rarity || 0) - (b.rarity || 0); },
-      name: function (a, b) { return a.name.localeCompare(b.name); },
+      name: abcName,
     };
-    return list.slice().sort(sorts[achState.sort] || sorts.progress);
+    return list.slice().sort(sorts[achState.sort] || sorts.name);
   }
 
   function footHtml(it) {
@@ -3643,10 +3648,7 @@ window.StreetSweepBases = {
 
   function renderAchievements(node, countNode, d) {
     countNode.textContent = d.earnedCount + " / " + d.total;
-    var items = achItems(d).sort(function (a, b) {
-      if (a.earned !== b.earned) return a.earned ? -1 : 1;
-      return ACH_TIERS.indexOf(b.tier) - ACH_TIERS.indexOf(a.tier) || fraction(b) - fraction(a);
-    });
+    var items = achItems(d).sort(abcName);
     node.innerHTML = "<div class='achMini'>" + items.map(function (it) {
       return "<div class='" + (it.earned ? "" : "locked") + "' title='" + escapeHtml(it.blurb) +
         (it.earned ? "" : " — " + Math.round(fraction(it) * 100) + "% there") + "' style='text-align:center'>" +
@@ -3807,11 +3809,8 @@ window.StreetSweepBases = {
       if (parent && parent !== a) (kids[parent.id] = kids[parent.id] || []).push(a);
       else roots.push(a);
     });
-    var order = function (x, y) {
-      return levelRank(y.level) - levelRank(x.level) || x.name.localeCompare(y.name);
-    };
-    roots.sort(order);
-    Object.keys(kids).forEach(function (k) { kids[k].sort(order); });
+    roots.sort(abcName);
+    Object.keys(kids).forEach(function (k) { kids[k].sort(abcName); });
     return { roots: roots, kids: kids };
   }
 
@@ -3973,7 +3972,7 @@ window.StreetSweepBases = {
         cell(d.rank ? "#" + d.rank : "—", "Rank by streets");
 
       el("udAreasEmpty").hidden = d.areas.length > 0;
-      el("udAreas").innerHTML = d.areas.map(function (a) {
+      el("udAreas").innerHTML = d.areas.slice().sort(abcName).map(function (a) {
         var pct = a.total ? Math.round((a.done / a.total) * 100) : 0;
         return "<li><span class='main'><b>" + escapeHtml(a.name) + "</b><span>" +
           a.done.toLocaleString() + " / " + a.total.toLocaleString() + " streets</span>" +
@@ -4000,7 +3999,7 @@ window.StreetSweepBases = {
       el("udMoveGo").setAttribute("data-drives", t.drives);
       el("udMoveGo").setAttribute("data-streets", t.streets);
       apiJson("/api/users").then(function (list) {
-        var others = list.users.filter(function (x) { return x.id !== u.id; });
+        var others = list.users.filter(function (x) { return x.id !== u.id; }).sort(abcName);
         el("udMoveTo").innerHTML = others.map(function (x) {
           return "<option value='" + x.id + "'>" + escapeHtml(x.name) + " (" + escapeHtml(x.email) + ")</option>";
         }).join("");
@@ -4041,7 +4040,7 @@ window.StreetSweepBases = {
   function loadUsers() {
     return apiJson("/api/users").then(function (d) {
       el("ptUsers").textContent = d.users.length;
-      el("userList").innerHTML = d.users.map(function (u) {
+      el("userList").innerHTML = d.users.slice().sort(abcName).map(function (u) {
         return "<tr data-user='" + u.id + "' data-name='" + escapeHtml(u.name) + "'" + (u.active ? "" : " class='off'") + ">" +
           "<td><span class='who open' role='button' tabindex='0'>" +
             "<span class='avatar' data-avatar='" + u.id + "'></span>" +
@@ -4077,7 +4076,7 @@ window.StreetSweepBases = {
       apiJson("/api/admin/vehicle-stats").catch(function () { return { vehicles: [] }; }),
       apiJson("/api/devices").catch(function () { return { devices: [] }; }),
     ]).then(function (got) {
-      var list = got[0].vehicles;
+      var list = got[0].vehicles.slice().sort(abcName);
       var stats = {};
       got[1].vehicles.forEach(function (v) { stats[v.id] = v; });
       var phones = {};
@@ -4085,6 +4084,7 @@ window.StreetSweepBases = {
         if (x.revokedAt || x.vehicleId == null) return;
         (phones[x.vehicleId] = phones[x.vehicleId] || []).push(x);
       });
+      Object.keys(phones).forEach(function (k) { phones[k].sort(function (a, b) { return abc(a.label, b.label); }); });
       el("ptVehicles").textContent = list.length;
       el("vehListEmpty").hidden = list.length > 0;
       el("vehList").innerHTML = list.map(function (v) {
@@ -4128,7 +4128,8 @@ window.StreetSweepBases = {
 
   function loadDevices() {
     return apiJson("/api/devices").then(function (d) {
-      var live = d.devices.filter(function (x) { return !x.revokedAt; });
+      var live = d.devices.filter(function (x) { return !x.revokedAt; })
+        .sort(function (a, b) { return abc(a.label, b.label); });
       el("devEmpty").hidden = live.length > 0;
       el("devList").innerHTML = live.map(function (x) {
         return "<li data-device='" + x.id + "'>" +
@@ -4839,7 +4840,7 @@ window.StreetSweepBases = {
 
   function fillAreaList(list, rows) {
     list.innerHTML = "";
-    rows.forEach(function (a) {
+    rows.slice().sort(abcName).forEach(function (a) {
       var percent = percentOf(a.stats);
       var remaining = Math.max(0, (a.stats.total || 0) - (a.stats.done || 0));
       var li = document.createElement("li");
@@ -5865,7 +5866,8 @@ window.StreetSweepBases = {
         }
         html += '<button data-act="gated">Mark as gated</button>' +
           '<div class="popExclude"><select data-reason>' +
-          Object.keys(REASON_LABEL).filter(function (r) { return r !== "GATED"; }).map(function (r) {
+          Object.keys(REASON_LABEL).filter(function (r) { return r !== "GATED"; })
+            .sort(function (a, b) { return abc(REASON_LABEL[a], REASON_LABEL[b]); }).map(function (r) {
             return '<option value="' + r + '"' + (r === tool.reason ? " selected" : "") + ">" +
               REASON_LABEL[r] + "</option>";
           }).join("") + '</select><button data-act="exclude">Exclude</button></div>';
@@ -5988,7 +5990,7 @@ window.StreetSweepBases = {
     if (isOrganizational(a)) {
       // What it groups, in place of figures it does not have.
       var inside = areas.filter(function (x) { return x.parent && x.parent.toLowerCase() === a.name.toLowerCase(); })
-        .sort(function (x, y) { return levelRank(y.level) - levelRank(x.level) || x.name.localeCompare(y.name); });
+        .sort(abcName);
       box.innerHTML =
         '<div class="card"><span class="orgpill">Grouping only</span>' +
         '<p class="hint" style="margin:8px 0 0">' + escapeHtml(LEVELS[a.level]) +
@@ -6289,7 +6291,9 @@ window.StreetSweepBases = {
     var cache = addressCache();
     var list = el("poiList");
     list.innerHTML = "";
-    rows.forEach(function (p) {
+    rows.slice().sort(function (a, b) {
+      return abc(a.name || a.note || "Marked spot", b.name || b.note || "Marked spot");
+    }).forEach(function (p) {
       var li = document.createElement("li");
       li.className = "area";
       var when = new Date(p.at);
@@ -6471,7 +6475,7 @@ window.StreetSweepBases = {
     var select = el("citySelect");
     var seen = {};
     areas.forEach(function (a) { if (a.city) seen[a.city] = true; });
-    var names = Object.keys(seen).sort();
+    var names = Object.keys(seen).sort(abc);
     var keep = select.value;
     select.innerHTML = '<option value="">All cities</option>';
     names.forEach(function (n) {
