@@ -1055,6 +1055,17 @@
     outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring);
   }
   .field { margin-bottom: 10px; }
+  .parentPicks {
+    max-height: 190px; overflow-y: auto; border: 1px solid var(--line-strong);
+    border-radius: var(--r); background: var(--surface); padding: 4px 10px;
+  }
+  .parentPicks label {
+    display: flex; align-items: center; gap: 8px; margin: 0; padding: 5px 0;
+    font-size: 13px; font-weight: 400; color: var(--ink); cursor: pointer;
+  }
+  .parentPicks label span.lv { margin-left: auto; font-size: 11px; color: var(--ink-soft); }
+  .parentPicks .none { font-size: 12px; color: var(--ink-soft); padding: 6px 0; }
+  .nm .also { font-size: 11px; color: var(--ink-soft); font-weight: 400; margin-left: 6px; }
   .card { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); padding: 13px; box-shadow: var(--shadow-1); }
   .card + .card { margin-top: 10px; }
   /* Street popups on the map follow the page's theme rather than Leaflet's white. */
@@ -1455,8 +1466,8 @@
               <select id="fLevel"></select>
             </div>
             <div class="field">
-              <label for="fParent">Part of</label>
-              <select id="fParent"><option value="">Nothing</option></select>
+              <label id="fParentLabel">Part of</label>
+              <div class="parentPicks" id="fParents" role="group" aria-labelledby="fParentLabel"></div>
               <div class="hint" id="fParentHint"></div>
             </div>
             <div class="field">
@@ -1935,6 +1946,23 @@ window.StreetSweepBases = {
     return String(x || "").localeCompare(String(y || ""), undefined, { sensitivity: "base", numeric: true });
   }
   function abcName(x, y) { return abc(x.name, y.name); }
+  /**
+   * Every area this one is part of, by name: the first parent (the one phones are given)
+   * and then any others, such as the second county a city crosses into.
+   */
+  function parentsOf(a) {
+    return [a.parent].concat(a.alsoIn || []).filter(function (n, i, all) {
+      return n && all.findIndex(function (m) { return m && m.toLowerCase() === n.toLowerCase(); }) === i;
+    });
+  }
+  function setParents(a, names) {
+    a.parent = names[0] || "";
+    a.alsoIn = names.slice(1);
+  }
+  function isPartOf(a, name) {
+    var key = String(name || "").toLowerCase();
+    return parentsOf(a).some(function (n) { return n.toLowerCase() === key; });
+  }
   var LEVEL_COLOR = {
     NEIGHBORHOOD: "#0b6b57", CITY: "#45607a", COUNTY: "#6f5aa8",
     METRO: "#b8762b", REGION: "#a4553d", STATE: "#7d4a63", COUNTRY: "#4f5d6b"
@@ -2095,6 +2123,7 @@ window.StreetSweepBases = {
       name: area.name,
       level: area.level,
       parentName: area.parent || null,
+      alsoIn: area.alsoIn || [],
       city: area.city || null,
       notes: area.notes || null,
       color: area.color || null,
@@ -2114,7 +2143,7 @@ window.StreetSweepBases = {
   function saveLocal() {
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify(areas.map(function (a) {
-        return { id: a.id, name: a.name, level: a.level, parent: a.parent,
+        return { id: a.id, name: a.name, level: a.level, parent: a.parent, alsoIn: a.alsoIn || [],
                  latlngs: a.latlngs.map(function (p) { return [p.lat, p.lng]; }) };
       })));
     } catch (e) { /* private window or storage disabled; the export still works */ }
@@ -2172,7 +2201,8 @@ window.StreetSweepBases = {
       var raw = localStorage.getItem(STORE_KEY);
       if (raw) {
         JSON.parse(raw).forEach(function (a) {
-          addArea(a.latlngs.map(function (p) { return L.latLng(p[0], p[1]); }), a.name, a.level, a.parent);
+          addArea(a.latlngs.map(function (p) { return L.latLng(p[0], p[1]); }), a.name, a.level, a.parent,
+            { alsoIn: a.alsoIn });
         });
       }
     } catch (e) { /* ignore a corrupt cache rather than losing the page */ }
@@ -2227,6 +2257,7 @@ window.StreetSweepBases = {
       name: name || "Area " + nextId,
       level: LEVELS[level] ? level : "NEIGHBORHOOD",
       parent: parent || "",
+      alsoIn: Array.isArray(meta.alsoIn) ? meta.alsoIn.slice() : [],
       city: meta.city || "",
       notes: meta.notes || "",
       color: meta.color || "",
@@ -2265,7 +2296,12 @@ window.StreetSweepBases = {
   function removeArea(area) {
     areaLayer.removeLayer(area.poly);
     areas = areas.filter(function (a) { return a !== area; });
-    areas.forEach(function (a) { if (a.parent === area.name) a.parent = ""; });
+    // Whatever was part of it is part of its other parents only, or of nothing.
+    areas.forEach(function (a) {
+      if (!isPartOf(a, area.name)) return;
+      setParents(a, parentsOf(a).filter(function (n) { return n.toLowerCase() !== area.name.toLowerCase(); }));
+      persist(a);
+    });
   }
 
   function byId(id) { return areas.filter(function (a) { return a.id === id; })[0]; }
@@ -2371,28 +2407,27 @@ window.StreetSweepBases = {
 
     // A place can only sit inside a bigger one: a neighbourhood in a city, a city in a
     // county, and so on up the ladder. Anything the same size or smaller is not offered.
+    // It can be part of several at once: a city across two counties is in both.
     var rank = levelRank(area.level);
-    var parentSelect = el("fParent");
-    parentSelect.innerHTML = "<option value=''>Nothing</option>";
     var bigger = areas.filter(function (a) {
       return a.id !== area.id && levelRank(a.level) > rank;
     });
     bigger.sort(abcName);
-    bigger.forEach(function (a) {
-      var o = document.createElement("option");
-      o.value = a.name; o.textContent = a.name + " (" + LEVELS[a.level] + ")";
-      parentSelect.appendChild(o);
-    });
     // Raising an area's level can leave it pointing at something no longer big enough.
-    var stillValid = bigger.some(function (a) { return a.name === area.parent; });
-    if (area.parent && !stillValid) area.parent = "";
-    parentSelect.value = area.parent || "";
-    parentSelect.disabled = bigger.length === 0;
+    // A parent that is not drawn at all is kept: it may simply not be loaded yet.
+    var kept = parentsOf(area).filter(function (n) {
+      var found = areas.filter(function (a) { return a.name.toLowerCase() === n.toLowerCase(); })[0];
+      return !found || bigger.indexOf(found) >= 0;
+    });
+    if (kept.length !== parentsOf(area).length) { setParents(area, kept); persist(area); }
+    renderParentPicks(area, bigger);
     el("fParentHint").textContent = bigger.length === 0
       ? (rank >= LEVEL_ORDER.length - 1
           ? "Nothing on the list is bigger than a country."
           : "Nothing bigger than this drawn yet.")
-      : "";
+      : parentsOf(area).length > 1
+        ? "Shown under each of them. Phones list it under " + area.parent + ", the first one ticked."
+        : "Tick more than one if it crosses a boundary, such as a city in two counties.";
 
     var cells = cellCount(area.latlngs);
     var sqMiles = areaSquareMiles(area.latlngs);
@@ -2418,7 +2453,11 @@ window.StreetSweepBases = {
     var old = a.name;
     a.name = el("fName").value;
     // Children point at their parent by name, so a rename has to follow them.
-    areas.forEach(function (x) { if (x.parent === old) { x.parent = a.name; persist(x); } });
+    areas.forEach(function (x) {
+      if (x === a || !isPartOf(x, old)) return;
+      setParents(x, parentsOf(x).map(function (n) { return n.toLowerCase() === old.toLowerCase() ? a.name : n; }));
+      persist(x);
+    });
     renderList(); persist(a);
   });
   el("fLevel").addEventListener("change", function () {
@@ -2501,9 +2540,26 @@ window.StreetSweepBases = {
     }
   }
 
-  el("fParent").addEventListener("change", function () {
-    var a = byId(selectedId); if (!a) return;
-    a.parent = el("fParent").value; renderList(); persist(a);
+  function renderParentPicks(area, bigger) {
+    var box = el("fParents");
+    if (!bigger.length) { box.innerHTML = "<div class='none'>Nothing</div>"; return; }
+    box.innerHTML = bigger.map(function (b) {
+      return "<label><input type='checkbox' data-parent='" + escapeHtml(b.name) + "'" +
+        (isPartOf(area, b.name) ? " checked" : "") + ">" +
+        "<span class='swatch' style='background:" + (b.color || LEVEL_COLOR[b.level]) + "'></span>" +
+        escapeHtml(b.name) + "<span class='lv'>" + escapeHtml(LEVELS[b.level] || b.level) + "</span></label>";
+    }).join("");
+  }
+
+  el("fParents").addEventListener("change", function (ev) {
+    var box = ev.target.closest && ev.target.closest("input[data-parent]");
+    var a = byId(selectedId); if (!box || !a) return;
+    var name = box.getAttribute("data-parent");
+    // The order they were ticked in is kept, so the first stays first until it is unticked.
+    var names = parentsOf(a).filter(function (n) { return n.toLowerCase() !== name.toLowerCase(); });
+    if (box.checked) names.push(name);
+    setParents(a, names);
+    showEditor(a); renderList(); persist(a);
   });
   el("btnZoom").addEventListener("click", function () {
     var a = byId(selectedId); if (a) zoomTo(a);
@@ -2527,7 +2583,8 @@ window.StreetSweepBases = {
       li.innerHTML =
         "<div class='name'><span class='swatch' style='background:" + LEVEL_COLOR[a.level] + "'></span>" +
         escapeHtml(a.name) + "</div>" +
-        "<div class='meta'>" + LEVELS[a.level] + (a.parent ? " in " + escapeHtml(a.parent) : "") +
+        "<div class='meta'>" + LEVELS[a.level] +
+        (parentsOf(a).length ? " in " + parentsOf(a).map(escapeHtml).join(" and ") : "") +
         " · " + fmtArea(areaSquareMiles(a.latlngs)) + " · " + cells + (cells === 1 ? " cell" : " cells") + "</div>";
       li.addEventListener("click", function () { select(a.id); });
       list.appendChild(li);
@@ -3794,29 +3851,50 @@ window.StreetSweepBases = {
   }
 
   /**
-   * Every area on one page, each under the area it is part of. Biggest first at each level
-   * of the tree, then by name. An area whose parent is not drawn sits at the top.
+   * Every area on one page, under each area it is part of, A to Z at every level of the
+   * tree. A city in two counties shows under both. An area none of whose parents is drawn
+   * sits at the top.
    */
   function areaTree() {
     var byName = {};
     areas.forEach(function (a) { byName[a.name.toLowerCase()] = a; });
+    var drawnParents = function (a) {
+      return parentsOf(a).map(function (n) { return byName[n.toLowerCase()]; })
+        .filter(function (p) { return p && p !== a; });
+    };
+    // Is [target] somewhere above [from]? Follows every parent, each area once.
+    function above(from, target) {
+      var seen = {}, stack = [from];
+      while (stack.length) {
+        var x = stack.pop();
+        if (x === target) return true;
+        if (seen[x.id]) continue;
+        seen[x.id] = true;
+        stack.push.apply(stack, drawnParents(x));
+      }
+      return false;
+    }
     var kids = {}, roots = [];
     areas.forEach(function (a) {
-      var parent = a.parent && byName[a.parent.toLowerCase()];
-      // A parent that loops back (A in B in A) would never end; treat it as top level.
-      var seen = {}, p = parent;
-      while (p && !seen[p.id]) { seen[p.id] = true; if (p === a) { parent = null; break; } p = p.parent && byName[p.parent.toLowerCase()]; }
-      if (parent && parent !== a) (kids[parent.id] = kids[parent.id] || []).push(a);
-      else roots.push(a);
+      // A parent that loops back (A in B in A) would never end; that link is left out.
+      var under = drawnParents(a).filter(function (p) { return !above(p, a); });
+      under.forEach(function (p) { (kids[p.id] = kids[p.id] || []).push(a); });
+      if (!under.length) roots.push(a);
     });
     roots.sort(abcName);
     Object.keys(kids).forEach(function (k) { kids[k].sort(abcName); });
     return { roots: roots, kids: kids };
   }
 
+  /** How many areas sit anywhere under this one, each counted once however it is reached. */
   function descendants(tree, a) {
-    var n = 0;
-    (tree.kids[a.id] || []).forEach(function (c) { n += 1 + descendants(tree, c); });
+    var seen = {}, stack = (tree.kids[a.id] || []).slice(), n = 0;
+    while (stack.length) {
+      var c = stack.pop();
+      if (seen[c.id]) continue;
+      seen[c.id] = true; n++;
+      stack.push.apply(stack, tree.kids[c.id] || []);
+    }
     return n;
   }
 
@@ -3826,6 +3904,7 @@ window.StreetSweepBases = {
     // shown only to place a match are dimmed.
     var shows = {};
     function mark(a) {
+      if (a.id in shows) return shows[a.id];   // reached again through another parent
       var any = areaMatches(a);
       (tree.kids[a.id] || []).forEach(function (c) { if (mark(c)) any = true; });
       shows[a.id] = any;
@@ -3835,8 +3914,10 @@ window.StreetSweepBases = {
     var filtering = areaFilter !== "all";
 
     var rows = [], shown = 0;
-    function row(a, depth) {
+    function row(a, depth, under) {
       if (!shows[a.id]) return;
+      // Under one of several parents: name the others, so it does not look like a repeat.
+      var others = under ? parentsOf(a).filter(function (n) { return n.toLowerCase() !== under.name.toLowerCase(); }) : [];
       var children = tree.kids[a.id] || [];
       var visibleKids = children.filter(function (c) { return shows[c.id]; });
       // A filter opens every branch it needs to show a match.
@@ -3853,6 +3934,7 @@ window.StreetSweepBases = {
             escapeHtml(a.name) + "'>&#9662;</button>" +
           "<span class='swatch' style='background:" + (a.color || LEVEL_COLOR[a.level]) + "'></span>" +
           escapeHtml(a.name) +
+          (others.length ? "<span class='also'>also in " + others.map(escapeHtml).join(", ") + "</span>" : "") +
           (count ? " <span class='kids'>" + count + (count === 1 ? " area" : " areas") + "</span>" : "") +
         "</span></td>" +
         (org
@@ -3868,7 +3950,7 @@ window.StreetSweepBases = {
           ? new Date(p.computedAt).toLocaleDateString() : "—") + "</td>" +
         "<td style='text-align:right'><button type='button' data-open='" + a.id +
           "'>Open</button></td></tr>");
-      if (!folded) visibleKids.forEach(function (c) { row(c, depth + 1); });
+      if (!folded) visibleKids.forEach(function (c) { row(c, depth + 1, a); });
     }
     tree.roots.forEach(function (r) { row(r, 0); });
 
@@ -4499,7 +4581,8 @@ window.StreetSweepBases = {
       ring.push(ring[0]);
       return {
         type: "Feature",
-        properties: { kind: "area", name: a.name, level: a.level, parent: a.parent || undefined },
+        properties: { kind: "area", name: a.name, level: a.level, parent: a.parent || undefined,
+                      alsoIn: a.alsoIn && a.alsoIn.length ? a.alsoIn : undefined },
         geometry: { type: "Polygon", coordinates: [ring] }
       };
     });
@@ -4564,7 +4647,7 @@ window.StreetSweepBases = {
         // GeoJSON rings repeat the first point; the app's polygons do not.
         if (pts.length > 1 && pts[0].equals(pts[pts.length - 1])) pts.pop();
         if (pts.length < 3) return;
-        addArea(pts, p.name, normaliseLevel(p.level), p.parent);
+        addArea(pts, p.name, normaliseLevel(p.level), p.parent, { alsoIn: p.alsoIn });
         added++;
       } else if (g.type === "LineString" || g.type === "Point") {
         context += drawContextFeature(g);
@@ -5989,7 +6072,7 @@ window.StreetSweepBases = {
 
     if (isOrganizational(a)) {
       // What it groups, in place of figures it does not have.
-      var inside = areas.filter(function (x) { return x.parent && x.parent.toLowerCase() === a.name.toLowerCase(); })
+      var inside = areas.filter(function (x) { return isPartOf(x, a.name); })
         .sort(abcName);
       box.innerHTML =
         '<div class="card"><span class="orgpill">Grouping only</span>' +
@@ -6024,7 +6107,7 @@ window.StreetSweepBases = {
         '<dl class="kv">' +
           kv("City", a.city || "—") +
           kv("Level", levelLabel(a.level)) +
-          kv("Part of", a.parentName || "—") +
+          kv("Part of", parentsOf(a).join(", ") || "—") +
           kv("Created", a.createdAt ? new Date(a.createdAt).toLocaleDateString() : "—") +
           kv("Last drive", lastDriveIn(a.name)) +
         "</dl>" +

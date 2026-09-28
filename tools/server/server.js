@@ -92,6 +92,9 @@ async function ensureSchema() {
     ALTER TABLE areas ADD COLUMN IF NOT EXISTS city  TEXT;
     ALTER TABLE areas ADD COLUMN IF NOT EXISTS notes TEXT;
     ALTER TABLE areas ADD COLUMN IF NOT EXISTS color TEXT;
+    -- Further areas it is part of, beyond parent_name: a city across two counties. By
+    -- name, like parent_name. parent_name stays the first, and the one phones are given.
+    ALTER TABLE areas ADD COLUMN IF NOT EXISTS also_in TEXT[] NOT NULL DEFAULT '{}';
     CREATE INDEX IF NOT EXISTS areas_bbox ON areas (min_lat, min_lng, max_lat, max_lng);
 
     -- What the phone reports back. Kept apart from "areas" on purpose: that table is the
@@ -263,6 +266,16 @@ function cleanArea(body) {
   const lats = points.map((p) => p[0]);
   const lngs = points.map((p) => p[1]);
   const parent = body.parentName ? String(body.parentName).trim().slice(0, 120) : null;
+  // The other areas it is part of: named once each, never itself or its first parent.
+  const alsoIn = [];
+  for (const raw of Array.isArray(body.alsoIn) ? body.alsoIn : []) {
+    const n = String(raw || "").trim().slice(0, 120);
+    const key = n.toLowerCase();
+    if (!n || key === String(name).toLowerCase() || (parent && key === parent.toLowerCase())) continue;
+    if (alsoIn.some((x) => x.toLowerCase() === key)) continue;
+    alsoIn.push(n);
+    if (alsoIn.length >= 20) break;
+  }
   const city = body.city ? String(body.city).trim().slice(0, 120) : null;
   const notes = body.notes ? String(body.notes).trim().slice(0, 2000) : null;
   // A colour is only ever chosen from the swatches, so anything else is not one.
@@ -271,7 +284,9 @@ function cleanArea(body) {
   return {
     name,
     level,
-    parentName: parent || null,
+    parentName: parent || alsoIn[0] || null,
+    // Without a first parent there is nothing to be "also" in: the first of these moves up.
+    alsoIn: parent ? alsoIn : alsoIn.slice(1),
     city: city || null,
     notes: notes || null,
     color: colour,
@@ -317,6 +332,7 @@ function rowToArea(row) {
     name: row.name,
     level: row.level,
     parentName: row.parent_name,
+    alsoIn: row.also_in || [],
     city: row.city || null,
     notes: row.notes || null,
     color: row.color || null,
@@ -328,7 +344,7 @@ function rowToArea(row) {
 
 // ----------------------------------------------------------------- store
 
-const COLUMNS = "id, name, level, parent_name, city, notes, color, polygon, created_at, updated_at";
+const COLUMNS = "id, name, level, parent_name, also_in, city, notes, color, polygon, created_at, updated_at";
 
 // level is text, so an alphabetical sort would put NEIGHBORHOOD above CITY. Rank it instead,
 // largest place first, the way the phone lists them.
@@ -344,10 +360,11 @@ async function listAreas() {
 async function createArea(area) {
   const { rows } = await pool.query(
     `INSERT INTO areas (name, level, parent_name, city, notes, color,
-                        polygon, min_lat, min_lng, max_lat, max_lng)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING ${COLUMNS}`,
+                        polygon, min_lat, min_lng, max_lat, max_lng, also_in)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING ${COLUMNS}`,
     [area.name, area.level, area.parentName, area.city, area.notes, area.color,
-     JSON.stringify(area.polygon), area.minLat, area.minLng, area.maxLat, area.maxLng],
+     JSON.stringify(area.polygon), area.minLat, area.minLng, area.maxLat, area.maxLng,
+     area.alsoIn || []],
   );
   progress.touched(pool, rows[0].id);
   return rowToArea(rows[0]);
@@ -357,10 +374,11 @@ async function updateArea(id, area) {
   const { rows } = await pool.query(
     `UPDATE areas SET name=$1, level=$2, parent_name=$3, city=$4, notes=$5, color=$6,
                       polygon=$7, min_lat=$8, min_lng=$9, max_lat=$10, max_lng=$11,
-                      updated_at=now()
+                      also_in=$13, updated_at=now()
      WHERE id=$12 RETURNING ${COLUMNS}`,
     [area.name, area.level, area.parentName, area.city, area.notes, area.color,
-     JSON.stringify(area.polygon), area.minLat, area.minLng, area.maxLat, area.maxLng, id],
+     JSON.stringify(area.polygon), area.minLat, area.minLng, area.maxLat, area.maxLng, id,
+     area.alsoIn || []],
   );
   if (rows.length) progress.touched(pool, id);
   return rows.length ? rowToArea(rows[0]) : null;
@@ -381,7 +399,7 @@ async function uploadPhoneAreas(list) {
       continue;
     }
     const { rows } = await pool.query(
-      `SELECT id, name, level, parent_name, city, notes, color FROM areas WHERE lower(name) = lower($1)`,
+      `SELECT id, name, level, parent_name, also_in, city, notes, color FROM areas WHERE lower(name) = lower($1)`,
       [clean.name]);
     if (!rows.length) {
       await createArea(clean);
@@ -390,7 +408,7 @@ async function uploadPhoneAreas(list) {
       // A new outline only; the web's name, level, parent, notes and colour stay.
       const r = rows[0];
       await updateArea(r.id, {
-        ...clean, name: r.name, level: r.level, parentName: r.parent_name,
+        ...clean, name: r.name, level: r.level, parentName: r.parent_name, alsoIn: r.also_in || [],
         city: r.city, notes: r.notes, color: r.color,
       });
       out.redrawn.push(r.name);
@@ -423,6 +441,8 @@ function toGeoJson(areas) {
       ring.push(ring[0]);
       const properties = { kind: "area", name: a.name, level: levelForPhone(a.level) };
       if (a.parentName) properties.parent = a.parentName;
+      // Phones read only "parent"; the rest are for the web's own export and import.
+      if (a.alsoIn && a.alsoIn.length) properties.alsoIn = a.alsoIn;
       if (a.city) properties.city = a.city;
       if (a.notes) properties.notes = a.notes;
       if (a.color) properties.color = a.color;
@@ -462,6 +482,7 @@ async function importGeoJson(doc) {
         name: properties.name || `Imported area ${++unnamed}`,
         level: normaliseLevel(properties.level),
         parentName: properties.parent,
+        alsoIn: properties.alsoIn,
         polygon: points,
       })));
     }
@@ -778,7 +799,7 @@ async function coverage(edgeLimit) {
   const [areas, edges, drives, pois, totals] = await Promise.all([
     // The server's own count of each area (progress.js), from everyone's driving — not
     // what any one phone last reported. The web is the record; phones only feed it.
-    pool.query(`SELECT a.name, a.level, a.parent_name, a.polygon,
+    pool.query(`SELECT a.name, a.level, a.parent_name, a.also_in, a.polygon,
                        p.total AS streets_total, p.done AS streets_done, p.partial AS streets_partial,
                        p.excluded AS streets_excluded, p.meters_total, p.meters_driven,
                        p.computed_at AS reported_at
@@ -795,6 +816,7 @@ async function coverage(edgeLimit) {
       name: r.name,
       level: r.level,
       parentName: r.parent_name,
+      alsoIn: r.also_in || [],
       polygon: r.polygon,
       // Null until the server has counted it (a new area, for a moment).
       stats: r.streets_total == null ? null : {
