@@ -11,9 +11,32 @@
 set -euo pipefail
 
 REPO="${STREETSWEEP_REPO:-https://github.com/encondata/streetsweep.git}"
-# On Unraid, on the array beside its data; anywhere else, the home directory.
-if [ -d /mnt/user ]; then DEFAULT_DIR=/mnt/user/streetsweep; else DEFAULT_DIR="$HOME/streetsweep"; fi
-DIR="${STREETSWEEP_DIR:-$DEFAULT_DIR}"
+# Where it goes. Suggested: where it runs now, so an update is just Enter; otherwise the
+# array on Unraid, or the home directory. Asked on the terminal even under curl | bash
+# (which has the script, not the keyboard, on standard input); STREETSWEEP_DIR skips the
+# question, and with no terminal at all the suggestion is used.
+RUNNING_WD="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' \
+  streetsweep-area-builder 2>/dev/null || true)"
+if [ -n "$RUNNING_WD" ]; then DEFAULT_DIR="$(dirname "$RUNNING_WD")"
+elif [ -d /mnt/user ]; then DEFAULT_DIR=/mnt/user/streetsweep
+else DEFAULT_DIR="$HOME/streetsweep"; fi
+DIR="${STREETSWEEP_DIR:-}"
+if [ -z "$DIR" ] && { exec 3</dev/tty; } 2>/dev/null; then
+  printf '\nInstall StreetSweep where? [%s] ' "$DEFAULT_DIR" > /dev/tty
+  read -r DIR <&3 || DIR=""
+  exec 3<&-
+fi
+DIR="${DIR:-$DEFAULT_DIR}"
+case "$DIR" in "~"*) DIR="$HOME${DIR#\~}" ;; esac
+DIR="${DIR%/}"
+case "$DIR" in /*) ;; *) echo "Please give a full path, starting with /." >&2; exit 1 ;; esac
+if [ -n "$RUNNING_WD" ] && [ "$DIR" != "$(dirname "$RUNNING_WD")" ]; then
+  printf 'The install in %s, and its data if it has any, will move to %s.\n' "$(dirname "$RUNNING_WD")" "$DIR"
+fi
+# Somewhere with files in it that are not StreetSweep would make git refuse to clone.
+if [ -d "$DIR" ] && [ ! -d "$DIR/.git" ] && [ -n "$(ls -A "$DIR" 2>/dev/null)" ]; then
+  echo "$DIR already has other files in it. Choose an empty or new folder." >&2; exit 1
+fi
 BRANCH="${STREETSWEEP_BRANCH:-main}"
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
