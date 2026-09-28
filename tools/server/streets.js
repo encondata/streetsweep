@@ -64,6 +64,30 @@ function cellBounds(key) {
   return [c.la / 10, c.lo / 10, (c.la + 1) / 10, (c.lo + 1) / 10];
 }
 
+/**
+ * The cells an area's outline touches: each piece's own box, so an area in several pieces
+ * (a county of islands) does not take in all the sea between them. [lat, lng] rings.
+ */
+function cellsForRings(rings) {
+  const keys = new Set();
+  for (const ring of rings) {
+    if (!Array.isArray(ring) || ring.length < 3) continue;
+    let s = 90, n = -90, w = 180, e = -180;
+    for (const [lat, lng] of ring) {
+      if (lat < s) s = lat; if (lat > n) n = lat;
+      if (lng < w) w = lng; if (lng > e) e = lng;
+    }
+    cellsFor(s, w, n, e).forEach((k) => keys.add(k));
+  }
+  return [...keys];
+}
+
+/** An area's pieces: its outline, and any more (see areas.more_pieces). */
+function ringsOf(area) {
+  return [area.polygon, ...(area.more_pieces || area.morePieces || [])]
+    .filter((r) => Array.isArray(r) && r.length >= 3);
+}
+
 /** Every cell a bounding box touches, as the phone's ChunkGrid.cellsFor works it out. */
 function cellsFor(s, w, n, e) {
   const keys = [];
@@ -201,9 +225,9 @@ async function cell(pool, key) {
 async function neededCells(pool) {
   // States and countries only group areas; their cells are not needed for their own sake.
   const { rows } = await pool.query(
-    "SELECT min_lat, min_lng, max_lat, max_lng FROM areas WHERE level NOT IN ('STATE', 'COUNTRY')");
+    "SELECT polygon, more_pieces FROM areas WHERE level NOT IN ('STATE', 'COUNTRY')");
   const keys = new Set();
-  for (const a of rows) cellsFor(a.min_lat, a.min_lng, a.max_lat, a.max_lng).forEach((k) => keys.add(k));
+  for (const a of rows) cellsForRings(ringsOf(a)).forEach((k) => keys.add(k));
   return keys;
 }
 
@@ -240,5 +264,6 @@ async function refreshStale(pool, max) {
 }
 
 module.exports = {
-  ensureSchema, cell, cellsFor, cellBounds, parseKey, SERVERS, onRefresh, storeStatus, refreshStale,
+  ensureSchema, cell, cellsFor, cellsForRings, ringsOf, cellBounds, parseKey, SERVERS, onRefresh,
+  storeStatus, refreshStale,
 };

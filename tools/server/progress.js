@@ -191,7 +191,7 @@ async function rebuildMembership(pool, area, keys) {
         if (seen.has(id)) continue;
         seen.add(id);
         const [cLat, cLng] = networks.boxCentre(shape);
-        if (!networks.inside(area.polygon, cLat, cLng)) continue;
+        if (!networks.insideArea(area, cLat, cLng)) continue;
         ids.push(id); lengths.push(lineLength(shape)); cells.push(cellOf(shape));
       }
     } catch (err) {
@@ -227,7 +227,7 @@ async function rebuildMembership(pool, area, keys) {
 
 async function compute(pool, areaId) {
   const { rows } = await pool.query(
-    `SELECT a.id, a.polygon, a.min_lat, a.min_lng, a.max_lat, a.max_lng, a.updated_at,
+    `SELECT a.id, a.polygon, a.more_pieces, a.min_lat, a.min_lng, a.max_lat, a.max_lng, a.updated_at,
             p.needs_full, p.area_updated_at
        FROM areas a LEFT JOIN area_progress p ON p.area_id = a.id WHERE a.id = $1`, [areaId]);
   const area = rows[0];
@@ -239,7 +239,7 @@ async function compute(pool, areaId) {
     await pool.query("DELETE FROM area_progress WHERE area_id = $1", [areaId]);
     return;
   }
-  const keys = streets.cellsFor(area.min_lat, area.min_lng, area.max_lat, area.max_lng);
+  const keys = streets.cellsForRings(streets.ringsOf(area));
   const full = area.needs_full !== false || !area.area_updated_at ||
     new Date(area.updated_at) > new Date(area.area_updated_at);
   await pool.query(

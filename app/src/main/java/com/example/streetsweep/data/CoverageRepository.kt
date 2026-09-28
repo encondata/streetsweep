@@ -143,7 +143,8 @@ data class AreaWithStats(val area: CoverageArea, val stats: AreaStats) {
     val level get() = area.areaLevel
     val bounds get() = area.bounds
     val vertices: List<LatLngPoint> = area.vertices
-    fun contains(p: LatLngPoint) = bounds.contains(p) && Polygon.contains(vertices, p)
+    val pieces: List<List<LatLngPoint>> = area.pieces
+    fun contains(p: LatLngPoint) = area.contains(p)
 }
 
 data class Recorded(val segments: Int, val meters: Double)
@@ -299,12 +300,16 @@ class CoverageRepository(private val db: AppDatabase) {
     /** One-shot read of every area with its numbers, hidden ones included, for a push. */
     suspend fun areasWithStatsNow(): List<AreaWithStats> = observeWithStats(dao.observeAreas()).first()
 
-    suspend fun createArea(name: String, level: AreaLevel, parentId: Long?, polygon: List<LatLngPoint>): CoverageArea {
+    suspend fun createArea(
+        name: String, level: AreaLevel, parentId: Long?, polygon: List<LatLngPoint>,
+        morePieces: List<List<LatLngPoint>> = emptyList(),
+    ): CoverageArea {
         require(polygon.size >= 3) { "An area needs at least three points" }
-        val b = Bounds.of(polygon)!!
+        val more = morePieces.filter { it.size >= 3 }
+        val b = Bounds.of(polygon + more.flatten())!!
         val area = CoverageArea(
             name = name.trim().ifEmpty { level.label }, level = level.ordinal, parentId = parentId,
-            polygon = ShapeText.encode(polygon),
+            polygon = ShapeText.encode(polygon), morePieces = ShapeText.encodeRings(more),
             south = b.south, west = b.west, north = b.north, east = b.east,
             createdAt = System.currentTimeMillis(),
         )
@@ -325,7 +330,7 @@ class CoverageRepository(private val db: AppDatabase) {
         for (area in imported.sortedByDescending { it.level.ordinal }) {
             if (area.polygon.size < 3) continue
             val parentId = area.parent?.lowercase()?.let { byName[it] }
-            val made = createArea(area.name, area.level, parentId, area.polygon)
+            val made = createArea(area.name, area.level, parentId, area.polygon, area.morePieces)
             byName[made.name.lowercase()] = made.id
             created += made
         }
@@ -351,8 +356,9 @@ class CoverageRepository(private val db: AppDatabase) {
     suspend fun syncFromWeb(mine: CoverageArea, incoming: ImportedArea, parentId: Long?): WebSync {
         if (incoming.polygon.size < 3) return WebSync.UNCHANGED
         val webOutline = ShapeText.encode(incoming.polygon)
+        val webPieces = ShapeText.encodeRings(incoming.morePieces.filter { it.size >= 3 })
         val redrawnHere = mine.pulledOutline != null && mine.polygon != mine.pulledOutline
-        val outlineDiffers = mine.polygon != webOutline
+        val outlineDiffers = mine.polygon != webOutline || mine.morePieces != webPieces
         val levelDiffers = mine.level != incoming.level.ordinal
         val parentDiffers = parentId != null && mine.parentId != parentId
 
@@ -363,9 +369,9 @@ class CoverageRepository(private val db: AppDatabase) {
             return WebSync.UNCHANGED
         }
 
-        val b = Bounds.of(incoming.polygon)!!
+        val b = Bounds.of(incoming.polygon + incoming.morePieces.flatten())!!
         val updated = mine.copy(
-            polygon = webOutline, pulledOutline = webOutline,
+            polygon = webOutline, pulledOutline = webOutline, morePieces = webPieces,
             south = b.south, west = b.west, north = b.north, east = b.east,
             level = incoming.level.ordinal,
             parentId = parentId ?: mine.parentId,
@@ -412,10 +418,10 @@ class CoverageRepository(private val db: AppDatabase) {
 
     /** Point-in-polygon test of every loaded street centroid inside the area's box. */
     suspend fun refreshMembership(area: CoverageArea) {
-        val poly = area.vertices
         val b = area.bounds
+        val pieces = area.pieces
         val inside = dao.getCentroidsIn(b.south, b.west, b.north, b.east)
-            .filter { Polygon.contains(poly, LatLngPoint(it.cLat, it.cLng)) }
+            .filter { c -> LatLngPoint(c.cLat, c.cLng).let { p -> pieces.any { Polygon.contains(it, p) } } }
             .map { AreaWay(area.id, it.id) }
         db.withTransaction {
             dao.clearMembership(area.id)
@@ -436,10 +442,10 @@ class CoverageRepository(private val db: AppDatabase) {
         val centres = streets.mapNotNull { s -> Bounds.of(s.shape)?.center?.let { s.id to it } }
         val rows = ArrayList<AreaWay>()
         for (area in areas) {
-            val poly = area.vertices
+            val pieces = area.pieces
             val box = area.bounds
             for ((id, c) in centres) {
-                if (box.contains(c) && Polygon.contains(poly, c)) rows += AreaWay(area.id, id)
+                if (box.contains(c) && pieces.any { Polygon.contains(it, c) }) rows += AreaWay(area.id, id)
             }
         }
         if (rows.isNotEmpty()) dao.insertMembership(rows)
@@ -692,7 +698,7 @@ class CoverageRepository(private val db: AppDatabase) {
     /** After nearby cells arrive: each on-demand area's count of cells held. */
     suspend fun refreshOnDemandCounts(freshAfter: Long) {
         for (a in dao.onDemandAreas()) {
-            val keys = com.example.streetsweep.domain.ChunkGrid.cellsFor(a.bounds).map { it.key }
+            val keys = a.cells().map { it.key }
             dao.setOnDemand(a.id, true, keys.size, freshChunkCount(keys, freshAfter), a.streetsLoadedAt ?: System.currentTimeMillis())
         }
     }

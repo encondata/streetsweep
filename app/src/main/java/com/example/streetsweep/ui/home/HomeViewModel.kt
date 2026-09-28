@@ -392,7 +392,7 @@ class HomeViewModel(private val container: AppContainer, private val context: Co
         val focused = arr[1] as AreaWithStats?
         @Suppress("UNCHECKED_CAST")
         MapLayers(
-            areas = areaList.map { AreaOutline(it.name, it.vertices, it.bounds, it.stats.percent, it.area.level, focused = it.area.id == focused?.area?.id) },
+            areas = areaList.map { AreaOutline(it.name, it.pieces, it.bounds, it.stats.percent, it.area.level, focused = it.area.id == focused?.area?.id) },
             streets = arr[2] as List<com.example.streetsweep.data.StreetStatus>,
             drivenEdges = arr[3] as List<DrivenTrack>,
             colourByRecency = (arr[11] as TrackingSettings).colourByRecency,

@@ -47,9 +47,28 @@ data class CoverageArea(
      * sync leaves it hidden, and it can be shown again from the Areas screen.
      */
     @ColumnInfo(defaultValue = "0") val hidden: Boolean = false,
+    /**
+     * Any further pieces of the area, beyond [polygon] ([ShapeText.encodeRings]): a
+     * county of islands, a city with an exclave. Empty for an area in one piece. The box
+     * fields cover every piece.
+     */
+    @ColumnInfo(defaultValue = "") val morePieces: String = "",
 ) {
     val bounds: Bounds get() = Bounds(south, west, north, east)
+    /** The main piece. */
     val vertices: List<LatLngPoint> get() = ShapeText.decode(polygon)
+    /** Every piece, the main one first. */
+    val pieces: List<List<LatLngPoint>> get() = listOf(vertices) + ShapeText.decodeRings(morePieces)
+
+    /** Inside any piece. */
+    fun contains(p: LatLngPoint): Boolean =
+        bounds.contains(p) && pieces.any { com.example.streetsweep.domain.Polygon.contains(it, p) }
+
+    /** The map cells its pieces cover: each piece's own box, not the sea between them. */
+    fun cells(): List<com.example.streetsweep.domain.ChunkGrid.Cell> =
+        pieces.mapNotNull { Bounds.of(it) }
+            .flatMap { com.example.streetsweep.domain.ChunkGrid.cellsFor(it) }
+            .distinctBy { it.key }
     val areaLevel: AreaLevel get() = AreaLevel.fromOrdinal(level)
     val isDownloading: Boolean get() = !onDemand && streetsLoadedAt == null && lastError == null && chunksTotal > 0
 }

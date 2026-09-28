@@ -1479,6 +1479,14 @@
               <div class="swatches" id="fColor"></div>
             </div>
             <p class="coords" id="fStats"></p>
+            <div class="field" id="fPieces">
+              <label>Pieces</label>
+              <div class="hint" id="fPiecesHint" style="margin:0 0 6px"></div>
+              <div class="row">
+                <button id="btnAddPiece">Add a piece</button>
+                <button id="btnDropPiece" class="danger">Delete this piece</button>
+              </div>
+            </div>
             <div class="row" style="margin-top:10px">
               <button id="btnZoom">Zoom to</button>
               <button id="btnDelete" class="danger">Delete</button>
@@ -1990,7 +1998,9 @@ window.StreetSweepBases = {
   var areaLayer = L.layerGroup().addTo(map);
   var editLayer = L.layerGroup().addTo(map);
 
-  var areas = [];          // { id, name, level, parent, latlngs, poly }
+  // pieces: every ring of the outline (an area can come in several: a county of islands);
+  // latlngs: the piece being edited, the same array as one of pieces.
+  var areas = [];          // { id, name, level, parent, pieces, piece, latlngs, poly }
   var selectedId = null;
   var drawing = null;      // { latlngs, line }
   var nextId = 1;
@@ -2044,17 +2054,57 @@ window.StreetSweepBases = {
     return hours > 0 ? hours + "h " + (minutes % 60) + "m" : minutes + "m";
   }
 
-  function cellCount(latlngs) {
-    if (!latlngs.length) return 0;
+  /** The map cells one ring's box touches, as keys. */
+  function cellKeys(latlngs, into) {
+    into = into || {};
+    if (!latlngs.length) return into;
     var s = Infinity, n = -Infinity, w = Infinity, e = -Infinity;
     latlngs.forEach(function (p) {
       s = Math.min(s, p.lat); n = Math.max(n, p.lat);
       w = Math.min(w, p.lng); e = Math.max(e, p.lng);
     });
-    var rows = Math.floor(n / CELL_DEG) - Math.floor(s / CELL_DEG) + 1;
-    var cols = Math.floor(e / CELL_DEG) - Math.floor(w / CELL_DEG) + 1;
-    return rows * cols;
+    for (var la = Math.floor(s / CELL_DEG); la <= Math.floor(n / CELL_DEG); la++) {
+      for (var lo = Math.floor(w / CELL_DEG); lo <= Math.floor(e / CELL_DEG); lo++) into[la + "_" + lo] = true;
+    }
+    return into;
   }
+
+  /**
+   * Cells for a ring, or for several: each piece's own box, as the server works it out,
+   * so the sea between islands is not counted.
+   */
+  function cellCount(latlngs) {
+    var rings = latlngs.length && Array.isArray(latlngs[0]) ? latlngs : [latlngs];
+    var keys = {};
+    rings.forEach(function (r) { cellKeys(r, keys); });
+    return Object.keys(keys).length;
+  }
+
+  // ---- an area's pieces ----
+
+  /** What Leaflet draws: one ring as a polygon, several as a multipolygon. */
+  function shapeOf(a) {
+    return a.pieces.length > 1 ? a.pieces.map(function (r) { return [r]; }) : a.pieces[0];
+  }
+  function areaSqMi(a) {
+    return a.pieces.reduce(function (t, r) { return t + areaSquareMiles(r); }, 0);
+  }
+  function areaCells(a) { return cellCount(a.pieces); }
+  function areaCorners(a) { return a.pieces.reduce(function (t, r) { return t + r.length; }, 0); }
+  /** Makes piece [k] the one the handles edit. */
+  function setPiece(a, k) {
+    a.piece = Math.max(0, Math.min(k, a.pieces.length - 1));
+    a.latlngs = a.pieces[a.piece];
+  }
+  /** Which of the area's pieces holds the point; -1 for none. */
+  function pieceAt(a, latlng) {
+    for (var k = 0; k < a.pieces.length; k++) {
+      if (inside(a.pieces[k], latlng.lat, latlng.lng)) return k;
+    }
+    return -1;
+  }
+  function toLatLngs(ring) { return ring.map(function (p) { return L.latLng(p[0], p[1]); }); }
+  function toPairs(ring) { return ring.map(function (p) { return [p.lat, p.lng]; }); }
 
   // ---- storage ----------------------------------------------------------
   // Served from the container, areas live in Postgres. Opened straight off disk there is
@@ -2127,7 +2177,8 @@ window.StreetSweepBases = {
       city: area.city || null,
       notes: area.notes || null,
       color: area.color || null,
-      polygon: area.latlngs.map(function (p) { return [p.lat, p.lng]; })
+      polygon: toPairs(area.pieces[0]),
+      morePieces: area.pieces.slice(1).map(toPairs)
     };
   }
 
@@ -2144,7 +2195,7 @@ window.StreetSweepBases = {
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify(areas.map(function (a) {
         return { id: a.id, name: a.name, level: a.level, parent: a.parent, alsoIn: a.alsoIn || [],
-                 latlngs: a.latlngs.map(function (p) { return [p.lat, p.lng]; }) };
+                 latlngs: toPairs(a.pieces[0]), morePieces: a.pieces.slice(1).map(toPairs) };
       })));
     } catch (e) { /* private window or storage disabled; the export still works */ }
   }
@@ -2189,7 +2240,9 @@ window.StreetSweepBases = {
     (list || []).forEach(function (a) {
       var pts = a.polygon.map(function (p) { return L.latLng(p[0], p[1]); });
       if (pts.length < 3) return;
-      var area = addArea(pts, a.name, a.level, a.parentName, a);
+      var area = addArea(pts, a.name, a.level, a.parentName, Object.assign({}, a, {
+        morePieces: (a.morePieces || []).filter(function (r) { return r.length >= 3; }).map(toLatLngs),
+      }));
       area.serverId = a.id;
     });
     renderList();
@@ -2201,8 +2254,8 @@ window.StreetSweepBases = {
       var raw = localStorage.getItem(STORE_KEY);
       if (raw) {
         JSON.parse(raw).forEach(function (a) {
-          addArea(a.latlngs.map(function (p) { return L.latLng(p[0], p[1]); }), a.name, a.level, a.parent,
-            { alsoIn: a.alsoIn });
+          addArea(toLatLngs(a.latlngs), a.name, a.level, a.parent,
+            { alsoIn: a.alsoIn, morePieces: (a.morePieces || []).map(toLatLngs) });
         });
       }
     } catch (e) { /* ignore a corrupt cache rather than losing the page */ }
@@ -2262,10 +2315,12 @@ window.StreetSweepBases = {
       notes: meta.notes || "",
       color: meta.color || "",
       createdAt: meta.createdAt || null,
+      pieces: [latlngs].concat(Array.isArray(meta.morePieces) ? meta.morePieces : []),
+      piece: 0,
       latlngs: latlngs
     };
     var shade = area.color || LEVEL_COLOR[area.level];
-    area.poly = L.polygon(latlngs, {
+    area.poly = L.polygon(shapeOf(area), {
       color: shade, weight: 2, opacity: 0.9, fillColor: shade, fillOpacity: 0.12
     }).addTo(areaLayer);
     if (typeof onImagery !== "undefined" && onImagery) {
@@ -2282,8 +2337,13 @@ window.StreetSweepBases = {
       }
       // Streets inside an outline are clicked through it.
       if (tryStreetClick(ev.latlng)) return;
-      // Handles belong to the Areas view; elsewhere a click just reads the area.
-      if (window.StreetSweepViews.current() === "areas") select(area.id);
+      // Handles belong to the Areas view; elsewhere a click just reads the area. Clicking
+      // another piece of the area being edited moves the handles to that piece.
+      if (window.StreetSweepViews.current() === "areas") {
+        var k = pieceAt(area, ev.latlng);
+        if (k >= 0 && k !== area.piece) setPiece(area, k);
+        select(area.id);
+      }
       // Already showing: a click that missed a street is not a reason to load it all again.
       if (window.StreetSweepViews.current() === "map" && streetCtx && streetCtx.area === area && ctxLive()) return;
       detailFor(area);
@@ -2365,7 +2425,7 @@ window.StreetSweepBases = {
   map.on("mousemove", function (ev) {
     if (!dragging) return;
     dragging.area.latlngs[dragging.index] = ev.latlng;
-    dragging.area.poly.setLatLngs(dragging.area.latlngs);
+    dragging.area.poly.setLatLngs(shapeOf(dragging.area));
   });
   map.on("mouseup", function () {
     if (!dragging) return;
@@ -2376,7 +2436,7 @@ window.StreetSweepBases = {
   });
 
   function refresh(area) {
-    area.poly.setLatLngs(area.latlngs);
+    area.poly.setLatLngs(shapeOf(area));
     area.poly.setStyle({ color: LEVEL_COLOR[area.level], fillColor: LEVEL_COLOR[area.level] });
     if (selectedId === area.id) { drawHandles(area); showEditor(area); }
     renderList();
@@ -2429,8 +2489,8 @@ window.StreetSweepBases = {
         ? "Shown under each of them. Phones list it under " + area.parent + ", the first one ticked."
         : "Tick more than one if it crosses a boundary, such as a city in two counties.";
 
-    var cells = cellCount(area.latlngs);
-    var sqMiles = areaSquareMiles(area.latlngs);
+    var cells = areaCells(area);
+    var sqMiles = areaSqMi(area);
     var cellWord = cells === 1 ? " map cell" : " map cells";
     // Nothing is downloaded for a state or country, so its size is no limit.
     var note = isOrganizational(area)
@@ -2445,7 +2505,14 @@ window.StreetSweepBases = {
         "outline. Renaming, recolouring and deleting all still work.</span>"
       : "";
     el("fStats").innerHTML =
-      area.latlngs.length + " corners · " + fmtArea(sqMiles) + "<br>" + note + tooMany;
+      areaCorners(area) + " corners" +
+      (area.pieces.length > 1 ? " in " + area.pieces.length + " pieces" : "") +
+      " · " + fmtArea(sqMiles) + "<br>" + note + tooMany;
+    el("fPiecesHint").textContent = area.pieces.length > 1
+      ? "Editing piece " + (area.piece + 1) + " of " + area.pieces.length + " (" +
+        fmtArea(areaSquareMiles(area.latlngs)) + "). Click another piece on the map to edit that one."
+      : "One piece. Add another for an area in parts, such as a county of islands.";
+    el("btnDropPiece").hidden = area.pieces.length < 2;
   }
 
   el("fName").addEventListener("input", function () {
@@ -2579,13 +2646,14 @@ window.StreetSweepBases = {
     areas.slice().sort(abcName).forEach(function (a) {
       var li = document.createElement("li");
       li.className = "area" + (a.id === selectedId ? " selected" : "");
-      var cells = cellCount(a.latlngs);
+      var cells = areaCells(a);
       li.innerHTML =
         "<div class='name'><span class='swatch' style='background:" + LEVEL_COLOR[a.level] + "'></span>" +
         escapeHtml(a.name) + "</div>" +
         "<div class='meta'>" + LEVELS[a.level] +
         (parentsOf(a).length ? " in " + parentsOf(a).map(escapeHtml).join(" and ") : "") +
-        " · " + fmtArea(areaSquareMiles(a.latlngs)) + " · " + cells + (cells === 1 ? " cell" : " cells") + "</div>";
+        " · " + fmtArea(areaSqMi(a)) + (a.pieces.length > 1 ? " in " + a.pieces.length + " pieces" : "") +
+        " · " + cells + (cells === 1 ? " cell" : " cells") + "</div>";
       li.addEventListener("click", function () { select(a.id); });
       list.appendChild(li);
     });
@@ -3174,7 +3242,7 @@ window.StreetSweepBases = {
       var state = areaState(a.name);
       if (dashFilter !== "all" && dashFilter !== state) return;
       var colour = STATE_COLOUR[state];
-      var poly = L.polygon(a.latlngs, {
+      var poly = L.polygon(shapeOf(a), {
         color: colour, weight: 2, opacity: 0.95,
         fillColor: colour, fillOpacity: state === "none" ? 0.06 : 0.16,
       }).addTo(dashLayer);
@@ -4397,10 +4465,42 @@ window.StreetSweepBases = {
 
   el("btnCancel").addEventListener("click", function () { endDrawing(); clearHandles(); status(""); });
 
+  /** Drawing another piece of the selected area, rather than a new area. */
+  el("btnAddPiece").addEventListener("click", function () {
+    var a = byId(selectedId); if (!a) return;
+    clearHandles();
+    drawing = {
+      latlngs: [], addTo: a,
+      line: L.polyline([], { color: "#b3261e", weight: 3, dashArray: "6 6" }).addTo(editLayer),
+    };
+    el("btnFinish").disabled = false;
+    el("btnCancel").disabled = false;
+    el("btnNew").disabled = true;
+    status("Drawing another piece of " + a.name + ". Click the map to drop corners, then Finish.");
+  });
+
+  el("btnDropPiece").addEventListener("click", function () {
+    var a = byId(selectedId); if (!a || a.pieces.length < 2) return;
+    if (!confirm("Delete piece " + (a.piece + 1) + " of " + a.name + "? The rest of it stays.")) return;
+    a.pieces.splice(a.piece, 1);
+    setPiece(a, 0);
+    refresh(a);
+    status("Piece deleted; " + a.pieces.length + (a.pieces.length === 1 ? " piece" : " pieces") + " left");
+  });
+
   el("btnFinish").addEventListener("click", function () {
     if (!drawing || drawing.latlngs.length < 3) { status("Three corners at least", "bad"); return; }
     var pts = drawing.latlngs.slice();
+    var addTo = drawing.addTo;
     endDrawing();
+    if (addTo) {
+      addTo.pieces.push(pts);
+      setPiece(addTo, addTo.pieces.length - 1);
+      select(addTo.id);
+      refresh(addTo);
+      status("Added piece " + addTo.pieces.length + " to " + addTo.name);
+      return;
+    }
     var area = addArea(pts, "", "NEIGHBORHOOD", "");
     area.name = "Area " + areas.length;
     select(area.id);
@@ -4440,8 +4540,7 @@ window.StreetSweepBases = {
   function snapToOutline(latlng) {
     var target = map.latLngToLayerPoint(latlng);
     var best = null;
-    areas.forEach(function (a) {
-      var ring = a.latlngs;
+    areas.forEach(function (a) { a.pieces.forEach(function (ring) {
       if (!ring || ring.length < 3) return;
       for (var i = 0; i < ring.length; i++) {
         var p1 = map.latLngToLayerPoint(ring[i]);
@@ -4460,9 +4559,9 @@ window.StreetSweepBases = {
         // a fraction of a metre, which is the very thing this is meant to avoid.
         var startVertex = (i + 1) % ring.length;
         if (t <= 0.5 && target.distanceTo(p1) <= SNAP_PIXELS) {
-          best = { area: a, segment: i, along: 0, away: away, latlng: ring[i] };
+          best = { area: a, ring: ring, segment: i, along: 0, away: away, latlng: ring[i] };
         } else if (t > 0.5 && target.distanceTo(p2) <= SNAP_PIXELS) {
-          best = { area: a, segment: startVertex, along: 0, away: away, latlng: ring[startVertex] };
+          best = { area: a, ring: ring, segment: startVertex, along: 0, away: away, latlng: ring[startVertex] };
         } else {
           // Partway along. How near the click was is a question about the screen, but
           // where exactly it lands is a question about the ground, and a pixel is tens
@@ -4471,6 +4570,7 @@ window.StreetSweepBases = {
           var alng = alongSegment(latlng, ring[i], ring[startVertex]);
           best = {
             area: a,
+            ring: ring,
             segment: i,
             along: alng,
             away: away,
@@ -4481,7 +4581,7 @@ window.StreetSweepBases = {
           };
         }
       }
-    });
+    }); });
     return best;
   }
 
@@ -4491,8 +4591,7 @@ window.StreetSweepBases = {
    * Either direction is a legitimate boundary; the shorter one is what someone tracing a
    * shared edge almost always means. Clicking a corner partway along picks the other.
    */
-  function cornersBetween(area, from, to) {
-    var ring = area.latlngs;
+  function cornersBetween(ring, from, to) {
     var n = ring.length;
     function walk(start, end) {
       var out = [];
@@ -4547,9 +4646,9 @@ window.StreetSweepBases = {
     var point = snap ? snap.latlng : ev.latlng;
     var borrowed = 0;
 
-    if (snap && drawing.lastSnap && drawing.lastSnap.area === snap.area) {
+    if (snap && drawing.lastSnap && drawing.lastSnap.ring === snap.ring) {
       var previous = drawing.latlngs[drawing.latlngs.length - 1];
-      cornersBetween(snap.area, drawing.lastSnap, snap).forEach(function (c) {
+      cornersBetween(snap.ring, drawing.lastSnap, snap).forEach(function (c) {
         // The corner a snap landed on is already in the line, and the one the next
         // snap lands on is about to be, so neither is borrowed twice.
         if (same(c, previous) || same(c, point)) return;
@@ -4577,13 +4676,19 @@ window.StreetSweepBases = {
   el("btnExport").addEventListener("click", function () {
     if (!areas.length) { status("Nothing to export yet", "bad"); return; }
     var features = areas.map(function (a) {
-      var ring = a.latlngs.map(function (p) { return [round(p.lng), round(p.lat)]; });
-      ring.push(ring[0]);
+      var rings = a.pieces.map(function (r) {
+        var ring = r.map(function (p) { return [round(p.lng), round(p.lat)]; });
+        ring.push(ring[0]);
+        return ring;
+      });
       return {
         type: "Feature",
         properties: { kind: "area", name: a.name, level: a.level, parent: a.parent || undefined,
                       alsoIn: a.alsoIn && a.alsoIn.length ? a.alsoIn : undefined },
-        geometry: { type: "Polygon", coordinates: [ring] }
+        // An area in pieces is one MultiPolygon feature.
+        geometry: rings.length > 1
+          ? { type: "MultiPolygon", coordinates: rings.map(function (r) { return [r]; }) }
+          : { type: "Polygon", coordinates: [rings[0]] }
       };
     });
     var blob = new Blob([JSON.stringify({ type: "FeatureCollection", features: features }, null, 2)],
@@ -4641,13 +4746,19 @@ window.StreetSweepBases = {
 
     features.forEach(function (f) {
       var g = f.geometry || {}, p = f.properties || {};
-      if (g.type === "Polygon" && (p.kind === "area" || p.kind === undefined)) {
-        var ring = g.coordinates[0] || [];
-        var pts = ring.map(function (c) { return L.latLng(c[1], c[0]); });
-        // GeoJSON rings repeat the first point; the app's polygons do not.
-        if (pts.length > 1 && pts[0].equals(pts[pts.length - 1])) pts.pop();
-        if (pts.length < 3) return;
-        addArea(pts, p.name, normaliseLevel(p.level), p.parent, { alsoIn: p.alsoIn });
+      if ((g.type === "Polygon" || g.type === "MultiPolygon") && (p.kind === "area" || p.kind === undefined)) {
+        // Every outer ring of a MultiPolygon is a piece of the one area.
+        var outer = g.type === "Polygon" ? [g.coordinates[0] || []]
+          : (g.coordinates || []).map(function (poly) { return poly[0] || []; });
+        var pieces = outer.map(function (ring) {
+          var pts = ring.map(function (c) { return L.latLng(c[1], c[0]); });
+          // GeoJSON rings repeat the first point; the app's polygons do not.
+          if (pts.length > 1 && pts[0].equals(pts[pts.length - 1])) pts.pop();
+          return pts;
+        }).filter(function (pts) { return pts.length >= 3; });
+        if (!pieces.length) return;
+        addArea(pieces[0], p.name, normaliseLevel(p.level), p.parent,
+          { alsoIn: p.alsoIn, morePieces: pieces.slice(1) });
         added++;
       } else if (g.type === "LineString" || g.type === "Point") {
         context += drawContextFeature(g);
@@ -4800,7 +4911,8 @@ window.StreetSweepBases = {
       if (!a.polygon || a.polygon.length < 3) return;
       var percent = percentOf(a.stats);
       var shade = completionColor(percent);
-      var poly = L.polygon(a.polygon, onImagery
+      var rings = [a.polygon].concat(a.morePieces || []).filter(function (r) { return r && r.length >= 3; });
+      var poly = L.polygon(rings.length > 1 ? rings.map(function (r) { return [r]; }) : rings[0], onImagery
         ? { color: "#ffffff", weight: 2.5, opacity: 0.95, fillColor: shade, fillOpacity: 0.08 }
         : { color: shade, weight: 2, opacity: 0.9, fillColor: shade, fillOpacity: 0.06 }
       ).addTo(coverageLayer);
@@ -4979,24 +5091,30 @@ window.StreetSweepBases = {
   }
 
   /** The biggest ring, as [lat, lng] pairs. Islands and exclaves are left behind. */
-  function largestRing(geometry) {
+  /**
+   * Every outer ring, as [lat, lng] pairs, biggest first: an island county or a city with
+   * an exclave keeps all of its pieces. Holes (a lake inside a county) are left out.
+   */
+  function outerRings(geometry) {
     var rings = [];
-    if (!geometry) return { ring: [], dropped: 0 };
+    if (!geometry) return [];
     if (geometry.type === "Polygon") rings = [geometry.coordinates[0]];
     else if (geometry.type === "MultiPolygon") rings = geometry.coordinates.map(function (p) { return p[0]; });
-    else return { ring: [], dropped: 0 };
-    rings = rings.filter(function (r) { return r && r.length >= 4; });
-    if (!rings.length) return { ring: [], dropped: 0 };
-    var best = rings[0];
-    rings.forEach(function (r) { if (r.length > best.length) best = r; });
-    // Nominatim closes its rings; ours are implicitly closed, so drop the repeat.
-    var ring = best.map(function (c) { return [c[1], c[0]]; });
-    if (ring.length > 1 &&
-        Math.abs(ring[0][0] - ring[ring.length - 1][0]) < 1e-9 &&
-        Math.abs(ring[0][1] - ring[ring.length - 1][1]) < 1e-9) {
-      ring.pop();
-    }
-    return { ring: ring, dropped: rings.length - 1 };
+    else return [];
+    return rings.filter(function (r) { return r && r.length >= 4; }).map(function (r) {
+      // Nominatim closes its rings; ours are implicitly closed, so drop the repeat.
+      var ring = r.map(function (c) { return [c[1], c[0]]; });
+      if (ring.length > 1 &&
+          Math.abs(ring[0][0] - ring[ring.length - 1][0]) < 1e-9 &&
+          Math.abs(ring[0][1] - ring[ring.length - 1][1]) < 1e-9) {
+        ring.pop();
+      }
+      return ring;
+    }).sort(function (a, b) { return ringSqMi(b) - ringSqMi(a); });
+  }
+
+  function ringSqMi(ring) {
+    return areaSquareMiles(ring.map(function (p) { return { lat: p[0], lng: p[1] }; }));
   }
 
   /**
@@ -5032,6 +5150,21 @@ window.StreetSweepBases = {
   }
 
   /** Thins only as much as it has to, so a small outline is left exactly as surveyed. */
+  /**
+   * Several pieces thinned together to one budget of corners, the same tolerance for all.
+   * A piece thinned to nothing (a rock off the coast) is dropped.
+   */
+  function fitPiecesToCap(rings, cap) {
+    var total = function (rs) { return rs.reduce(function (t, r) { return t + r.length; }, 0); };
+    if (total(rings) <= cap) return { rings: rings, tolerance: 0 };
+    var tolerance = 2, out = rings;
+    for (var i = 0; i < 16 && total(out) > cap; i++) {
+      out = rings.map(function (r) { return thin(r, tolerance); }).filter(function (r) { return r.length >= 3; });
+      tolerance *= 2;
+    }
+    return { rings: out.length ? out : [rings[0]], tolerance: tolerance / 2 };
+  }
+
   function fitToCap(ring, cap) {
     cap = cap || MAX_BOUNDARY_CORNERS;
     if (ring.length <= cap) return { ring: ring, tolerance: 0 };
@@ -5067,11 +5200,11 @@ window.StreetSweepBases = {
   function showBoundaries(rows) {
     boundaryFound = [];
     rows.forEach(function (r) {
-      var picked = largestRing(r.geojson);
-      if (picked.ring.length < 3) return;   // a road or a point has no outline to take
+      var picked = outerRings(r.geojson);
+      if (!picked.length) return;   // a road or a point has no outline to take
       var kind = r.addresstype || r.type || "place";
       var org = isOrganizational({ level: levelFor(kind) });
-      var fitted = fitToCap(picked.ring, org ? ORG_BOUNDARY_CORNERS : MAX_BOUNDARY_CORNERS);
+      var fitted = fitPiecesToCap(picked, org ? ORG_BOUNDARY_CORNERS : MAX_BOUNDARY_CORNERS);
       var addr = r.address || {};
       boundaryFound.push({
         name: (r.name || r.display_name.split(",")[0]).trim(),
@@ -5079,10 +5212,11 @@ window.StreetSweepBases = {
         kind: kind,
         org: org,
         city: addr.city || addr.town || addr.village || addr.county || null,
-        ring: fitted.ring,
-        original: picked.ring.length,
+        rings: fitted.rings,
+        corners: fitted.rings.reduce(function (t, x) { return t + x.length; }, 0),
+        original: picked.reduce(function (t, x) { return t + x.length; }, 0),
         tolerance: fitted.tolerance,
-        dropped: picked.dropped,
+        dropped: picked.length - fitted.rings.length,
       });
     });
 
@@ -5096,12 +5230,15 @@ window.StreetSweepBases = {
     el("boundaryHint").textContent = "Pick one to see it on the map.";
 
     boundaryFound.forEach(function (b, index) {
-      var cells = b.org ? 0 : cellCount(b.ring.map(function (p) { return { lat: p[0], lng: p[1] }; }));
+      var cells = b.org ? 0 : cellCount(b.rings.map(function (r) {
+        return r.map(function (p) { return { lat: p[0], lng: p[1] }; });
+      }));
       var li = document.createElement("li");
       li.className = "area";
       li.innerHTML =
         '<div class="name">' + escapeHtml(b.name) + "</div>" +
-        '<div class="meta">' + escapeHtml(b.kind) + " · " + b.ring.length + " corners · " +
+        '<div class="meta">' + escapeHtml(b.kind) + " · " +
+          (b.rings.length > 1 ? b.rings.length + " pieces · " : "") + b.corners + " corners · " +
           (b.org ? "groups the areas inside it; no streets are downloaded"
                  : cells + (cells === 1 ? " map cell" : " map cells")) + "</div>" +
         (!b.org && cells > CELL_LIMIT
@@ -5111,7 +5248,8 @@ window.StreetSweepBases = {
         (b.tolerance ? '<div class="meta">Thinned from ' + b.original + ' corners, to about ' +
           Math.round(b.tolerance) + ' m of the surveyed line.</div>' : "") +
         (b.dropped ? '<div class="meta">' + b.dropped +
-          (b.dropped === 1 ? " separate piece left out." : " separate pieces left out.") + "</div>" : "") +
+          (b.dropped === 1 ? " piece too small to keep at this detail." : " pieces too small to keep at this detail.") +
+          "</div>" : "") +
         '<div class="remaining" data-add="' + index + '">Add this area<span class="chev">&rsaquo;</span></div>';
 
       li.addEventListener("click", function (ev2) {
@@ -5125,21 +5263,21 @@ window.StreetSweepBases = {
 
   function previewBoundary(b) {
     clearBoundaryPreview();
-    boundaryPreview = L.polygon(b.ring, {
+    boundaryPreview = L.polygon(b.rings.length > 1 ? b.rings.map(function (r) { return [r]; }) : b.rings[0], {
       color: "#e2721f", weight: 3, dashArray: "8 6", fillColor: "#e2721f", fillOpacity: 0.08,
     }).addTo(editLayer);
     map.fitBounds(boundaryPreview.getBounds(), { padding: [30, 30] });
-    status(b.name + " — " + b.ring.length + " corners");
+    status(b.name + " — " + (b.rings.length > 1 ? b.rings.length + " pieces, " : "") + b.corners + " corners");
   }
 
   function takeBoundary(b) {
     clearBoundaryPreview();
     var area = addArea(
-      b.ring.map(function (p) { return L.latLng(p[0], p[1]); }),
+      toLatLngs(b.rings[0]),
       b.name,
       levelFor(b.kind),
       "",
-      { city: b.city },
+      { city: b.city, morePieces: b.rings.slice(1).map(toLatLngs) },
     );
     persist(area);
     renderList();
@@ -5319,10 +5457,10 @@ window.StreetSweepBases = {
 
   function areaBox(a) {
     var s = 90, w = 180, n = -90, e = -180;
-    a.latlngs.forEach(function (p) {
+    a.pieces.forEach(function (r) { r.forEach(function (p) {
       s = Math.min(s, p.lat); n = Math.max(n, p.lat);
       w = Math.min(w, p.lng); e = Math.max(e, p.lng);
-    });
+    }); });
     return { s: s, w: w, n: n, e: e };
   }
 
@@ -5422,7 +5560,7 @@ window.StreetSweepBases = {
 
     var monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
     // Too big to load whole: its streets come a screenful at a time instead (loadView).
-    var big = cellCount(a.latlngs) > NETWORK_CELL_LIMIT;
+    var big = areaCells(a) > NETWORK_CELL_LIMIT;
     el("keyUndrivenRow").hidden = false;
 
     var state = { driven: null, month: 0, network: big ? "view" : "loading", count: 0, error: "",

@@ -349,6 +349,8 @@ class PortalSync(
         .put("name", a.name)
         // Redrawn on this phone since the web last sent it: the web takes the new outline.
         .put("redrawn", a.area.pulledOutline != null && a.area.polygon != a.area.pulledOutline)
+        // Came from the web: if the web no longer has it, it was deleted there, not drawn here.
+        .put("fromWeb", a.area.pulledOutline != null)
         .put("level", a.level.name)
         .put("parent", a.area.parentId?.let { nameById[it] } ?: JSONObject.NULL)
         .put("polygon", pointsJson(a.vertices))

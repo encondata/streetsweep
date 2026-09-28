@@ -17,7 +17,7 @@ import com.example.streetsweep.domain.RoadShape
         Poi::class, StreetExclusion::class, StreetCompletion::class, WayCoverage::class, AreaStatsCache::class,
         PendingDeletion::class,
     ],
-    version = 15,
+    version = 16,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -233,11 +233,18 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v16: an area can come in several pieces (a county of islands). */
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `areas` ADD COLUMN `morePieces` TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         /** Hand-written migrations, oldest first. Add one for each version bump. */
         val MIGRATIONS: Array<Migration> =
             arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
                 MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14,
-                MIGRATION_14_15)
+                MIGRATION_14_15, MIGRATION_15_16)
 
         fun build(context: Context): AppDatabase =
             // The phone now holds real drives and areas. Every schema change from version 4 on

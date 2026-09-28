@@ -45,4 +45,10 @@ object ShapeText {
             val c = pair.indexOf(',')
             LatLngPoint(pair.substring(0, c).toDouble(), pair.substring(c + 1).toDouble())
         }
+
+    /** Several rings, "|" between them: the further pieces of an area in parts. */
+    fun encodeRings(rings: List<List<LatLngPoint>>): String = rings.joinToString("|") { encode(it) }
+
+    fun decodeRings(text: String): List<List<LatLngPoint>> =
+        if (text.isEmpty()) emptyList() else text.split('|').map { decode(it) }.filter { it.size >= 3 }
 }

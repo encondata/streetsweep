@@ -102,13 +102,16 @@ class CoverageRenderer(private val tiles: OsmTiles) {
         canvas.drawRect(0f, 0f, cam.width.toFloat(), cam.height.toFloat(), background)
         drawTiles(canvas, cam)
         f.areas.sortedByDescending { it.area.level }.forEach { a ->
-            if (a.vertices.size < 3) return@forEach
             path.rewind()
-            a.vertices.forEachIndexed { i, p ->
-                val (x, y) = cam.toScreen(p)
-                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            // Every piece of an area in parts, as one path.
+            a.pieces.filter { it.size >= 3 }.forEach { piece ->
+                piece.forEachIndexed { i, p ->
+                    val (x, y) = cam.toScreen(p)
+                    if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                }
+                path.close()
             }
-            path.close()
+            if (path.isEmpty) return@forEach
             canvas.drawPath(path, if (a.area.id == f.focusedArea?.area?.id) areaFocusedPaint else areaPaint)
         }
         f.streets.forEach { s ->

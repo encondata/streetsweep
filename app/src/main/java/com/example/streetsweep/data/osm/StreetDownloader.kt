@@ -49,7 +49,8 @@ class StreetDownloadWorker(context: Context, params: WorkerParameters) : Corouti
         val repo: CoverageRepository = container.coverageRepository
         val area = repo.getArea(areaId) ?: return Result.success()   // deleted since it was queued
 
-        val cells = ChunkGrid.cellsFor(area.bounds)
+        // Each piece's own cells: an island county does not download the sea between.
+        val cells = area.cells()
         // A big area, with a server to load from as needed, is not downloaded whole: its
         // streets arrive as the phone drives through it and as its map is looked at.
         if (cells.size > WHOLE_AREA_CELLS && serverSet()) {

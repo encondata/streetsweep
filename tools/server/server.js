@@ -95,6 +95,9 @@ async function ensureSchema() {
     -- Further areas it is part of, beyond parent_name: a city across two counties. By
     -- name, like parent_name. parent_name stays the first, and the one phones are given.
     ALTER TABLE areas ADD COLUMN IF NOT EXISTS also_in TEXT[] NOT NULL DEFAULT '{}';
+    -- More pieces of the same area, beyond "polygon": a county of islands, a city with an
+    -- exclave. Each [[lat, lng], ...] like polygon. The box columns cover every piece.
+    ALTER TABLE areas ADD COLUMN IF NOT EXISTS more_pieces JSONB NOT NULL DEFAULT '[]';
     CREATE INDEX IF NOT EXISTS areas_bbox ON areas (min_lat, min_lng, max_lat, max_lng);
 
     -- What the phone reports back. Kept apart from "areas" on purpose: that table is the
@@ -293,6 +296,20 @@ async function waitForDatabase() {
 
 class BadRequest extends Error {}
 
+/** One piece of an outline: three or more [lat, lng] corners, in range. */
+function cleanRing(ring) {
+  if (!Array.isArray(ring) || ring.length < 3) throw new BadRequest("An outline needs at least three corners");
+  if (ring.length > 50000) throw new BadRequest("That outline has too many corners");
+  return ring.map((p) => {
+    if (!Array.isArray(p) || p.length < 2) throw new BadRequest("Each corner must be [lat, lng]");
+    const lat = Number(p[0]);
+    const lng = Number(p[1]);
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) throw new BadRequest("Latitude out of range");
+    if (!Number.isFinite(lng) || lng < -180 || lng > 180) throw new BadRequest("Longitude out of range");
+    return [lat, lng];
+  });
+}
+
 function cleanArea(body) {
   const name = String(body && body.name != null ? body.name : "").trim();
   if (!name) throw new BadRequest("An area needs a name");
@@ -301,24 +318,20 @@ function cleanArea(body) {
   const level = String(body.level || "NEIGHBORHOOD").toUpperCase();
   if (!LEVELS.has(level)) throw new BadRequest(`Level must be one of ${[...LEVELS].join(", ")}`);
 
-  const polygon = body.polygon;
-  if (!Array.isArray(polygon) || polygon.length < 3) throw new BadRequest("An outline needs at least three corners");
+  const points = cleanRing(body.polygon);
+  // Further pieces: the other islands of a county, an exclave of a city.
+  const raw = Array.isArray(body.morePieces) ? body.morePieces : [];
+  if (raw.length > 500) throw new BadRequest("That area has too many pieces");
+  const morePieces = raw.map(cleanRing);
+  const corners = points.length + morePieces.reduce((n, r) => n + r.length, 0);
   // Generous on purpose: a county as OpenStreetMap draws it runs to several thousand
   // corners and there is no reason to round it off. This is only here so a runaway
   // request cannot ask Postgres to hold something absurd.
-  if (polygon.length > 50000) throw new BadRequest("That outline has too many corners");
+  if (corners > 50000) throw new BadRequest("That outline has too many corners");
 
-  const points = polygon.map((p) => {
-    if (!Array.isArray(p) || p.length < 2) throw new BadRequest("Each corner must be [lat, lng]");
-    const lat = Number(p[0]);
-    const lng = Number(p[1]);
-    if (!Number.isFinite(lat) || lat < -90 || lat > 90) throw new BadRequest("Latitude out of range");
-    if (!Number.isFinite(lng) || lng < -180 || lng > 180) throw new BadRequest("Longitude out of range");
-    return [lat, lng];
-  });
-
-  const lats = points.map((p) => p[0]);
-  const lngs = points.map((p) => p[1]);
+  const all = points.concat(...morePieces);
+  const lats = all.map((p) => p[0]);
+  const lngs = all.map((p) => p[1]);
   const parent = body.parentName ? String(body.parentName).trim().slice(0, 120) : null;
   // The other areas it is part of: named once each, never itself or its first parent.
   const alsoIn = [];
@@ -345,6 +358,7 @@ function cleanArea(body) {
     notes: notes || null,
     color: colour,
     polygon: points,
+    morePieces,
     minLat: Math.min(...lats),
     minLng: Math.min(...lngs),
     maxLat: Math.max(...lats),
@@ -392,6 +406,7 @@ function rowToArea(row) {
     notes: row.notes || null,
     color: row.color || null,
     polygon: row.polygon,
+    morePieces: row.more_pieces || [],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -399,7 +414,7 @@ function rowToArea(row) {
 
 // ----------------------------------------------------------------- store
 
-const COLUMNS = "id, name, level, parent_name, also_in, city, notes, color, polygon, created_at, updated_at";
+const COLUMNS = "id, name, level, parent_name, also_in, city, notes, color, polygon, more_pieces, created_at, updated_at";
 
 // level is text, so an alphabetical sort would put NEIGHBORHOOD above CITY. Rank it instead,
 // largest place first, the way the phone lists them.
@@ -413,13 +428,15 @@ async function listAreas() {
 }
 
 async function createArea(area) {
+  // Drawn again on purpose: no longer a deleted area.
+  await pool.query("DELETE FROM deletions WHERE kind = 'area' AND key = lower($1)", [area.name]);
   const { rows } = await pool.query(
     `INSERT INTO areas (name, level, parent_name, city, notes, color,
-                        polygon, min_lat, min_lng, max_lat, max_lng, also_in)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING ${COLUMNS}`,
+                        polygon, min_lat, min_lng, max_lat, max_lng, also_in, more_pieces)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING ${COLUMNS}`,
     [area.name, area.level, area.parentName, area.city, area.notes, area.color,
      JSON.stringify(area.polygon), area.minLat, area.minLng, area.maxLat, area.maxLng,
-     area.alsoIn || []],
+     area.alsoIn || [], JSON.stringify(area.morePieces || [])],
   );
   progress.touched(pool, rows[0].id);
   return rowToArea(rows[0]);
@@ -429,11 +446,11 @@ async function updateArea(id, area) {
   const { rows } = await pool.query(
     `UPDATE areas SET name=$1, level=$2, parent_name=$3, city=$4, notes=$5, color=$6,
                       polygon=$7, min_lat=$8, min_lng=$9, max_lat=$10, max_lng=$11,
-                      also_in=$13, updated_at=now()
+                      also_in=$13, more_pieces=$14, updated_at=now()
      WHERE id=$12 RETURNING ${COLUMNS}`,
     [area.name, area.level, area.parentName, area.city, area.notes, area.color,
      JSON.stringify(area.polygon), area.minLat, area.minLng, area.maxLat, area.maxLng, id,
-     area.alsoIn || []],
+     area.alsoIn || [], JSON.stringify(area.morePieces || [])],
   );
   if (rows.length) progress.touched(pool, id);
   return rows.length ? rowToArea(rows[0]) : null;
@@ -454,18 +471,27 @@ async function uploadPhoneAreas(list) {
       continue;
     }
     const { rows } = await pool.query(
-      `SELECT id, name, level, parent_name, also_in, city, notes, color FROM areas WHERE lower(name) = lower($1)`,
+      `SELECT id, name, level, parent_name, also_in, more_pieces, city, notes, color FROM areas WHERE lower(name) = lower($1)`,
       [clean.name]);
     if (!rows.length) {
+      // Only an area drawn on the phone is new to the web. One the phone was given by the
+      // web and the web no longer has was deleted there, and must not come back.
+      if (a.fromWeb === true) continue;
+      const { rows: gone } = await pool.query(
+        "SELECT 1 FROM deletions WHERE kind = 'area' AND key = lower($1)", [clean.name]);
+      if (gone.length) continue;
       await createArea(clean);
       out.created.push(clean.name);
     } else if (a.redrawn === true) {
       // A new outline only; the web's name, level, parent, notes and colour stay.
       const r = rows[0];
-      await updateArea(r.id, {
-        ...clean, name: r.name, level: r.level, parentName: r.parent_name, alsoIn: r.also_in || [],
-        city: r.city, notes: r.notes, color: r.color,
+      // The phone knows one piece; the rest stay as the web has them, and the box is
+      // worked out again over all of them.
+      const whole = cleanArea({
+        name: r.name, level: r.level, parentName: r.parent_name, alsoIn: r.also_in || [],
+        polygon: clean.polygon, morePieces: r.more_pieces || [],
       });
+      await updateArea(r.id, { ...whole, city: r.city, notes: r.notes, color: r.color });
       out.redrawn.push(r.name);
     }
   }
@@ -473,8 +499,13 @@ async function uploadPhoneAreas(list) {
 }
 
 async function deleteArea(id) {
-  const { rowCount } = await pool.query("DELETE FROM areas WHERE id=$1", [id]);
-  return rowCount > 0;
+  const { rows } = await pool.query("DELETE FROM areas WHERE id=$1 RETURNING name", [id]);
+  if (!rows.length) return false;
+  // Remembered by name, so a phone that still holds it does not send it back as new.
+  await pool.query(
+    `INSERT INTO deletions (kind, key, deleted_at) VALUES ('area', lower($1), $2)
+     ON CONFLICT (kind, key) DO UPDATE SET deleted_at = EXCLUDED.deleted_at`, [rows[0].name, Date.now()]);
+  return true;
 }
 
 /**
@@ -488,12 +519,22 @@ function levelForPhone(level) {
 }
 
 /** The same shape tools/area-builder.html exports and the Android app imports. */
-function toGeoJson(areas) {
+/**
+ * With [pieces], an area in several pieces is one MultiPolygon feature. Without, only its
+ * main piece goes, as a Polygon: an older phone reads each ring of a MultiPolygon as an
+ * area of its own, and would make several areas of the same name.
+ */
+function toGeoJson(areas, { pieces = false } = {}) {
+  const ringOut = (r) => {
+    const ring = r.map(([lat, lng]) => [round(lng), round(lat)]);
+    ring.push(ring[0]);
+    return ring;
+  };
   return {
     type: "FeatureCollection",
     features: areas.map((a) => {
-      const ring = a.polygon.map(([lat, lng]) => [round(lng), round(lat)]);
-      ring.push(ring[0]);
+      const ring = ringOut(a.polygon);
+      const more = pieces ? (a.morePieces || []).filter((r) => r.length >= 3) : [];
       const properties = { kind: "area", name: a.name, level: levelForPhone(a.level) };
       if (a.parentName) properties.parent = a.parentName;
       // Phones read only "parent"; the rest are for the web's own export and import.
@@ -501,7 +542,10 @@ function toGeoJson(areas) {
       if (a.city) properties.city = a.city;
       if (a.notes) properties.notes = a.notes;
       if (a.color) properties.color = a.color;
-      return { type: "Feature", properties, geometry: { type: "Polygon", coordinates: [ring] } };
+      const geometry = more.length
+        ? { type: "MultiPolygon", coordinates: [[ring], ...more.map((r) => [ringOut(r)])] }
+        : { type: "Polygon", coordinates: [ring] };
+      return { type: "Feature", properties, geometry };
     }),
   };
 }
@@ -525,6 +569,8 @@ async function importGeoJson(doc) {
     const rings = geometry.type === "Polygon" ? [geometry.coordinates && geometry.coordinates[0]]
       : geometry.type === "MultiPolygon" ? (geometry.coordinates || []).map((p) => p[0])
       : [];
+    // Every ring of a MultiPolygon is a piece of one area, not an area of its own.
+    const pieces = [];
     for (const ring of rings) {
       if (!Array.isArray(ring)) continue;
       const points = ring.map((c) => [c[1], c[0]]);
@@ -532,15 +578,17 @@ async function importGeoJson(doc) {
       if (points.length > 1 &&
           points[0][0] === points[points.length - 1][0] &&
           points[0][1] === points[points.length - 1][1]) points.pop();
-      if (points.length < 3) continue;
-      created.push(await createArea(cleanArea({
-        name: properties.name || `Imported area ${++unnamed}`,
-        level: normaliseLevel(properties.level),
-        parentName: properties.parent,
-        alsoIn: properties.alsoIn,
-        polygon: points,
-      })));
+      if (points.length >= 3) pieces.push(points);
     }
+    if (!pieces.length) continue;
+    created.push(await createArea(cleanArea({
+      name: properties.name || `Imported area ${++unnamed}`,
+      level: normaliseLevel(properties.level),
+      parentName: properties.parent,
+      alsoIn: properties.alsoIn,
+      polygon: pieces[0],
+      morePieces: pieces.slice(1),
+    })));
   }
   return created;
 }
@@ -795,7 +843,7 @@ async function drives(limit, withShapes) {
 
   // Areas are matched by whether the drive's middle falls inside one, which is cheap and
   // right often enough to label a row with.
-  const { rows: areaRows } = await pool.query(`SELECT name, polygon, min_lat, min_lng, max_lat, max_lng FROM areas`);
+  const { rows: areaRows } = await pool.query(`SELECT name, polygon, more_pieces, min_lat, min_lng, max_lat, max_lng FROM areas`);
 
   // Each segment belongs to one drive: the most recent one that had already started when
   // it was stamped. Matching runs after a drive ends, so a window around each drive would
@@ -852,20 +900,11 @@ async function drives(limit, withShapes) {
   });
 }
 
-/** Ray casting, the same test the phone uses. */
+/** Ray casting, the same test the phone uses, against every piece of the area. */
 function contains(area, point) {
   const [lat, lng] = point;
   if (lat < area.min_lat || lat > area.max_lat || lng < area.min_lng || lng > area.max_lng) return false;
-  const ring = area.polygon || [];
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [ai, aj] = [ring[i], ring[j]];
-    if ((ai[0] > lat) !== (aj[0] > lat) &&
-        lng < ((aj[1] - ai[1]) * (lat - ai[0])) / (aj[0] - ai[0]) + ai[1]) {
-      inside = !inside;
-    }
-  }
-  return inside;
+  return networks.insideArea(area, lat, lng);
 }
 
 async function coverage(edgeLimit) {
@@ -873,7 +912,7 @@ async function coverage(edgeLimit) {
   const [areas, edges, drives, pois, totals] = await Promise.all([
     // The server's own count of each area (progress.js), from everyone's driving — not
     // what any one phone last reported. The web is the record; phones only feed it.
-    pool.query(`SELECT a.name, a.level, a.parent_name, a.also_in, a.polygon,
+    pool.query(`SELECT a.name, a.level, a.parent_name, a.also_in, a.polygon, a.more_pieces,
                        p.total AS streets_total, p.done AS streets_done, p.partial AS streets_partial,
                        p.excluded AS streets_excluded, p.meters_total, p.meters_driven,
                        p.computed_at AS reported_at
@@ -892,6 +931,7 @@ async function coverage(edgeLimit) {
       parentName: r.parent_name,
       alsoIn: r.also_in || [],
       polygon: r.polygon,
+      morePieces: r.more_pieces || [],
       // Null until the server has counted it (a new area, for a moment).
       stats: r.streets_total == null ? null : {
         total: r.streets_total, done: r.streets_done, partial: r.streets_partial,
@@ -1887,7 +1927,9 @@ async function handle(req, res) {
   if (route === "/api/areas.geojson" && req.method === "GET") {
     // For phones: states and countries are only groupings, and a phone given one would
     // treat it as an area to sweep — loading streets for the whole of it as it drives.
-    const body = JSON.stringify(toGeoJson((await listAreas()).filter((a) => !ORGANIZATIONAL.has(a.level))), null, 2);
+    // ?pieces=1 from a phone that knows an area can come in pieces.
+    const body = JSON.stringify(toGeoJson((await listAreas()).filter((a) => !ORGANIZATIONAL.has(a.level)),
+      { pieces: url.searchParams.get("pieces") === "1" }), null, 2);
     res.writeHead(200, {
       "Content-Type": "application/geo+json; charset=utf-8",
       "Content-Disposition": 'attachment; filename="streetsweep-areas.geojson"',
@@ -1935,7 +1977,7 @@ async function handle(req, res) {
   const areaStreets = route.match(/^\/api\/areas\/(\d+)\/streets$/);
   if (areaStreets && req.method === "GET") {
     const { rows: arows } = await pool.query(
-      "SELECT polygon, min_lat, min_lng, max_lat, max_lng FROM areas WHERE id=$1",
+      "SELECT polygon, more_pieces, min_lat, min_lng, max_lat, max_lng FROM areas WHERE id=$1",
       [Number(areaStreets[1])]);
     const area = arows[0];
     if (!area) return sendJson(res, 404, { error: "No such area" });
@@ -2019,7 +2061,7 @@ async function handle(req, res) {
   const areaNetwork = route.match(/^\/api\/areas\/(\d+)\/network$/);
   if (areaNetwork && req.method === "GET") {
     const { rows } = await pool.query(
-      "SELECT id, level, polygon, min_lat, min_lng, max_lat, max_lng FROM areas WHERE id=$1",
+      "SELECT id, level, polygon, more_pieces, min_lat, min_lng, max_lat, max_lng FROM areas WHERE id=$1",
       [Number(areaNetwork[1])]);
     if (!rows[0]) return sendJson(res, 404, { error: "No such area" });
     if (ORGANIZATIONAL.has(rows[0].level)) {

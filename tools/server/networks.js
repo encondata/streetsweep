@@ -36,6 +36,11 @@ function inside(polygon, lat, lng) {
   return hit;
 }
 
+/** Inside any of the area's pieces. */
+function insideArea(area, lat, lng) {
+  return streets.ringsOf(area).some((ring) => inside(ring, lat, lng));
+}
+
 async function ensureSchema() { /* nothing of its own now; the cells live in streets.js */ }
 
 /**
@@ -44,7 +49,7 @@ async function ensureSchema() { /* nothing of its own now; the cells live in str
  * one queue.
  */
 async function forArea(pool, area, only) {
-  let keys = streets.cellsFor(area.min_lat, area.min_lng, area.max_lat, area.max_lng);
+  let keys = streets.cellsForRings(streets.ringsOf(area));
   // A large area is loaded a few cells at a time, for the part of the map in view.
   if (only) keys = keys.filter((k) => only.has(k));
   const seen = new Set();
@@ -62,11 +67,11 @@ async function forArea(pool, area, only) {
       seen.add(way.id);
       const shape = way.geometry.map((p) => [p.lat, p.lon]);
       const [cLat, cLng] = boxCentre(shape);
-      if (!inside(area.polygon, cLat, cLng)) continue;
+      if (!insideArea(area, cLat, cLng)) continue;
       lines.push({ id: way.id, name: (way.tags && way.tags.name) || null, shape });
     }
   }
   return { lines, fetchedAt, cached, stale, cells: keys.length };
 }
 
-module.exports = { ensureSchema, forArea, boxCentre, inside };
+module.exports = { ensureSchema, forArea, boxCentre, inside, insideArea };

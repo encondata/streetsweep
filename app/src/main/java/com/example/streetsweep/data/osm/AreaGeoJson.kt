@@ -12,7 +12,10 @@ data class ImportedArea(
     val level: AreaLevel,
     /** Name of another imported area this one sits inside, if any. */
     val parent: String?,
+    /** The main piece. */
     val polygon: List<LatLngPoint>,
+    /** Any further pieces of the same area, from a MultiPolygon. */
+    val morePieces: List<List<LatLngPoint>> = emptyList(),
 )
 
 class AreaImportException(message: String) : Exception(message)
@@ -46,18 +49,18 @@ object AreaGeoJson {
             val kind = properties.optString("kind").takeIf { it.isNotEmpty() }
             if (kind != null && kind != "area") continue
 
-            for (ring in rings(geometry)) {
-                val points = ring.dropLastIfClosed()
-                if (points.size < 3) continue
-                val name = properties.optString("name").takeIf { it.isNotBlank() }
-                    ?: "Imported area ${++unnamed}"
-                out += ImportedArea(
-                    name = name,
-                    level = level(properties.opt("level")),
-                    parent = properties.optString("parent").takeIf { it.isNotBlank() },
-                    polygon = points,
-                )
-            }
+            // Every ring of a MultiPolygon is a piece of one area, not an area of its own.
+            val pieces = rings(geometry).map { it.dropLastIfClosed() }.filter { it.size >= 3 }
+            if (pieces.isEmpty()) continue
+            val name = properties.optString("name").takeIf { it.isNotBlank() }
+                ?: "Imported area ${++unnamed}"
+            out += ImportedArea(
+                name = name,
+                level = level(properties.opt("level")),
+                parent = properties.optString("parent").takeIf { it.isNotBlank() },
+                polygon = pieces.first(),
+                morePieces = pieces.drop(1),
+            )
         }
         if (out.isEmpty()) throw AreaImportException("No area outlines in that file")
         return out

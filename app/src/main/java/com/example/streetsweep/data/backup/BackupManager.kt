@@ -134,8 +134,8 @@ class BackupManager(
             val allAreas = coverage.getAreas()
             val nameById = allAreas.associate { it.id to it.name }
             for (area in allAreas) {
-                val ring = ShapeText.decode(area.polygon)
-                if (ring.size < 3) continue
+                val rings = area.pieces.filter { it.size >= 3 }
+                if (rings.isEmpty()) continue
                 comma()
                 // Level and parent go out by name so the file reads the same way the
                 // desktop area builder writes one.
@@ -143,9 +143,21 @@ class BackupManager(
                 w.write(",\"level\":" + quote(area.areaLevel.name))
                 area.parentId?.let { nameById[it] }?.let { w.write(",\"parent\":" + quote(it)) }
                 w.write("},")
-                w.write(""""geometry":{"type":"Polygon","coordinates":[[""")
-                (ring + ring.first()).forEachIndexed { i, p -> if (i > 0) w.write(","); w.write(coord(p)) }
-                w.write("]]}}")
+                // An area in parts goes out as one MultiPolygon.
+                fun writeRing(ring: List<com.example.streetsweep.domain.LatLngPoint>) {
+                    w.write("[")
+                    (ring + ring.first()).forEachIndexed { i, p -> if (i > 0) w.write(","); w.write(coord(p)) }
+                    w.write("]")
+                }
+                if (rings.size == 1) {
+                    w.write(""""geometry":{"type":"Polygon","coordinates":[""")
+                    writeRing(rings[0])
+                    w.write("]}}")
+                } else {
+                    w.write(""""geometry":{"type":"MultiPolygon","coordinates":[""")
+                    rings.forEachIndexed { i, r -> if (i > 0) w.write(","); w.write("["); writeRing(r); w.write("]") }
+                    w.write("]}}")
+                }
             }
             for (edge in coverage.getAllDrivenEdges()) {
                 val line = ShapeText.decode(edge.shape)

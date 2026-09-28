@@ -41,7 +41,8 @@ import org.osmdroid.views.overlay.Overlay
 import java.io.File
 
 /** An area rectangle with its label, drawn at every zoom. */
-data class AreaOutline(val name: String, val vertices: List<LatLngPoint>, val bounds: Bounds, val percent: Int, val level: Int, val focused: Boolean = false)
+/** An area to outline: every piece of it, for an area in parts. */
+data class AreaOutline(val name: String, val pieces: List<List<LatLngPoint>>, val bounds: Bounds, val percent: Int, val level: Int, val focused: Boolean = false)
 
 /** Everything the map draws on top of the OpenStreetMap tiles. */
 data class MapLayers(
@@ -339,8 +340,8 @@ class LayersOverlay : Overlay() {
         }
         l.areas.sortedByDescending { it.level }.forEach { a ->
             if (!visible.let { v -> a.bounds.intersects(Bounds(v.latSouth, v.lonWest, v.latNorth, v.lonEast)) }) return@forEach
-            if (a.vertices.size >= 3) {
-                val poly = polygonPath(a.vertices)
+            a.pieces.filter { it.size >= 3 }.forEach { piece ->
+                val poly = polygonPath(piece)
                 if (a.focused) canvas.drawPath(poly, areaFill)
                 canvas.drawPath(poly, if (a.focused) areaFocused else areaStroke)
             }

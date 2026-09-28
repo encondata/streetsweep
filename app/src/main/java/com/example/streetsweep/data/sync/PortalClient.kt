@@ -26,7 +26,8 @@ class PortalClient(
     private val token: suspend () -> String? = { null },
 ) {
 
-    suspend fun areasGeoJson(): String = get("/api/areas.geojson")
+    /** With every piece of an area in parts, as one MultiPolygon (older servers ignore it). */
+    suspend fun areasGeoJson(): String = get("/api/areas.geojson?pieces=1")
 
     suspend fun health(): Boolean = try {
         JSONObject(get("/api/health")).optBoolean("ok")
