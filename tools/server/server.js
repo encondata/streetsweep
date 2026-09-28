@@ -42,8 +42,11 @@ const ASSETS = new Set(
     : []
 );
 // Smallest first; the phone's AreaLevel enum is this same ladder in this same order.
-const LEVEL_ORDER = ["NEIGHBORHOOD", "CITY", "COUNTY", "METRO", "REGION", "STATE"];
+const LEVEL_ORDER = ["NEIGHBORHOOD", "CITY", "COUNTY", "METRO", "REGION", "STATE", "COUNTRY"];
 const LEVELS = new Set(LEVEL_ORDER);
+// Levels that only group other areas: nothing is downloaded for them, nothing counted, and
+// phones never see them. A state is thousands of street cells nobody means to sweep whole.
+const ORGANIZATIONAL = new Set(["STATE", "COUNTRY"]);
 
 // ---------------------------------------------------------------- photos
 //
@@ -1718,7 +1721,9 @@ async function handle(req, res) {
   }
 
   if (route === "/api/areas.geojson" && req.method === "GET") {
-    const body = JSON.stringify(toGeoJson(await listAreas()), null, 2);
+    // For phones: states and countries are only groupings, and a phone given one would
+    // treat it as an area to sweep — loading streets for the whole of it as it drives.
+    const body = JSON.stringify(toGeoJson((await listAreas()).filter((a) => !ORGANIZATIONAL.has(a.level))), null, 2);
     res.writeHead(200, {
       "Content-Type": "application/geo+json; charset=utf-8",
       "Content-Disposition": 'attachment; filename="streetsweep-areas.geojson"',
@@ -1850,9 +1855,12 @@ async function handle(req, res) {
   const areaNetwork = route.match(/^\/api\/areas\/(\d+)\/network$/);
   if (areaNetwork && req.method === "GET") {
     const { rows } = await pool.query(
-      "SELECT id, polygon, min_lat, min_lng, max_lat, max_lng FROM areas WHERE id=$1",
+      "SELECT id, level, polygon, min_lat, min_lng, max_lat, max_lng FROM areas WHERE id=$1",
       [Number(areaNetwork[1])]);
     if (!rows[0]) return sendJson(res, 404, { error: "No such area" });
+    if (ORGANIZATIONAL.has(rows[0].level)) {
+      return sendJson(res, 400, { error: "States and countries only group other areas; they have no streets of their own" });
+    }
     // ?cells=303_-956,303_-957 asks for just those of the area's cells: how the map loads
     // a county or a big city, a screenful at a time, instead of all of it at once.
     let only = null;

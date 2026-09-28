@@ -786,6 +786,24 @@
   table.grid .pct b { font-size: 12px; min-width: 34px; text-align: right; }
   table.grid .muted { color: var(--ink-soft); }
   table.grid button { padding: 4px 9px; font-size: 11px; box-shadow: none; }
+  /* The areas list as a tree: each area under the one it is part of. */
+  table.areaTree .nm { padding-left: calc(var(--depth, 0) * 22px); }
+  table.areaTree .tw {
+    width: 20px; height: 20px; flex: 0 0 auto; display: grid; place-items: center; border: 0;
+    background: transparent; padding: 0; color: var(--ink-soft); font-size: 11px; cursor: pointer;
+    border-radius: 5px; transition: transform .12s;
+  }
+  table.areaTree .tw:hover { background: var(--surface-2); color: var(--ink); }
+  table.areaTree .tw.shut { transform: rotate(-90deg); }
+  table.areaTree .tw.none { visibility: hidden; }
+  table.areaTree .kids { font-weight: 600; font-size: 11px; color: var(--ink-soft); }
+  table.areaTree tr.ctx td { opacity: .5; }
+  table.areaTree tr.org td { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+  .orgpill {
+    display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 700;
+    background: var(--surface-2); color: var(--ink-soft); letter-spacing: .02em;
+  }
+  #areasBack { margin-bottom: 6px; }
   .pager { display: flex; align-items: center; gap: 6px; margin-top: 14px; flex-wrap: wrap; }
   .pager button { padding: 5px 11px; font-size: 12px; box-shadow: none; }
   .pager button[aria-current="true"] {
@@ -1379,20 +1397,23 @@
             <button type="button" data-filter="done" aria-pressed="false">Completed</button>
             <button type="button" data-filter="none" aria-pressed="false">Not started</button>
             <span class="grow"></span>
+            <button type="button" id="btnExpandAll">Expand all</button>
+            <button type="button" id="btnCollapseAll">Collapse all</button>
             <button type="button" id="btnDrawMode" class="primary">Draw a new area</button>
           </div>
-          <table class="grid" id="areaGrid">
+          <table class="grid areaTree" id="areaGrid">
             <thead><tr>
               <th>Name</th><th style="width:200px">Completion</th><th>Streets</th>
-              <th>Level</th><th>Last driven</th><th></th>
+              <th>Level</th><th>Counted</th><th></th>
             </tr></thead>
             <tbody></tbody>
           </table>
           <p class="hint" id="areaGridEmpty" hidden>No area matches that filter.</p>
-          <div class="pager" id="areaPager"></div>
+          <p class="hint" id="areaCount"></p>
         </div>
 
         <div id="areasDraw" hidden>
+        <button type="button" id="areasBack" class="backlink">&larr; All areas</button>
         <div class="viewhead">
           <h2>Areas</h2>
           <p>Draw a neighbourhood, a city or any shape you want to finish. Corners drag, and the dot between two of them adds another.</p>
@@ -1890,15 +1911,18 @@ window.StreetSweepBases = {
   var CELL_LIMIT = 400;
   // Smallest first. Everything that cares about size — the parent list, the draw order,
   // the legacy numeric level on the wire — reads its ordering from here.
-  var LEVEL_ORDER = ["NEIGHBORHOOD", "CITY", "COUNTY", "METRO", "REGION", "STATE"];
+  var LEVEL_ORDER = ["NEIGHBORHOOD", "CITY", "COUNTY", "METRO", "REGION", "STATE", "COUNTRY"];
   var LEVELS = {
     NEIGHBORHOOD: "Neighborhood", CITY: "City", COUNTY: "County",
-    METRO: "Metro area", REGION: "Region", STATE: "State"
+    METRO: "Metro area", REGION: "Region", STATE: "State", COUNTRY: "Country"
   };
   var LEVEL_COLOR = {
     NEIGHBORHOOD: "#0b6b57", CITY: "#45607a", COUNTY: "#6f5aa8",
-    METRO: "#b8762b", REGION: "#a4553d", STATE: "#7d4a63"
+    METRO: "#b8762b", REGION: "#a4553d", STATE: "#7d4a63", COUNTRY: "#4f5d6b"
   };
+  // Only group other areas: no streets downloaded, nothing counted, not sent to phones.
+  var ORGANIZATIONAL = { STATE: true, COUNTRY: true };
+  function isOrganizational(a) { return Boolean(a && ORGANIZATIONAL[a.level]); }
 
   /** Position on the ladder; -1 for anything unrecognised. */
   function levelRank(level) { return LEVEL_ORDER.indexOf(level); }
@@ -2349,12 +2373,13 @@ window.StreetSweepBases = {
     parentSelect.disabled = bigger.length === 0;
     el("fParentHint").textContent = bigger.length === 0
       ? (rank >= LEVEL_ORDER.length - 1
-          ? "Nothing on the list is bigger than a state."
+          ? "Nothing on the list is bigger than a country."
           : "Nothing bigger than this drawn yet.")
       : "";
 
     var cells = cellCount(area.latlngs);
     var sqMiles = areaSquareMiles(area.latlngs);
+    if (isOrganizational(area)) cells = 0;   // nothing is downloaded for a state or country
     var cellWord = cells === 1 ? " map cell" : " map cells";
     var note = cells > CELL_LIMIT
       ? "<span class='bad'>" + cells + cellWord + " — over the " + CELL_LIMIT + " the app allows. Split it up.</span>"
@@ -3720,7 +3745,11 @@ window.StreetSweepBases = {
 
   // ---- the areas table ------------------------------------------------------
 
-  var areaFilter = "all", areaPage = 1, AREA_PER_PAGE = 12, areaProgress = {};
+  var areaFilter = "all", areaProgress = {};
+  // Which branches are folded, by area id; kept between visits.
+  var areaFolded = {};
+  try { areaFolded = JSON.parse(localStorage.getItem("streetsweep.areaFolded") || "{}") || {}; } catch (e) { areaFolded = {}; }
+  function saveFolded() { try { localStorage.setItem("streetsweep.areaFolded", JSON.stringify(areaFolded)); } catch (e) { /* ignore */ } }
 
   function setAreasMode(mode) {
     document.documentElement.setAttribute("data-areas", mode);
@@ -3732,102 +3761,162 @@ window.StreetSweepBases = {
 
   function areaPct(name) {
     var p = areaProgress[name];
-    if (!p || !p.total) return null;
-    return Math.round((p.done / p.total) * 100);
+    if (!p || !p.metersTotal) return p && p.total ? Math.round((p.done / p.total) * 100) : null;
+    return Math.round((p.metersDriven / p.metersTotal) * 100);
   }
 
   function areaMatches(a) {
-    var pct = areaPct(a.name);
     if (areaFilter === "all") return true;
+    if (isOrganizational(a)) return false;
+    var pct = areaPct(a.name);
     if (areaFilter === "none") return pct === null || pct === 0;
     if (areaFilter === "done") return pct === 100;
     if (areaFilter === "near") return pct !== null && pct >= 75 && pct < 100;
     return pct !== null && pct > 0 && pct < 100;          // going
   }
 
+  /**
+   * Every area on one page, each under the area it is part of. Biggest first at each level
+   * of the tree, then by name. An area whose parent is not drawn sits at the top.
+   */
+  function areaTree() {
+    var byName = {};
+    areas.forEach(function (a) { byName[a.name.toLowerCase()] = a; });
+    var kids = {}, roots = [];
+    areas.forEach(function (a) {
+      var parent = a.parent && byName[a.parent.toLowerCase()];
+      // A parent that loops back (A in B in A) would never end; treat it as top level.
+      var seen = {}, p = parent;
+      while (p && !seen[p.id]) { seen[p.id] = true; if (p === a) { parent = null; break; } p = p.parent && byName[p.parent.toLowerCase()]; }
+      if (parent && parent !== a) (kids[parent.id] = kids[parent.id] || []).push(a);
+      else roots.push(a);
+    });
+    var order = function (x, y) {
+      return levelRank(y.level) - levelRank(x.level) || x.name.localeCompare(y.name);
+    };
+    roots.sort(order);
+    Object.keys(kids).forEach(function (k) { kids[k].sort(order); });
+    return { roots: roots, kids: kids };
+  }
+
+  function descendants(tree, a) {
+    var n = 0;
+    (tree.kids[a.id] || []).forEach(function (c) { n += 1 + descendants(tree, c); });
+    return n;
+  }
+
   function renderAreaTable() {
-    var rows = areas.filter(areaMatches);
-    var pages = Math.max(1, Math.ceil(rows.length / AREA_PER_PAGE));
-    if (areaPage > pages) areaPage = pages;
-    var slice = rows.slice((areaPage - 1) * AREA_PER_PAGE, areaPage * AREA_PER_PAGE);
-
-    el("areaGridEmpty").hidden = rows.length > 0;
-    el("areaGrid").hidden = rows.length === 0;
-    el("areaGrid").querySelector("tbody").innerHTML = slice.map(function (a) {
-      var pct = areaPct(a.name), p = areaProgress[a.name];
-      return "<tr data-area='" + a.id + "'>" +
-        "<td><span class='nm'><span class='swatch' style='background:" +
-          (a.color || LEVEL_COLOR[a.level]) + "'></span>" + escapeHtml(a.name) + "</span></td>" +
-        "<td><span class='pct'><span class='bar'><i style='width:" + (pct || 0) +
-          "%'></i></span><b>" + (pct === null ? "—" : pct + "%") + "</b></span></td>" +
-        "<td class='muted'>" + (p && p.total
-          ? p.done.toLocaleString() + " / " + p.total.toLocaleString()
-          : "not reported") + "</td>" +
-        "<td class='muted'>" + escapeHtml(LEVELS[a.level] || a.level) + "</td>" +
-        "<td class='muted'>" + (p && p.reportedAt
-          ? new Date(p.reportedAt).toLocaleDateString() : "—") + "</td>" +
-        "<td style='text-align:right'><button type='button' data-open='" + a.id +
-          "'>Open</button></td></tr>";
-    }).join("");
-
-    var pager = el("areaPager");
-    pager.innerHTML = "";
-    if (pages > 1) {
-      for (var i = 1; i <= pages; i++) {
-        var b = document.createElement("button");
-        b.type = "button"; b.textContent = String(i);
-        if (i === areaPage) b.setAttribute("aria-current", "true");
-        b.setAttribute("data-page", String(i));
-        pager.appendChild(b);
-      }
+    var tree = areaTree();
+    // With a filter on, an area shows if it matches or anything under it does; the ones
+    // shown only to place a match are dimmed.
+    var shows = {};
+    function mark(a) {
+      var any = areaMatches(a);
+      (tree.kids[a.id] || []).forEach(function (c) { if (mark(c)) any = true; });
+      shows[a.id] = any;
+      return any;
     }
-    var count = document.createElement("span");
-    count.className = "count";
-    count.textContent = rows.length
-      ? "Showing " + ((areaPage - 1) * AREA_PER_PAGE + 1) + "–" +
-        Math.min(areaPage * AREA_PER_PAGE, rows.length) + " of " + rows.length
+    tree.roots.forEach(mark);
+    var filtering = areaFilter !== "all";
+
+    var rows = [], shown = 0;
+    function row(a, depth) {
+      if (!shows[a.id]) return;
+      var children = tree.kids[a.id] || [];
+      var visibleKids = children.filter(function (c) { return shows[c.id]; });
+      // A filter opens every branch it needs to show a match.
+      var folded = !filtering && Boolean(areaFolded[a.id]);
+      var org = isOrganizational(a);
+      var pct = org ? null : areaPct(a.name), p = areaProgress[a.name];
+      var count = descendants(tree, a);
+      shown++;
+      rows.push("<tr data-area='" + a.id + "' class='" + (org ? "org " : "") +
+        (filtering && !areaMatches(a) ? "ctx" : "") + "'>" +
+        "<td><span class='nm' style='--depth:" + depth + "'>" +
+          "<button type='button' class='tw" + (visibleKids.length ? "" : " none") + (folded ? " shut" : "") +
+            "' data-fold='" + a.id + "' aria-label='" + (folded ? "Show" : "Hide") + " the areas in " +
+            escapeHtml(a.name) + "'>&#9662;</button>" +
+          "<span class='swatch' style='background:" + (a.color || LEVEL_COLOR[a.level]) + "'></span>" +
+          escapeHtml(a.name) +
+          (count ? " <span class='kids'>" + count + (count === 1 ? " area" : " areas") + "</span>" : "") +
+        "</span></td>" +
+        (org
+          ? "<td><span class='orgpill'>Grouping only</span></td>" +
+            "<td class='muted'>not downloaded</td>"
+          : "<td><span class='pct'><span class='bar'><i style='width:" + (pct || 0) +
+              "%'></i></span><b>" + (pct === null ? "—" : pct + "%") + "</b></span></td>" +
+            "<td class='muted'>" + (p && p.total
+              ? p.done.toLocaleString() + " / " + p.total.toLocaleString()
+              : "not counted yet") + "</td>") +
+        "<td class='muted'>" + escapeHtml(LEVELS[a.level] || a.level) + "</td>" +
+        "<td class='muted'>" + (!org && p && p.computedAt
+          ? new Date(p.computedAt).toLocaleDateString() : "—") + "</td>" +
+        "<td style='text-align:right'><button type='button' data-open='" + a.id +
+          "'>Open</button></td></tr>");
+      if (!folded) visibleKids.forEach(function (c) { row(c, depth + 1); });
+    }
+    tree.roots.forEach(function (r) { row(r, 0); });
+
+    var any = tree.roots.some(function (r) { return shows[r.id]; });
+    el("areaGridEmpty").hidden = any;
+    el("areaGrid").hidden = !any;
+    el("areaGrid").querySelector("tbody").innerHTML = rows.join("");
+    var matching = areas.filter(areaMatches).length;
+    el("areaCount").textContent = areas.length
+      ? (filtering ? matching + " of " + areas.length + " areas match" : areas.length + (areas.length === 1 ? " area" : " areas"))
       : "";
-    pager.appendChild(count);
   }
 
   function loadAreaTable() {
-    // Progress is an administrator's figure; a driver still gets the table without it.
-    var wait = me && me.role === "admin"
-      ? apiJson("/api/admin/area-progress").then(function (d) {
-          areaProgress = {};
-          d.areas.forEach(function (a) { areaProgress[a.name] = a; });
-        }).catch(function () { areaProgress = {}; })
-      : Promise.resolve();
-    return wait.then(renderAreaTable);
+    // The server's own count of every area, for everyone who can see the list.
+    return apiJson("/api/areas/progress").then(function (d) {
+      areaProgress = {};
+      d.areas.forEach(function (a) { areaProgress[a.name] = a; });
+    }).catch(function () { areaProgress = {}; }).then(renderAreaTable);
   }
 
   el("areaChips").addEventListener("click", function (ev) {
     var b = ev.target.closest && ev.target.closest("button[data-filter]");
     if (!b) return;
     areaFilter = b.getAttribute("data-filter");
-    areaPage = 1;
     Array.prototype.forEach.call(el("areaChips").querySelectorAll("button[data-filter]"), function (x) {
       x.setAttribute("aria-pressed", String(x === b));
     });
     renderAreaTable();
   });
 
-  el("areaPager").addEventListener("click", function (ev) {
-    var b = ev.target.closest && ev.target.closest("button[data-page]");
-    if (!b) return;
-    areaPage = Number(b.getAttribute("data-page"));
-    renderAreaTable();
+  el("btnExpandAll").addEventListener("click", function () { areaFolded = {}; saveFolded(); renderAreaTable(); });
+  el("btnCollapseAll").addEventListener("click", function () {
+    var tree = areaTree();
+    areaFolded = {};
+    Object.keys(tree.kids).forEach(function (id) { areaFolded[id] = true; });
+    saveFolded(); renderAreaTable();
   });
 
   el("btnDrawMode").addEventListener("click", function () { setAreasMode("draw"); });
 
-  // Arriving at Areas shows the table; drawing is a deliberate step from it.
+  // Back to the list. A shape half drawn is asked about rather than thrown away quietly.
+  el("areasBack").addEventListener("click", function () {
+    if (drawing && !confirm("Stop drawing this area? The corners so far will be lost.")) return;
+    if (drawing) endDrawing();
+    setAreasMode("table");
+  });
+
+  // Arriving at Areas shows the list, every time — unless a shape is half drawn, which is
+  // kept where it was. Drawing is a deliberate step from the list.
   window.__ssAreasOpened = function () {
-    if (!document.documentElement.getAttribute("data-areas")) setAreasMode("table");
-    else if (document.documentElement.getAttribute("data-areas") === "table") loadAreaTable();
+    if (drawing) return setAreasMode("draw");
+    setAreasMode("table");
   };
 
   el("areaGrid").addEventListener("click", function (ev) {
+    var fold = ev.target.closest && ev.target.closest("button[data-fold]");
+    if (fold) {
+      var id = fold.getAttribute("data-fold");
+      if (areaFolded[id]) delete areaFolded[id]; else areaFolded[id] = true;
+      saveFolded(); renderAreaTable();
+      return;
+    }
     var b = ev.target.closest && ev.target.closest("button[data-open]");
     if (!b) return;
     var area = byId(Number(b.getAttribute("data-open")));
@@ -4738,6 +4827,7 @@ window.StreetSweepBases = {
 
   function levelFor(kind) {
     if (/county|parish/.test(kind)) return "COUNTY";
+    if (/country|nation/.test(kind)) return "COUNTRY";
     if (/state/.test(kind)) return "STATE";
     if (/region|province|district/.test(kind)) return "REGION";
     if (/metropol/.test(kind)) return "METRO";
@@ -5160,6 +5250,14 @@ window.StreetSweepBases = {
 
   function showStreets(a) {
     if (!a.serverId) return;                // not saved yet, so nothing driven in it
+    // A state or country only groups areas: it has no streets of its own to show or edit.
+    if (isOrganizational(a)) {
+      clearStreets();
+      var n = el("streetNote");
+      n.hidden = false;
+      n.textContent = LEVELS[a.level] + "s only group other areas: no streets are downloaded or counted for them. Open one of the areas inside it to see its streets.";
+      return;
+    }
     var token_ = {};
     shownStreetsFor = token_;
     streetLayer.clearLayers();
@@ -5823,6 +5921,31 @@ window.StreetSweepBases = {
     el("mapSubtitle").textContent = [a.city, levelLabel(a.level)].filter(Boolean).join(" · ");
     box.hidden = false;
 
+    if (isOrganizational(a)) {
+      // What it groups, in place of figures it does not have.
+      var inside = areas.filter(function (x) { return x.parent && x.parent.toLowerCase() === a.name.toLowerCase(); })
+        .sort(function (x, y) { return levelRank(y.level) - levelRank(x.level) || x.name.localeCompare(y.name); });
+      box.innerHTML =
+        '<div class="card"><span class="orgpill">Grouping only</span>' +
+        '<p class="hint" style="margin:8px 0 0">' + escapeHtml(LEVELS[a.level]) +
+          "s organise other areas. Nothing is downloaded or counted for them, and phones do not get them.</p>" +
+        (inside.length
+          ? '<p class="eyebrow" style="margin-top:14px">Inside ' + escapeHtml(a.name) + "</p>" +
+            '<ul class="board plain">' + inside.map(function (x) {
+              var st = reported[x.name], pct = st ? percentOf(st) : null;
+              return "<li><span class='main'><b>" + escapeHtml(x.name) + "</b><span>" + escapeHtml(LEVELS[x.level]) +
+                "</span></span><span class='fig'><b>" + (pct === null ? "—" : pct + "%") + "</b></span></li>";
+            }).join("") + "</ul>"
+          : '<p class="hint">Nothing is part of it yet. Set an area\'s “Part of” to ' + escapeHtml(a.name) + " to put it here.</p>") +
+        "</div>" +
+        '<div class="row" style="margin-top:10px"><button id="btnEditArea" class="primary">Edit area</button></div>';
+      el("btnEditArea").addEventListener("click", function () {
+        window.StreetSweepViews.show("areas");
+        setAreasMode("draw");
+        select(a.id);
+      });
+      return;
+    }
     var live = liveProgressFor(a);
     var percent = live ? live.percent : stats ? percentOf(stats) : null;
     var done = live ? live.done : stats ? (stats.done || 0) : 0;

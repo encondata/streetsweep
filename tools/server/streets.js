@@ -199,7 +199,9 @@ async function cell(pool, key) {
 
 /** Every cell some area covers. */
 async function neededCells(pool) {
-  const { rows } = await pool.query("SELECT min_lat, min_lng, max_lat, max_lng FROM areas");
+  // States and countries only group areas; their cells are not needed for their own sake.
+  const { rows } = await pool.query(
+    "SELECT min_lat, min_lng, max_lat, max_lng FROM areas WHERE level NOT IN ('STATE', 'COUNTRY')");
   const keys = new Set();
   for (const a of rows) cellsFor(a.min_lat, a.min_lng, a.max_lat, a.max_lng).forEach((k) => keys.add(k));
   return keys;

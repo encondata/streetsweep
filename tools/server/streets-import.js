@@ -193,7 +193,8 @@ async function importNow(pool, cellsChanged) {
         }
       }
       // Only cells some area needs: the file's box is mostly desert and gulf otherwise.
-      const { rows: areas } = await pool.query("SELECT min_lat, min_lng, max_lat, max_lng FROM areas");
+      const { rows: areas } = await pool.query(
+        "SELECT min_lat, min_lng, max_lat, max_lng FROM areas WHERE level NOT IN ('STATE', 'COUNTRY')");
       const needed = new Set();
       for (const a of areas) {
         for (let la = Math.floor(a.min_lat / 0.1); la <= Math.floor(a.max_lat / 0.1); la++) {

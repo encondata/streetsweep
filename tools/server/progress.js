@@ -24,6 +24,9 @@ let achievements = null;
 // People whose counts changed in this run, whose achievements are looked at once it ends.
 const recounted = new Set();
 
+// Only group other areas: never counted, never fetched (server.js ORGANIZATIONAL).
+const ORGANIZATIONAL = ["STATE", "COUNTRY"];
+
 const DONE_FRACTION = 0.8;
 const PARTIAL_FRACTION = 0.02;
 const ON_STREET_METERS = 30;
@@ -72,6 +75,12 @@ async function ensureSchema(pool) {
   `);
   // Anything left half done by a restart is simply started again.
   await pool.query(`UPDATE area_progress SET status = 'queued' WHERE status = 'working'`);
+  // States and countries counted before they became groupings: their counts and street
+  // lists go, so nothing refetches or recounts them.
+  await pool.query(
+    `DELETE FROM area_street WHERE area_id IN (SELECT id FROM areas WHERE level = ANY($1))`, [ORGANIZATIONAL]);
+  await pool.query(
+    `DELETE FROM area_progress WHERE area_id IN (SELECT id FROM areas WHERE level = ANY($1))`, [ORGANIZATIONAL]);
 }
 
 // ---- geometry, as the page and the phone do it -----------------------------------------
@@ -223,6 +232,13 @@ async function compute(pool, areaId) {
        FROM areas a LEFT JOIN area_progress p ON p.area_id = a.id WHERE a.id = $1`, [areaId]);
   const area = rows[0];
   if (!area) return;
+  const { rows: lv } = await pool.query("SELECT level FROM areas WHERE id = $1", [areaId]);
+  if (lv[0] && ORGANIZATIONAL.includes(lv[0].level)) {
+    // Became a state or country since it was queued: nothing to count.
+    await pool.query("DELETE FROM area_street WHERE area_id = $1", [areaId]);
+    await pool.query("DELETE FROM area_progress WHERE area_id = $1", [areaId]);
+    return;
+  }
   const keys = streets.cellsFor(area.min_lat, area.min_lng, area.max_lat, area.max_lng);
   const full = area.needs_full !== false || !area.area_updated_at ||
     new Date(area.updated_at) > new Date(area.area_updated_at);
@@ -383,8 +399,9 @@ async function run(pool) {
  * since — a drive synced, a street marked, the outline redrawn — and says how far it is.
  */
 async function forArea(pool, areaId) {
-  const exists = await pool.query("SELECT 1 FROM areas WHERE id = $1", [areaId]);
+  const exists = await pool.query("SELECT level FROM areas WHERE id = $1", [areaId]);
   if (!exists.rowCount) return null;
+  if (ORGANIZATIONAL.includes(exists.rows[0].level)) return { status: "organizational" };
   await pool.query(
     "INSERT INTO area_progress (area_id) VALUES ($1) ON CONFLICT (area_id) DO NOTHING", [areaId]);
   const { rows } = await pool.query(
@@ -467,9 +484,9 @@ async function cellRefreshed(pool, key) {
 async function catchUp(pool) {
   const { rows } = await pool.query(
     `SELECT a.id FROM areas a LEFT JOIN area_progress p ON p.area_id = a.id
-      WHERE p.area_id IS NULL OR p.status <> 'done' OR p.dirty OR p.needs_full
-         OR p.area_updated_at IS NULL OR a.updated_at > p.area_updated_at
-      ORDER BY (a.max_lat - a.min_lat) * (a.max_lng - a.min_lng)`);   // small ones first
+      WHERE a.level <> ALL($1) AND (p.area_id IS NULL OR p.status <> 'done' OR p.dirty OR p.needs_full
+         OR p.area_updated_at IS NULL OR a.updated_at > p.area_updated_at)
+      ORDER BY (a.max_lat - a.min_lat) * (a.max_lng - a.min_lng)`, [ORGANIZATIONAL]);   // small ones first
   for (const r of rows) {
     await pool.query("INSERT INTO area_progress (area_id) VALUES ($1) ON CONFLICT (area_id) DO NOTHING", [r.id]);
     enqueue(pool, Number(r.id));
@@ -478,10 +495,22 @@ async function catchUp(pool) {
 }
 
 /** An area was added, redrawn or renamed: count it again, soon. */
+async function isOrganizational(pool, areaId) {
+  const { rows } = await pool.query("SELECT level FROM areas WHERE id = $1", [areaId]);
+  return Boolean(rows[0] && ORGANIZATIONAL.includes(rows[0].level));
+}
+
 function touched(pool, areaId) {
-  pool.query(`INSERT INTO area_progress (area_id) VALUES ($1)
-              ON CONFLICT (area_id) DO UPDATE SET dirty = true, needs_full = true`,
-    [areaId]).then(() => enqueue(pool, Number(areaId))).catch(() => {});
+  isOrganizational(pool, areaId).then((org) => {
+    if (org) {
+      // Made a state or country: whatever was counted for it goes.
+      return pool.query("DELETE FROM area_street WHERE area_id = $1", [areaId])
+        .then(() => pool.query("DELETE FROM area_progress WHERE area_id = $1", [areaId]));
+    }
+    return pool.query(`INSERT INTO area_progress (area_id) VALUES ($1)
+                ON CONFLICT (area_id) DO UPDATE SET dirty = true, needs_full = true`, [areaId])
+      .then(() => enqueue(pool, Number(areaId)));
+  }).catch(() => {});
 }
 
 /**
