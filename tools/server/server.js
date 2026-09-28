@@ -1541,6 +1541,63 @@ async function handle(req, res) {
     });
   }
 
+  /**
+   * Moves everything someone recorded to someone else: drives, driven streets, marked
+   * places, streets marked or excluded, achievements and, if asked, their signed-in phones.
+   * For history recorded under the wrong account — typically the first administrator,
+   * which drives synced before accounts existed were credited to.
+   *
+   * Where the other person already has the same thing (a drive at the same moment, the
+   * same achievement) theirs is kept and the duplicate dropped; an achievement keeps
+   * whichever was earned first. Coverage itself does not change: a street swept is swept,
+   * whoever it is credited to. Every area is recounted after, since per-person shares move.
+   */
+  const transferMatch = route.match(/^\/api\/admin\/users\/(\d+)\/transfer$/);
+  if (transferMatch && req.method === "POST") {
+    const from = Number(transferMatch[1]);
+    const body = await readBody(req);
+    const to = Number(body.to);
+    if (!Number.isSafeInteger(to) || to === from) throw new BadRequest("Choose someone else to move them to");
+    const { rows: people } = await pool.query("SELECT id, name FROM users WHERE id = ANY($1::bigint[])", [[from, to]]);
+    if (people.length !== 2) return sendJson(res, 404, { error: "No such person" });
+    const moved = {};
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const n = async (key, sql) => { moved[key] = (await client.query(sql, [from, to])).rowCount; };
+      await n("drives", `UPDATE drives SET user_id = $2 WHERE user_id = $1
+                          AND started_at NOT IN (SELECT started_at FROM drives WHERE user_id = $2)`);
+      await n("duplicateDrives", "DELETE FROM drives WHERE user_id = $1 AND $2::bigint IS NOT NULL");
+      await n("segments", "UPDATE driven_edges SET user_id = $2 WHERE user_id = $1");
+      await n("places", "UPDATE pois SET user_id = $2 WHERE user_id = $1");
+      await n("marks", "UPDATE street_completions SET user_id = $2 WHERE user_id = $1");
+      await n("exclusions", "UPDATE street_exclusions SET user_id = $2 WHERE user_id = $1");
+      await client.query(`DELETE FROM reported_areas WHERE user_id = $1
+                            AND name IN (SELECT name FROM reported_areas WHERE user_id = $2)`, [from, to]);
+      await client.query("UPDATE reported_areas SET user_id = $2 WHERE user_id = $1", [from, to]);
+      await n("achievements", `INSERT INTO achievements (user_id, code, level, earned_at)
+                                 SELECT $2, code, level, earned_at FROM achievements WHERE user_id = $1
+                               ON CONFLICT (user_id, code, level)
+                               DO UPDATE SET earned_at = LEAST(achievements.earned_at, EXCLUDED.earned_at)`);
+      await client.query("DELETE FROM achievements WHERE user_id = $1", [from]);
+      if (body.phones) {
+        await n("phones", "UPDATE device_tokens SET user_id = $2 WHERE user_id = $1 AND revoked_at IS NULL");
+      }
+      await client.query("UPDATE area_progress SET top_user_id = $2 WHERE top_user_id = $1", [from, to]);
+      await client.query("DELETE FROM area_user_progress WHERE user_id = $1", [from]);
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+    // Per-person shares of every area are redone; their achievements are looked at after.
+    progress.changed(pool, null, 500);
+    achievements.evaluate(pool, to).catch(() => {});
+    return sendJson(res, 200, { moved });
+  }
+
   /** Everything the user page shows about one person. */
   const summaryMatch = route.match(/^\/api\/admin\/users\/(\d+)\/summary$/);
   if (summaryMatch && req.method === "GET") {

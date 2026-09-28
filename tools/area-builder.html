@@ -1743,6 +1743,20 @@
 
               <p class="eyebrow">Achievements <span id="udAchCount" class="tag"></span></p>
               <div id="udAch"></div>
+
+              <p class="eyebrow">Move their history</p>
+              <div class="card udMove">
+                <p class="hint" style="margin:0 0 10px">Everything recorded under this account — drives, driven streets,
+                  marked places, streets marked or excluded, achievements — credited to someone else instead.
+                  For drives that ended up under the wrong account. Coverage does not change, only who it is
+                  credited to, and it can be moved back the same way.</p>
+                <div class="row" style="align-items:center;flex-wrap:wrap;gap:10px">
+                  <select id="udMoveTo" style="flex:1 1 200px"></select>
+                  <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin:0">
+                    <input type="checkbox" id="udMovePhones" checked> Their signed-in phones too</label>
+                  <button type="button" id="udMoveGo" class="primary">Move</button>
+                </div>
+              </div>
             </div>
             <div style="min-width:0">
               <p class="eyebrow">Recent drives</p>
@@ -3935,7 +3949,7 @@ window.StreetSweepBases = {
 
   function openUser(id) {
     adminSay("");
-    apiJson("/api/admin/users/" + id + "/summary").then(function (d) {
+    return apiJson("/api/admin/users/" + id + "/summary").then(function (d) {
       var u = d.user, t = d.totals;
       el("peopleMain").hidden = true;
       el("userDetail").hidden = false;
@@ -3977,10 +3991,50 @@ window.StreetSweepBases = {
           "<span class='fig'><b>" + fmtDistance(dr.meters) + "</b><span>driven</span></span></li>";
       }).join("");
       loadAchievements(u.id, el("udAch"), el("udAchCount"));
+
+      // Who their history could go to: everyone else.
+      el("udMoveGo").setAttribute("data-from", u.id);
+      el("udMoveGo").setAttribute("data-name", u.name);
+      el("udMoveGo").setAttribute("data-drives", t.drives);
+      el("udMoveGo").setAttribute("data-streets", t.streets);
+      apiJson("/api/users").then(function (list) {
+        var others = list.users.filter(function (x) { return x.id !== u.id; });
+        el("udMoveTo").innerHTML = others.map(function (x) {
+          return "<option value='" + x.id + "'>" + escapeHtml(x.name) + " (" + escapeHtml(x.email) + ")</option>";
+        }).join("");
+        el("udMoveGo").disabled = others.length === 0;
+      }).catch(function () { /* the rest of the page still shows */ });
     }).catch(function (err) { adminSay(err.message || "Could not open that person.", true); });
   }
 
   el("userBack").addEventListener("click", showUserList);
+
+  el("udMoveGo").addEventListener("click", function () {
+    var b = el("udMoveGo");
+    var from = b.getAttribute("data-from"), name = b.getAttribute("data-name");
+    var sel = el("udMoveTo"), to = sel.value;
+    if (!to) return;
+    var toName = sel.options[sel.selectedIndex].textContent;
+    var phones = el("udMovePhones").checked;
+    if (!confirm("Move everything recorded under " + name + " to " + toName + "?\n\n" +
+        Number(b.getAttribute("data-drives")).toLocaleString() + " drives and " +
+        Number(b.getAttribute("data-streets")).toLocaleString() + " streets swept, with their marked places, " +
+        "street marks and achievements" + (phones ? ", and their signed-in phones" : "") + ".")) return;
+    b.disabled = true; b.textContent = "Moving…";
+    apiJson("/api/admin/users/" + from + "/transfer", "POST", { to: Number(to), phones: phones }).then(function (d) {
+      var m = d.moved;
+      var said = ("Moved " + (m.drives || 0) + " drives, " + (m.segments || 0) + " street segments, " +
+        (m.places || 0) + " places and " + (m.achievements || 0) + " achievements to " + toName +
+        (m.phones ? ", with " + m.phones + (m.phones === 1 ? " phone" : " phones") : "") +
+        (m.duplicateDrives ? " (" + m.duplicateDrives + " drives they already had were left as theirs)" : "") +
+        ". Areas are being recounted.");
+      // Shown once the page has reloaded, which clears messages on its way in.
+      loadUsers();
+      return openUser(Number(from)).then(function () { adminSay(said); });
+    }).catch(function (err) {
+      adminSay(err.message || "Could not move them.", true);
+    }).then(function () { b.disabled = false; b.textContent = "Move"; });
+  });
 
   function loadUsers() {
     return apiJson("/api/users").then(function (d) {
