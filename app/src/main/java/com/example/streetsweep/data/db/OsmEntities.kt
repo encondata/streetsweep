@@ -41,6 +41,12 @@ data class CoverageArea(
      * and as the map is looked at, cell by cell, from the server. See NearbyStreets.
      */
     @ColumnInfo(defaultValue = "0") val onDemand: Boolean = false,
+    /**
+     * Put out of sight on this phone: off the map, the lists, guidance and the figures.
+     * Areas are the web's to delete, so this is what the phone can do instead; the next
+     * sync leaves it hidden, and it can be shown again from the Areas screen.
+     */
+    @ColumnInfo(defaultValue = "0") val hidden: Boolean = false,
 ) {
     val bounds: Bounds get() = Bounds(south, west, north, east)
     val vertices: List<LatLngPoint> get() = ShapeText.decode(polygon)

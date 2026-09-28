@@ -2,6 +2,7 @@ package com.example.streetsweep.data
 
 import androidx.room.withTransaction
 import com.example.streetsweep.data.db.AppDatabase
+import com.example.streetsweep.data.db.PendingDeletion
 import com.example.streetsweep.data.db.Poi
 import com.example.streetsweep.data.db.SessionTotalsRow
 import com.example.streetsweep.data.db.WeeklyDrivingRow
@@ -76,7 +77,17 @@ class TrackRepository(private val db: AppDatabase) {
     suspend fun poisWithUnsentPhotos(): List<Poi> = pois.withUnsentPhotos()
 
     suspend fun markPoiPhotoSent(id: Long) = pois.markPhotoSynced(id, System.currentTimeMillis())
-    suspend fun deletePoi(id: Long) = pois.delete(id)
+    /**
+     * Deletes a marked place. Unless the server is the one that asked, it is told at the
+     * next sync, and the place is gone from the web too.
+     */
+    suspend fun deletePoi(id: Long, tellServer: Boolean = true) = db.withTransaction {
+        val poi = pois.get(id) ?: return@withTransaction
+        pois.delete(id)
+        if (tellServer) {
+            pois.addPendingDeletion(PendingDeletion(PendingDeletion.KIND_POI, poi.serverKey, System.currentTimeMillis()))
+        }
+    }
 
     suspend fun addCoverageStats(sessionId: Long, segments: Int, meters: Double) =
         dao.addCoverageStats(sessionId, segments, meters)
@@ -149,7 +160,42 @@ class TrackRepository(private val db: AppDatabase) {
         return closed
     }
 
-    suspend fun deleteSession(sessionId: Long) = db.withTransaction {
+    suspend fun pendingDeletions(): List<PendingDeletion> = pois.pendingDeletions()
+
+    suspend fun clearPendingDeletions(kind: String, keys: List<String>) {
+        if (keys.isNotEmpty()) pois.clearPendingDeletions(kind, keys)
+    }
+
+    /**
+     * Applies deletions made on the web: drives by when they started, places by the
+     * server's key for them. Nothing is sent back. Returns how many were found here.
+     */
+    suspend fun applyServerDeletions(driveStarts: List<Long>, poiKeys: Set<String>): Int {
+        var n = 0
+        for (at in driveStarts) {
+            dao.getSessionsStartedAt(at).forEach { deleteSession(it.id, tellServer = false); n++ }
+        }
+        if (poiKeys.isNotEmpty()) {
+            pois.getAll().filter { it.serverKey in poiKeys }.forEach {
+                it.photoPath?.let { path -> runCatching { java.io.File(path).delete() } }
+                deletePoi(it.id, tellServer = false); n++
+            }
+        }
+        return n
+    }
+
+    suspend fun deleteSession(sessionId: Long, tellServer: Boolean = true) = db.withTransaction {
+        val session = dao.getSession(sessionId) ?: return@withTransaction
+        // Told at the next sync, which deletes the web's copy and the coverage it earned.
+        if (tellServer) {
+            val at = System.currentTimeMillis()
+            pois.addPendingDeletion(PendingDeletion(PendingDeletion.KIND_DRIVE, session.startedAt.toString(), at))
+            // Its segments by key: they are stamped when matched, which can be well after
+            // the drive ended, so the server cannot find them all by time.
+            db.coverageDao().edgeKeysDrivenIn(sessionId).forEach {
+                pois.addPendingDeletion(PendingDeletion(PendingDeletion.KIND_EDGE, it, at))
+            }
+        }
         // The streets it drove are measured again once its segments are gone.
         val touched = db.coverageDao().wayIdsDrivenIn(sessionId)
         db.coverageDao().deleteDrivenEdgesForSession(sessionId)

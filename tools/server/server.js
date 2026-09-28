@@ -157,7 +157,61 @@ async function ensureSchema() {
     ALTER TABLE pois ADD COLUMN IF NOT EXISTS name       TEXT;
     ALTER TABLE pois ADD COLUMN IF NOT EXISTS photo_key  TEXT;
     ALTER TABLE pois ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0;
+
+    -- What was deleted, and when, so every device can be told. A phone sends its whole
+    -- history on each sync, so without this a drive deleted on the web came straight back,
+    -- and a phone forgets only what it is told to forget.
+    CREATE TABLE IF NOT EXISTS deletions (
+      kind       TEXT   NOT NULL,   -- 'drive' or 'poi'
+      key        TEXT   NOT NULL,   -- a drive: "<user id>:<started at>"; a place: its id
+      user_id    BIGINT,            -- whose drive it was; for a place, who deleted it
+      deleted_at BIGINT NOT NULL,
+      PRIMARY KEY (kind, key)
+    );
+    CREATE INDEX IF NOT EXISTS deletions_at ON deletions (deleted_at);
   `);
+}
+
+// ---------------------------------------------------------------- deleting
+
+/**
+ * Deletes one of someone's drives, and the coverage it earned them: the segments credited
+ * to them while it ran, which is what the phone drops when a drive is deleted there.
+ * Remembered, so the phone that recorded it deletes its copy rather than sending it back.
+ * Returns the streets whose figures moved, or null when there was no such drive.
+ */
+async function deleteDrive(db, userId, startedAt) {
+  const { rows } = await db.query(
+    "DELETE FROM drives WHERE user_id=$1 AND started_at=$2 RETURNING started_at, ended_at",
+    [userId, startedAt]);
+  await db.query(
+    `INSERT INTO deletions (kind, key, user_id, deleted_at) VALUES ('drive', $1, $2, $3)
+     ON CONFLICT (kind, key) DO UPDATE SET deleted_at = EXCLUDED.deleted_at`,
+    [`${userId}:${startedAt}`, userId, Date.now()]);
+  if (!rows.length) return null;
+  // A segment is stamped when it is matched, which is at the end of the drive or, on a
+  // retry, some hours later. So the drive's segments run from its start up to this
+  // person's next drive, and never more than a day. (A phone deleting its own drive sends
+  // the exact segments as well; this is for a drive deleted on the web.)
+  const { rows: next } = await db.query(
+    "SELECT min(started_at) AS at FROM drives WHERE user_id=$1 AND started_at > $2", [userId, startedAt]);
+  const dayLater = Number(startedAt) + 24 * 60 * 60 * 1000;
+  const until = Math.min(Number(next[0].at) || dayLater, dayLater);
+  const { rows: gone } = await db.query(
+    "DELETE FROM driven_edges WHERE user_id=$1 AND driven_at >= $2 AND driven_at < $3 RETURNING way_id",
+    [userId, startedAt, until]);
+  return gone.map((r) => Number(r.way_id)).filter(Number.isFinite);
+}
+
+/** Deletes a marked place and its photo, remembered the same way. False when there was none. */
+async function deletePoi(db, id, byUserId) {
+  const { rows } = await db.query("DELETE FROM pois WHERE id=$1 RETURNING photo_key", [id]);
+  await db.query(
+    `INSERT INTO deletions (kind, key, user_id, deleted_at) VALUES ('poi', $1, $2, $3)
+     ON CONFLICT (kind, key) DO UPDATE SET deleted_at = EXCLUDED.deleted_at`,
+    [id, byUserId || null, Date.now()]);
+  if (rows.length && rows[0].photo_key) photos.remove(rows[0].photo_key).catch(() => {});
+  return rows.length > 0;
 }
 
 /**
@@ -321,6 +375,7 @@ function rowToPoi(r) {
     name: r.name || null,
     note: r.note || null,
     hasPhoto: Boolean(r.photo_key),
+    userId: r.user_id != null ? Number(r.user_id) : null,
     at: Number(r.at),
     updatedAt: Number(r.updated_at) || Number(r.at),
   };
@@ -568,11 +623,33 @@ async function applySync(body, by) {
       }
     }
 
-    // "Send everything again" is about this phone's own contribution. Dropping the whole
-    // table would throw away every other driver's coverage as well.
-    if (body.resetEdges) {
-      await client.query("DELETE FROM driven_edges WHERE user_id=$1", [by.userId]);
+    // What was deleted on the phone since it last synced. Before the drives and places
+    // below, which no longer carry these.
+    const deleted = body.deleted || {};
+    for (const startedAt of Array.isArray(deleted.drives) ? deleted.drives : []) {
+      const at = num(startedAt, 0);
+      if (!at) continue;
+      const ways = await deleteDrive(client, by.userId, at);
+      if (ways) touchedWays.push(...ways);
+      result.deleted = (result.deleted || 0) + 1;
     }
+    // The segments a deleted drive earned, named exactly by the phone that recorded it.
+    const edgeKeys = (Array.isArray(deleted.edges) ? deleted.edges : []).map((k) => String(k || "")).filter(Boolean);
+    if (edgeKeys.length) {
+      const { rows: gone } = await client.query(
+        "DELETE FROM driven_edges WHERE user_id=$1 AND key = ANY($2) RETURNING way_id", [by.userId, edgeKeys]);
+      touchedWays.push(...gone.map((r) => Number(r.way_id)).filter(Number.isFinite));
+    }
+    for (const id of Array.isArray(deleted.pois) ? deleted.pois : []) {
+      if (!id) continue;
+      await deletePoi(client, String(id).slice(0, 200), by.userId);
+      result.deleted = (result.deleted || 0) + 1;
+    }
+
+    // "Send everything again" (resetEdges) used to clear this person's segments first. It
+    // no longer clears anything: a person's coverage can come from several phones, or be
+    // moved to them from another account, and one phone's copy is not all of it. Every
+    // segment is written again below, and writing one twice changes nothing.
 
     if (Array.isArray(body.edges)) {
       for (const e of body.edges) {
@@ -604,13 +681,18 @@ async function applySync(body, by) {
     }
 
     if (Array.isArray(body.drives)) {
-      // This phone sends its whole history each time, so its own rows are replaced —
-      // but only its own. Unscoped, the second driver to sync erased the first one's
-      // drives entirely, which is what the test caught.
-      await client.query("DELETE FROM drives WHERE user_id=$1", [by.userId]);
+      // This phone sends its whole history each time. Each drive is written or brought up
+      // to date; none is taken away for being missing. A person's drives can come from
+      // more than one phone, or be moved over from another account, and a phone that has
+      // never held a drive is not saying it was deleted. Deletions come as "deleted".
+      const { rows: gone } = await client.query(
+        "SELECT key FROM deletions WHERE kind='drive' AND user_id=$1", [by.userId]);
+      const deletedDrives = new Set(gone.map((r) => r.key));
       for (const d of body.drives) {
         const startedAt = num(d.startedAt, 0);
         if (!startedAt) { result.skipped++; continue; }
+        // Deleted on the web: the phone is told, and meanwhile it does not come back.
+        if (deletedDrives.has(`${by.userId}:${startedAt}`)) { result.skipped++; continue; }
         await client.query(
           `INSERT INTO drives (user_id, vehicle_id, started_at, ended_at, trigger, point_count,
                                distance_m, new_segments, new_meters, paused_ms)
@@ -629,19 +711,19 @@ async function applySync(body, by) {
     }
 
     if (Array.isArray(body.pois)) {
-      // The phone owns which places exist and where they are, so one it no longer
-      // has is one you deleted. It does not own the name and note: those can be
-      // written from this page too, so the newer edit wins rather than the last
-      // sender. Wiping the table and refilling it, as this used to, threw away
-      // anything written here between drives.
-      const keep = [];
+      // The phone says where its places are. It does not own the name and note: those
+      // can be written from this page too, so the newer edit wins rather than the last
+      // sender. A place missing from the list is not taken as deleted — deletions come
+      // as "deleted" — and one deleted on the web is not brought back.
+      const { rows: gone } = await client.query("SELECT key FROM deletions WHERE kind='poi'");
+      const deletedPois = new Set(gone.map((r) => r.key));
       for (const p of body.pois) {
         const lat = Number(p.lat);
         const lng = Number(p.lng);
         const at = num(p.at, 0);
         if (!Number.isFinite(lat) || !Number.isFinite(lng) || !at) { result.skipped++; continue; }
         const id = at + ":" + lat.toFixed(6) + ":" + lng.toFixed(6);
-        keep.push(id);
+        if (deletedPois.has(id)) { result.skipped++; continue; }
         await client.query(
           `INSERT INTO pois (id, lat, lng, note, name, photo_key, at, updated_at, user_id)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
@@ -659,14 +741,6 @@ async function applySync(body, by) {
         );
         result.pois++;
       }
-      // Places this phone no longer has, and only this person's: another driver's
-      // marks are not this phone's to forget.
-      await client.query(
-        keep.length
-          ? "DELETE FROM pois WHERE user_id=$2 AND NOT (id = ANY($1))"
-          : "DELETE FROM pois WHERE user_id=$1",
-        keep.length ? [keep, by.userId] : [by.userId],
-      );
     }
 
     if (Array.isArray(body.completions)) {
@@ -807,7 +881,7 @@ async function coverage(edgeLimit) {
                  ORDER BY ${LEVEL_RANK}, a.name`),
     pool.query("SELECT key, name, road_class, length_m, driven_at, shape FROM driven_edges ORDER BY driven_at DESC LIMIT $1", [cap]),
     pool.query("SELECT started_at, ended_at, trigger, point_count, distance_m, new_segments, new_meters, paused_ms FROM drives ORDER BY started_at DESC"),
-    pool.query("SELECT id, lat, lng, note, name, photo_key, at, updated_at FROM pois ORDER BY at DESC"),
+    pool.query("SELECT id, lat, lng, note, name, photo_key, at, updated_at, user_id FROM pois ORDER BY at DESC"),
     pool.query("SELECT COUNT(*)::int AS edges, COALESCE(SUM(length_m),0) AS meters FROM driven_edges"),
   ]);
 
@@ -933,6 +1007,7 @@ function rightFor(route, method) {
   if (route.startsWith("/api/areas") && method !== "GET") return "areas";
   if (route === "/api/sync") return "record";
   if (route.startsWith("/api/pois") && method !== "GET") return "record";
+  if (route.startsWith("/api/drives/") && method === "DELETE") return "record";
   if (route.startsWith("/api/street-completions") && method !== "GET") return "record";
   if (route.startsWith("/api/street-exclusions") && method !== "GET") return "record";
   if (route.startsWith("/api/match/")) return "record";
@@ -1587,9 +1662,19 @@ async function handle(req, res) {
     try {
       await client.query("BEGIN");
       const n = async (key, sql) => { moved[key] = (await client.query(sql, [from, to])).rowCount; };
+      // Gone from the old account: a phone still signed in as them forgets its copies
+      // rather than sending them back under the old name.
+      await client.query(
+        `INSERT INTO deletions (kind, key, user_id, deleted_at)
+         SELECT 'drive', user_id || ':' || started_at, user_id, $2 FROM drives WHERE user_id = $1
+         ON CONFLICT (kind, key) DO UPDATE SET deleted_at = EXCLUDED.deleted_at`, [from, Date.now()]);
       await n("drives", `UPDATE drives SET user_id = $2 WHERE user_id = $1
                           AND started_at NOT IN (SELECT started_at FROM drives WHERE user_id = $2)`);
       await n("duplicateDrives", "DELETE FROM drives WHERE user_id = $1 AND $2::bigint IS NOT NULL");
+      // Moved back after an earlier move away: no longer deleted for them.
+      await client.query(
+        `DELETE FROM deletions WHERE kind = 'drive' AND user_id = $1
+            AND key IN (SELECT user_id || ':' || started_at FROM drives WHERE user_id = $1)`, [to]);
       await n("segments", "UPDATE driven_edges SET user_id = $2 WHERE user_id = $1");
       await n("places", "UPDATE pois SET user_id = $2 WHERE user_id = $1");
       await n("marks", "UPDATE street_completions SET user_id = $2 WHERE user_id = $1");
@@ -2021,11 +2106,23 @@ async function handle(req, res) {
       const note = body.note != null ? String(body.note).trim().slice(0, 4000) : null;
       const { rows } = await pool.query(
         `UPDATE pois SET name=$1, note=$2, updated_at=$3
-         WHERE id=$4 RETURNING id, lat, lng, note, name, photo_key, at, updated_at`,
+         WHERE id=$4 RETURNING id, lat, lng, note, name, photo_key, at, updated_at, user_id`,
         [name || null, note || null, Date.now(), id],
       );
       if (!rows.length) return sendJson(res, 404, { error: "No marked place with that id" });
       return sendJson(res, 200, { poi: rowToPoi(rows[0]) });
+    }
+
+    // Deleted here, and on the phone that marked it at its next sync. Whoever marked it,
+    // or an administrator.
+    if (!isPhoto && req.method === "DELETE") {
+      const { rows } = await pool.query("SELECT user_id FROM pois WHERE id=$1", [id]);
+      if (!rows.length) return sendJson(res, 404, { error: "No marked place with that id" });
+      if (Number(rows[0].user_id) !== who.user.id && !identity.can(who.user, "admin")) {
+        return sendJson(res, 403, { error: "Only whoever marked it, or an administrator, can delete it" });
+      }
+      await deletePoi(pool, id, who.user.id);
+      return sendJson(res, 200, { ok: true });
     }
 
     if (isPhoto && (req.method === "POST" || req.method === "PUT")) {
@@ -2074,8 +2171,84 @@ async function handle(req, res) {
 
   if (route === "/api/pois" && req.method === "GET") {
     const { rows } = await pool.query(
-      "SELECT id, lat, lng, note, name, photo_key, at, updated_at FROM pois ORDER BY at DESC");
+      "SELECT id, lat, lng, note, name, photo_key, at, updated_at, user_id FROM pois ORDER BY at DESC");
     return sendJson(res, 200, { pois: rows.map(rowToPoi) });
+  }
+
+  // A drive, deleted: its record and the coverage it earned. The driver's own, or anyone's
+  // for an administrator. The phone that recorded it deletes its copy at its next sync.
+  const driveMatch = route.match(/^\/api\/drives\/(\d+)\/(\d+)$/);
+  if (driveMatch && req.method === "DELETE") {
+    const userId = Number(driveMatch[1]), startedAt = Number(driveMatch[2]);
+    if (userId !== who.user.id && !identity.can(who.user, "admin")) {
+      return sendJson(res, 403, { error: "Only the driver, or an administrator, can delete a drive" });
+    }
+    const ways = await deleteDrive(pool, userId, startedAt);
+    if (!ways) return sendJson(res, 404, { error: "No such drive" });
+    progress.changed(pool, ways.length ? ways : null);
+    return sendJson(res, 200, { ok: true, streetsTouched: ways.length });
+  }
+
+  /**
+   * What was deleted since a phone last asked: its person's drives, and anyone's places
+   * (every phone holds only its own, so the rest are simply not there to delete).
+   */
+  if (route === "/api/sync/deleted" && req.method === "GET") {
+    const since = Number(url.searchParams.get("since")) || 0;
+    const now = Date.now();
+    const { rows } = await pool.query(
+      `SELECT kind, key FROM deletions
+        WHERE deleted_at > $1 AND deleted_at <= $2 AND (kind = 'poi' OR user_id = $3)`,
+      [since, now, who.user.id]);
+    return sendJson(res, 200, {
+      now,
+      drives: rows.filter((r) => r.kind === "drive").map((r) => Number(r.key.split(":")[1])),
+      pois: rows.filter((r) => r.kind === "poi").map((r) => r.key),
+    });
+  }
+
+  /**
+   * The phone's Stats screen, from the record rather than from one phone's memory: this
+   * person's driving (every phone and vehicle, and any history moved to them), and how
+   * fast each area is being finished by everyone.
+   */
+  if (route === "/api/me/stats" && req.method === "GET") {
+    const weeks = Math.max(4, Math.min(104, Number(url.searchParams.get("weeks")) || 26));
+    const since = Date.now() - weeks * 604800000;
+    const [totals, weekly, areaWeeks] = await Promise.all([
+      pool.query(
+        `SELECT count(*)::int AS drives, COALESCE(sum(distance_m),0) AS meters,
+                COALESCE(sum(GREATEST(COALESCE(ended_at, started_at) - started_at - paused_ms, 0)),0) AS duration_ms,
+                COALESCE(sum(new_meters),0) AS new_meters, COALESCE(sum(new_segments),0)::int AS new_segments
+           FROM drives WHERE user_id=$1`, [who.user.id]),
+      pool.query(
+        `SELECT (started_at / 604800000)::bigint AS week, count(*)::int AS drives,
+                COALESCE(sum(distance_m),0) AS meters, COALESCE(sum(new_meters),0) AS new_meters
+           FROM drives WHERE user_id=$1 GROUP BY week ORDER BY week`, [who.user.id]),
+      pool.query(
+        `SELECT a.name, (e.driven_at / 604800000)::bigint AS week, sum(e.length_m) AS meters
+           FROM driven_edges e
+           JOIN area_street s ON s.way_id = e.way_id
+           JOIN areas a ON a.id = s.area_id
+          WHERE e.driven_at >= $1
+          GROUP BY a.name, week ORDER BY a.name, week`, [since]),
+    ]);
+    const t = totals.rows[0];
+    const byArea = new Map();
+    for (const r of areaWeeks.rows) {
+      if (!byArea.has(r.name)) byArea.set(r.name, []);
+      byArea.get(r.name).push({ week: Number(r.week), meters: Number(r.meters) });
+    }
+    return sendJson(res, 200, {
+      totals: {
+        drives: t.drives, meters: Number(t.meters), durationMs: Number(t.duration_ms),
+        newMeters: Number(t.new_meters), newSegments: t.new_segments,
+      },
+      weekly: weekly.rows.map((r) => ({
+        week: Number(r.week), drives: r.drives, meters: Number(r.meters), newMeters: Number(r.new_meters),
+      })),
+      areas: [...byArea].map(([name, w]) => ({ name, weeks: w })),
+    });
   }
 
   if (route === "/api/drives" && req.method === "GET") {

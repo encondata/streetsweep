@@ -127,7 +127,6 @@ fun HomeScreen(
     val mapController = remember { TrackMapController() }
     var follow by rememberSaveable { mutableStateOf(true) }
     var centeredOnce by rememberSaveable { mutableStateOf(false) }
-    var confirmArea by remember { mutableStateOf(false) }
 
     /**
      * How close in to sit. 15 shows a neighbourhood, which is what you want when picking
@@ -138,11 +137,10 @@ fun HomeScreen(
     val drivingZoom = 17.0
     val restingZoom = 15.0
 
-    // Another screen asked us to show, or redraw, an area.
+    // Another screen asked us to show an area.
     val pendingFocus by MapFocus.pending.collectAsStateWithLifecycle()
     LaunchedEffect(pendingFocus) {
         MapFocus.consume()?.let { follow = false; centeredOnce = true; mapController.fitBounds(it) }
-        MapFocus.consumeRedraw()?.let { viewModel.startDrawing(redraw = it) }
     }
 
     LaunchedEffect(hasLocation) {
@@ -196,18 +194,13 @@ fun HomeScreen(
                 carConnected = carConnected,
                 focused = focused,
                 hasAreas = areas.isNotEmpty(),
-                onAddArea = { viewModel.startDrawing(DrawMode.AREA) },
                 onExcludeShape = { viewModel.startDrawing(DrawMode.EXCLUDE) },
             )
             if (drawing) {
                 Spacer(Modifier.height(8.dp))
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
                     Text(
-                        when {
-                            viewModel.redrawing != null -> "Editing ${viewModel.redrawing?.name}. "
-                            drawMode == DrawMode.EXCLUDE -> "Outline the gated or private area. Streets inside it stop counting. "
-                            else -> "Outline the area (3+ points). "
-                        } +
+                        "Outline the gated or private area. Streets inside it stop counting. " +
                             "Tap the map to add a point · drag a point to move it · touch a small circle between points to add one there · " +
                             "tap a point, then Delete, to remove it.",
                         Modifier.padding(12.dp),
@@ -281,20 +274,12 @@ fun HomeScreen(
             when {
                 drawing -> DrawControls(
                     points = draft.size,
-                    redrawing = viewModel.redrawing != null,
-                    excluding = drawMode == DrawMode.EXCLUDE,
                     hasSelection = selectedVertex != null,
                     onDeletePoint = viewModel::deleteSelectedPoint,
                     onUndo = viewModel::undoDraftPoint,
                     onUseView = viewModel::useViewAsDraft,
                     onCancel = viewModel::cancelDrawing,
-                    onDone = {
-                        when {
-                            drawMode == DrawMode.EXCLUDE -> viewModel.prepareExcludeFromDraft()
-                            viewModel.redrawing != null -> viewModel.finishRedraw()
-                            else -> confirmArea = true
-                        }
-                    },
+                    onDone = viewModel::prepareExcludeFromDraft,
                 )
                 !hasLocation -> Button(onClick = { locationLauncher.launch(Permissions.LOCATION) }) {
                     Text("Allow precise location to record")
@@ -395,77 +380,6 @@ fun HomeScreen(
         )
     }
 
-    if (confirmArea) {
-        CreateAreaDialog(
-            cells = viewModel.cellsForDraft(),
-            zoom = viewModel.currentViewport?.zoom ?: 0.0,
-            existing = areas,
-            onCreate = { name, level, parent -> confirmArea = false; viewModel.createAreaFromDraft(name, level, parent) },
-            onDismiss = { confirmArea = false },
-        )
-    }
-}
-
-@Composable
-private fun CreateAreaDialog(
-    cells: Int,
-    zoom: Double,
-    existing: List<AreaWithStats>,
-    onCreate: (String, AreaLevel, Long?) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var name by remember { mutableStateOf("") }
-    var level by remember { mutableStateOf(if (zoom >= 13) AreaLevel.NEIGHBORHOOD else if (zoom >= 10.5) AreaLevel.CITY else AreaLevel.METRO) }
-    var parentId by remember { mutableStateOf<Long?>(null) }
-    val tooLarge = cells > com.example.streetsweep.data.osm.StreetDownloadWorker.MAX_CELLS
-    val parents = existing.filter { it.area.level > level.ordinal }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add coverage area") },
-        text = {
-            Column {
-                Text(
-                    "Streets inside your outline are downloaded from OpenStreetMap in $cells map cell${if (cells == 1) "" else "s"}" +
-                        (if (cells > 40) " (about ${cells * 3 / 60 + 1} min)" else "") + ".",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                if (tooLarge) Text("Too large. Zoom in, or add it as several cities.", color = MaterialTheme.colorScheme.error)
-                Spacer(Modifier.height(8.dp))
-                androidx.compose.material3.OutlinedTextField(
-                    value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    AreaLevel.entries.forEach { l ->
-                        androidx.compose.material3.FilterChip(
-                            selected = level == l,
-                            onClick = { level = l; parentId = null },
-                            label = { Text(l.label) },
-                        )
-                    }
-                }
-                if (parents.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text("Part of", style = MaterialTheme.typography.labelMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        androidx.compose.material3.FilterChip(selected = parentId == null, onClick = { parentId = null }, label = { Text("None") })
-                        parents.take(3).forEach { p ->
-                            androidx.compose.material3.FilterChip(
-                                selected = parentId == p.area.id,
-                                onClick = { parentId = p.area.id },
-                                label = { Text(p.name) },
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(enabled = !tooLarge && cells > 0, onClick = { onCreate(name, level, parentId) }) { Text("Add & download") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
 }
 
 @Composable
@@ -614,35 +528,19 @@ private fun ExcludeShapeDialog(count: Int, onConfirm: (ExclusionReason) -> Unit,
     )
 }
 
+/** Outlining a gated or private stretch on the spot. Areas themselves are drawn on the web. */
 @Composable
-private fun AddMenuButton(outlined: Boolean, onAddArea: () -> Unit, onExcludeShape: () -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        if (outlined) {
-            OutlinedButton(onClick = { open = true }) { Text("Add area") }
-        } else {
-            TextButton(onClick = { open = true }) { Text("Add") }
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(
-                text = { Text("Add coverage area") },
-                leadingIcon = { Icon(Icons.Default.Layers, contentDescription = null) },
-                onClick = { open = false; onAddArea() },
-            )
-            DropdownMenuItem(
-                text = { Text("Exclude a gated area") },
-                leadingIcon = { Icon(Icons.Default.Block, contentDescription = null) },
-                onClick = { open = false; onExcludeShape() },
-            )
-        }
+private fun ExcludeButton(onExcludeShape: () -> Unit) {
+    TextButton(onClick = onExcludeShape) {
+        Icon(Icons.Default.Block, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(4.dp))
+        Text("Exclude")
     }
 }
 
 @Composable
 private fun DrawControls(
     points: Int,
-    redrawing: Boolean,
-    excluding: Boolean,
     hasSelection: Boolean,
     onDeletePoint: () -> Unit,
     onUndo: () -> Unit,
@@ -658,10 +556,8 @@ private fun DrawControls(
             } else {
                 TextButton(onClick = onUndo, enabled = points > 0) { Text("Undo") }
             }
-            if (!redrawing && !hasSelection) TextButton(onClick = onUseView) { Text("Use view") }
-            Button(onClick = onDone, enabled = points >= 3) {
-                Text(if (redrawing) "Save" else if (excluding) "Exclude inside" else "Done ($points)")
-            }
+            if (!hasSelection) TextButton(onClick = onUseView) { Text("Use view") }
+            Button(onClick = onDone, enabled = points >= 3) { Text("Exclude inside") }
         }
     }
 }
@@ -676,7 +572,6 @@ private fun StatusCard(
     carConnected: Boolean,
     focused: AreaWithStats?,
     hasAreas: Boolean,
-    onAddArea: () -> Unit,
     onExcludeShape: () -> Unit,
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f))) {
@@ -747,12 +642,12 @@ private fun StatusCard(
             when {
                 a == null -> Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        if (hasAreas) "Move the map into one of your areas to see its progress." else "No coverage areas yet.",
+                        if (hasAreas) "Move the map into one of your areas to see its progress."
+                        else "No areas yet. They are drawn on the web and arrive here when the phone syncs.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
                     )
-                    AddMenuButton(outlined = true, onAddArea = onAddArea, onExcludeShape = onExcludeShape)
                 }
                 a.area.isDownloading -> Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -790,7 +685,7 @@ private fun StatusCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    AddMenuButton(outlined = false, onAddArea = onAddArea, onExcludeShape = onExcludeShape)
+                    ExcludeButton(onExcludeShape)
                 }
             }
         }

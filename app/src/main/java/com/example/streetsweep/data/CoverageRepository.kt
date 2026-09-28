@@ -277,14 +277,27 @@ class CoverageRepository(private val db: AppDatabase) {
         return out.size
     }
 
-    /** Every area with its live numbers, largest level first. */
-    fun observeAreasWithStats(): Flow<List<AreaWithStats>> = dao.observeAreas().flatMapLatest { areas ->
-        if (areas.isEmpty()) flowOf(emptyList())
-        else combine(areas.map { a -> observeStats(a.id).map { AreaWithStats(a, it) } }) { it.toList() }
-    }
+    /**
+     * Every area in sight with its live numbers, A to Z. Areas hidden on this phone are
+     * left out, so the map, lists, guidance, widget and figures all pass them over.
+     */
+    fun observeAreasWithStats(): Flow<List<AreaWithStats>> =
+        observeWithStats(dao.observeAreas().map { all -> all.filter { !it.hidden } })
 
-    /** One-shot read of every area with its numbers, for a push. */
-    suspend fun areasWithStatsNow(): List<AreaWithStats> = observeAreasWithStats().first()
+    private fun observeWithStats(source: Flow<List<CoverageArea>>): Flow<List<AreaWithStats>> =
+        source.flatMapLatest { areas ->
+            if (areas.isEmpty()) flowOf(emptyList())
+            else combine(areas.map { a -> observeStats(a.id).map { AreaWithStats(a, it) } }) { it.toList() }
+        }
+
+    /** The areas hidden on this phone, for the Areas screen to offer back. */
+    fun observeHiddenAreas(): Flow<List<CoverageArea>> =
+        dao.observeAreas().map { all -> all.filter { it.hidden } }
+
+    suspend fun setHidden(id: Long, hidden: Boolean) = dao.setHidden(id, hidden)
+
+    /** One-shot read of every area with its numbers, hidden ones included, for a push. */
+    suspend fun areasWithStatsNow(): List<AreaWithStats> = observeWithStats(dao.observeAreas()).first()
 
     suspend fun createArea(name: String, level: AreaLevel, parentId: Long?, polygon: List<LatLngPoint>): CoverageArea {
         require(polygon.size >= 3) { "An area needs at least three points" }
@@ -378,6 +391,17 @@ class CoverageRepository(private val db: AppDatabase) {
         val updated = area.copy(polygon = ShapeText.encode(polygon), south = b.south, west = b.west, north = b.north, east = b.east)
         dao.updateArea(updated)
         refreshMembership(updated)
+    }
+
+    /**
+     * Areas the web no longer has, taken off the phone. Only ones that came from the web
+     * (or went up to it) — [CoverageArea.pulledOutline] says so — so an area that was only
+     * ever on this phone is never lost to a sync. Returns the names removed.
+     */
+    suspend fun removeAreasGoneFromWeb(webNames: Set<String>): List<String> {
+        val gone = dao.getAreas().filter { it.pulledOutline != null && it.name.lowercase() !in webNames }
+        gone.forEach { deleteArea(it.id) }
+        return gone.map { it.name }
     }
 
     suspend fun deleteArea(id: Long) = db.withTransaction {

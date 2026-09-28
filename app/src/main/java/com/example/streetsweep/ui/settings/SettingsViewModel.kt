@@ -99,8 +99,6 @@ class SettingsViewModel(private val container: AppContainer, private val context
         container.settings.setPortalUrl(TrackingSettings.DEFAULT_PORTAL_URL)
     }
 
-    fun setAutoPush(on: Boolean) = viewModelScope.launch { container.settings.setAutoPush(on) }
-
     fun testPortal() = work { "Reached " + container.portalClient.ping() }
 
     /**
@@ -109,14 +107,6 @@ class SettingsViewModel(private val container: AppContainer, private val context
      * phone — they are this device's history, not the portal's copy of it.
      */
     fun signOutOfPortal() = viewModelScope.launch { container.settings.clearPortalIdentity() }
-
-    /** Someone who chose to go without an account asking for the gate back. */
-    fun signInAgain() = viewModelScope.launch { container.settings.setStandalone(false) }
-
-    fun pullAreasFromPortal() = work {
-        describe(container.portalSync.pullAreas())
-            ?: "Nothing to change — the phone already matches every area on the server"
-    }
 
     fun pushToPortal(full: Boolean) = work {
         val r = container.portalSync.push(full)
@@ -134,15 +124,6 @@ class SettingsViewModel(private val container: AppContainer, private val context
             if (retrying > 0) "retrying streets for $retrying unfinished ${if (retrying == 1) "area" else "areas"}" else null,
         ).joinToString(" · ").ifEmpty { null }
             ?.let { it + if (queued > 0) " — downloading one area at a time" else "" }
-    }
-
-    fun importAreas(uri: Uri) = work {
-        val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-            ?: error("Could not open that file")
-        val parsed = com.example.streetsweep.data.osm.AreaGeoJson.parse(text)
-        val made = container.coverageRepository.importAreas(parsed)
-        made.forEach { com.example.streetsweep.data.osm.StreetDownloadWorker.enqueue(context, it.id) }
-        if (made.isEmpty()) "Nothing to import" else "Imported ${made.size} areas — downloading their streets"
     }
 
     fun restoreFrom(uri: Uri) = work {
@@ -184,10 +165,6 @@ class SettingsViewModel(private val container: AppContainer, private val context
     fun setSnapToRoads(enabled: Boolean) = viewModelScope.launch { container.settings.setSnapToRoads(enabled) }
 
     fun setGpsInterval(seconds: Int) = viewModelScope.launch { container.settings.setGpsIntervalSeconds(seconds) }
-
-    fun setValhallaUrl(url: String) = viewModelScope.launch { container.settings.setValhallaUrl(url) }
-
-    fun setOverpassUrl(url: String) = viewModelScope.launch { container.settings.setOverpassUrl(url) }
 
     fun selectBluetoothDevice(device: BluetoothDevices.Info?) = viewModelScope.launch {
         container.settings.setBluetoothTrigger(device?.address, device?.name)

@@ -10,7 +10,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.LaunchedEffect
@@ -36,7 +35,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.DirectionsCar
@@ -140,9 +138,6 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
     }
     val folderLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         uri?.let(viewModel::chooseBackupFolder)
-    }
-    val areaImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let(viewModel::importAreas)
     }
     var confirmRestore by remember { mutableStateOf(false) }
 
@@ -336,29 +331,13 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
                 headlineContent = { Text("Export coverage as GeoJSON") },
                 supportingContent = { Text("Area outlines and every driven street segment") },
             )
-            ListItem(
-                modifier = Modifier.clickable { areaImportLauncher.launch(arrayOf("*/*")) },
-                leadingContent = { Icon(Icons.Default.Layers, contentDescription = null) },
-                headlineContent = { Text("Import areas from GeoJSON") },
-                supportingContent = {
-                    Text("Outlines drawn on a computer with tools/area-builder.html, or any polygon file")
-                },
-            )
 
             SectionHeader("Area builder server")
             UrlField(label = "Server address", value = settings.portalUrl.orEmpty(), onCommit = viewModel::setPortalUrl)
             // Signing in replaces pasting a token by hand: the server issues this phone one
-            // of its own, so a drive can be attributed to the person who made it.
-            if (settings.portalToken.isNullOrBlank()) {
-                // Only reachable by someone who chose to go without an account: signing
-                // in is the gate in front of the app, so this puts the gate back.
-                ListItem(
-                    modifier = Modifier.clickable { viewModel.signInAgain() },
-                    leadingContent = { Icon(Icons.Default.AccountCircle, contentDescription = null) },
-                    headlineContent = { Text("Sign in") },
-                    supportingContent = { Text("With the email and password an administrator gave you") },
-                )
-            } else {
+            // of its own, so a drive can be attributed to the person who made it. Signing in
+            // is the gate in front of the app, so there is always an account to show here.
+            run {
                 ListItem(
                     leadingContent = { Icon(Icons.Default.AccountCircle, contentDescription = null) },
                     headlineContent = {
@@ -379,10 +358,8 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
                     },
                 )
             }
-            // These were three lines of green text in a row — "Test", "Get areas", "Send
-            // coverage" — and read as labels rather than things to press. Syncing is the one
-            // most people want, so it is the filled button; it sends coverage and then takes
-            // the web's areas back down, which is everything "Get areas" did and more.
+            // Syncing sends this phone's drives, places and marks, and takes back the web's
+            // areas, figures and deletions: there is nothing to fetch separately.
             val serverReady = !settings.portalUrl.isNullOrBlank()
             Column(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
@@ -397,21 +374,11 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
                     Spacer(Modifier.width(8.dp))
                     Text("Sync now")
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = viewModel::pullAreasFromPortal,
-                        enabled = serverReady,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Icon(Icons.Default.CloudDownload, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Download areas")
-                    }
-                    OutlinedButton(
-                        onClick = viewModel::testPortal,
-                        enabled = serverReady,
-                    ) { Text("Test") }
-                }
+                OutlinedButton(
+                    onClick = viewModel::testPortal,
+                    enabled = serverReady,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Test the connection") }
             }
             if (settings.portalUrl != TrackingSettings.DEFAULT_PORTAL_URL) {
                 ListItem(
@@ -420,21 +387,16 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
                     supportingContent = { Text(TrackingSettings.DEFAULT_PORTAL_URL) },
                 )
             }
-            ListItem(
-                headlineContent = { Text("Send after every drive") },
-                supportingContent = { Text("Pushes the streets you covered as soon as there is a network") },
-                trailingContent = {
-                    Switch(
-                        checked = settings.autoPushEnabled,
-                        onCheckedChange = viewModel::setAutoPush,
-                        enabled = !settings.portalUrl.isNullOrBlank(),
-                    )
-                },
+            Text(
+                "Syncs by itself when the app opens and after every drive.",
+                Modifier.padding(horizontal = 16.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             ListItem(
                 modifier = Modifier.clickable(enabled = !settings.portalUrl.isNullOrBlank()) { viewModel.pushToPortal(true) },
                 headlineContent = { Text("Send everything again") },
-                supportingContent = { Text("Clears what the server holds and re-sends every segment. Use after restoring a backup.") },
+                supportingContent = { Text("Re-sends every drive, place and street segment this phone holds. Use after restoring a backup.") },
             )
             Text(
                 if (settings.lastPortalPushAt > 0) "Last synced ${Format.dateTime(settings.lastPortalPushAt)}."
@@ -484,19 +446,13 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
                 modifier = Modifier.padding(horizontal = 8.dp),
             ) { Text("Open app settings") }
 
-            SectionHeader("OpenStreetMap services")
+            // Maps, street data and matching all come through the server now, which holds
+            // the addresses of anything further afield; the phone has none of its own to set.
+            SectionHeader("Matching")
             ListItem(
                 headlineContent = { Text("Match drives to streets") },
-                supportingContent = { Text("Snaps each drive to OpenStreetMap roads (Valhalla) so streets count as covered") },
+                supportingContent = { Text("Snaps each drive to OpenStreetMap roads, through the server, so streets count as covered") },
                 trailingContent = { Switch(checked = settings.snapToRoadsEnabled, onCheckedChange = viewModel::setSnapToRoads) },
-            )
-            UrlField(label = "Valhalla server", value = settings.valhallaUrl, onCommit = viewModel::setValhallaUrl)
-            UrlField(label = "Overpass server", value = settings.overpassUrl, onCommit = viewModel::setOverpassUrl)
-            Text(
-                "Defaults are free community servers (fair use). Point these at your own instances if they are slow or down.",
-                Modifier.padding(horizontal = 16.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
             SectionHeader("How recording works")

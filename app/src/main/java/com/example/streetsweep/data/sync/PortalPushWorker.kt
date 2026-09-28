@@ -17,7 +17,8 @@ class PortalPushWorker(context: Context, params: WorkerParameters) : CoroutineWo
     override suspend fun doWork(): Result {
         val container = applicationContext.appContainer
         val settings = container.settings.current()
-        if (!settings.autoPushEnabled || settings.portalUrl.isNullOrBlank()) return Result.success()
+        // Always on while signed in: after every drive, at every launch, and from Sync.
+        if (settings.portalUrl.isNullOrBlank() || settings.portalToken.isNullOrBlank()) return Result.success()
         return try {
             val pushed = container.portalSync.push()
             Log.i(TAG, "pushed $pushed")

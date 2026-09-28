@@ -24,7 +24,6 @@ import com.example.streetsweep.domain.Geo
 import com.example.streetsweep.domain.GuidanceMode
 import com.example.streetsweep.domain.LatLngPoint
 import com.example.streetsweep.domain.Polygon
-import com.example.streetsweep.ui.map.RedrawRequest
 import com.example.streetsweep.domain.TriggerSource
 import com.example.streetsweep.tracking.Permissions
 import com.example.streetsweep.tracking.TrackingService
@@ -62,7 +61,8 @@ import kotlin.math.round
 data class Viewport(val bounds: Bounds, val zoom: Double)
 
 /** What the outline being drawn will become. */
-enum class DrawMode { AREA, EXCLUDE }
+/** The one shape still drawn on the phone: a gated area to exclude. Areas are drawn on the web. */
+enum class DrawMode { EXCLUDE }
 
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class HomeViewModel(private val container: AppContainer, private val context: Context) : ViewModel() {
@@ -125,16 +125,11 @@ class HomeViewModel(private val container: AppContainer, private val context: Co
     /** Outline under construction; empty when not drawing. */
     val draft = MutableStateFlow<List<LatLngPoint>>(emptyList())
     val drawing = MutableStateFlow(false)
-    /** Area being redrawn, or null when drawing a new one. */
-    var redrawing: RedrawRequest? = null
-        private set
+    val drawMode = MutableStateFlow(DrawMode.EXCLUDE)
 
-    val drawMode = MutableStateFlow(DrawMode.AREA)
-
-    fun startDrawing(mode: DrawMode = DrawMode.AREA, redraw: RedrawRequest? = null) {
-        redrawing = redraw
-        drawMode.value = if (redraw != null) DrawMode.AREA else mode
-        draft.value = redraw?.vertices.orEmpty()
+    fun startDrawing(mode: DrawMode = DrawMode.EXCLUDE) {
+        drawMode.value = mode
+        draft.value = emptyList()
         selectedStreet.value = null
         drawing.value = true
     }
@@ -226,8 +221,6 @@ class HomeViewModel(private val container: AppContainer, private val context: Co
         drawing.value = false
         draft.value = emptyList()
         selectedVertex.value = null
-        redrawing = null
-        drawMode.value = DrawMode.AREA
         pendingExcludeCount.value = null
     }
 
@@ -427,32 +420,6 @@ class HomeViewModel(private val container: AppContainer, private val context: Co
     fun pauseTracking() = TrackingService.pause(context)
     fun resumeTracking() = TrackingService.resume(context)
     fun stopTracking() = TrackingService.stop(context)
-
-    /** How many download cells the drafted outline would need; drives the size warning in the dialog. */
-    fun cellsForDraft(): Int = Bounds.of(draft.value)?.let { ChunkGrid.cellsFor(it).size } ?: 0
-
-    fun createAreaFromDraft(name: String, level: AreaLevel, parentId: Long?) {
-        val polygon = draft.value
-        if (polygon.size < 3) return
-        viewModelScope.launch {
-            val area = container.coverageRepository.createArea(name, level, parentId, polygon)
-            StreetDownloadWorker.enqueue(context, area.id)
-            _message.value = "Downloading streets for ${area.name}…"
-            cancelDrawing()
-        }
-    }
-
-    fun finishRedraw() {
-        val r = redrawing ?: return
-        val polygon = draft.value
-        if (polygon.size < 3) return
-        viewModelScope.launch {
-            container.coverageRepository.updatePolygon(r.areaId, polygon)
-            StreetDownloadWorker.enqueue(context, r.areaId) // fetch any newly covered cells
-            _message.value = "Updated outline of ${r.name}"
-            cancelDrawing()
-        }
-    }
 
     fun clearMessage() { _message.value = null }
 

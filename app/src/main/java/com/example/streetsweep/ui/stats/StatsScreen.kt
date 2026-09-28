@@ -65,6 +65,9 @@ import com.example.streetsweep.domain.Pace
 import com.example.streetsweep.ui.common.Format
 import com.example.streetsweep.ui.common.containerViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import org.json.JSONObject
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -112,20 +115,80 @@ data class AreaPace(
         )
 }
 
+/**
+ * The Stats screen's figures as the web has them: this person's driving from every phone
+ * and vehicle (and any history moved to them), and each area's week-by-week progress from
+ * everyone's. Areas are matched by name, as everywhere else between phone and web.
+ */
+private data class ServerStats(
+    val totals: SessionTotalsRow,
+    val weekly: List<WeeklyDrivingRow>,
+    val areaWeeks: Map<String, List<Pair<Long, Double>>>,
+)
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class StatsViewModel(private val container: AppContainer) : ViewModel() {
 
-    val totals: StateFlow<SessionTotalsRow?> = container.trackRepository.observeTotals()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    /** Null until the server answers, and for good if it cannot: the phone's own figures stand in. */
+    private val server = MutableStateFlow<ServerStats?>(null)
 
-    val weekly: StateFlow<List<WeeklyDrivingRow>> = container.trackRepository.observeWeeklyDriving()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    init {
+        viewModelScope.launch {
+            server.value = runCatching { parseServerStats(container.portalClient.getJson("/api/me/stats")) }
+                .getOrNull()
+        }
+    }
+
+    private fun parseServerStats(body: String): ServerStats {
+        val json = JSONObject(body)
+        val t = json.getJSONObject("totals")
+        val weekly = json.optJSONArray("weekly")
+        val areas = json.optJSONArray("areas")
+        return ServerStats(
+            totals = SessionTotalsRow(
+                drives = t.optInt("drives"), meters = t.optDouble("meters", 0.0),
+                durationMs = t.optLong("durationMs"), newMeters = t.optDouble("newMeters", 0.0),
+                newSegments = t.optInt("newSegments"),
+            ),
+            weekly = (0 until (weekly?.length() ?: 0)).map { i ->
+                val w = weekly!!.getJSONObject(i)
+                WeeklyDrivingRow(w.getLong("week"), w.optInt("drives"), w.optDouble("meters", 0.0), w.optDouble("newMeters", 0.0))
+            },
+            areaWeeks = (0 until (areas?.length() ?: 0)).associate { i ->
+                val a = areas!!.getJSONObject(i)
+                val weeks = a.getJSONArray("weeks")
+                a.getString("name").lowercase() to (0 until weeks.length()).map { j ->
+                    val w = weeks.getJSONObject(j)
+                    w.getLong("week") to w.optDouble("meters", 0.0)
+                }
+            },
+        )
+    }
+
+    val totals: StateFlow<SessionTotalsRow?> = combine(container.trackRepository.observeTotals(), server) { local, web ->
+        web?.totals ?: local
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val weekly: StateFlow<List<WeeklyDrivingRow>> = combine(container.trackRepository.observeWeeklyDriving(), server) { local, web ->
+        web?.weekly ?: local
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** Each area with the pace of the last few weeks, for the "done by" estimate. */
-    val paces: StateFlow<List<AreaPace>> = container.coverageRepository.observeAreasWithStats()
-        .flatMapLatest { areas ->
+    val paces: StateFlow<List<AreaPace>> = combine(container.coverageRepository.observeAreasWithStats(), server) { a, w -> a to w }
+        .flatMapLatest { (areas, web) ->
             if (areas.isEmpty()) {
                 flowOf(emptyList())
+            } else if (web != null) {
+                flowOf(
+                    areas.map { a ->
+                        val rows = web.areaWeeks[a.name.lowercase()].orEmpty()
+                        AreaPace(
+                            area = a,
+                            metersPerWeek = Pace.recentRate(rows),
+                            lastProgressWeek = rows.filter { it.second > 0 }.maxOfOrNull { it.first },
+                        )
+                    },
+                )
             } else {
                 combine(
                     areas.map { a ->
@@ -142,15 +205,21 @@ class StatsViewModel(private val container: AppContainer) : ViewModel() {
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    /** Every area added up, plus the lifetime distance from the drive log. */
+    /**
+     * The areas added up, plus the lifetime distance from the drive log. Streets and miles
+     * come from the top-level areas only: a neighbourhood's streets are already inside its
+     * city's, and adding both counted them twice.
+     */
     val overview: StateFlow<Overview> = combine(paces, totals) { list, t ->
+        val ids = list.map { it.area.area.id }.toSet()
+        val top = list.filter { it.area.area.parentId == null || it.area.area.parentId !in ids }
         Overview(
-            drivenStreets = list.sumOf { it.area.stats.done },
-            unvisitedStreets = list.sumOf { it.area.stats.remaining },
+            drivenStreets = top.sumOf { it.area.stats.done },
+            unvisitedStreets = top.sumOf { it.area.stats.remaining },
             areasCompleted = list.count { it.isComplete },
             areasInProgress = list.count { it.isStarted && !it.isComplete },
-            metersDriven = list.sumOf { it.area.stats.metersDriven },
-            metersTotal = list.sumOf { it.area.stats.metersTotal },
+            metersDriven = top.sumOf { it.area.stats.metersDriven },
+            metersTotal = top.sumOf { it.area.stats.metersTotal },
             lifetimeMeters = t?.meters ?: 0.0,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Overview.EMPTY)

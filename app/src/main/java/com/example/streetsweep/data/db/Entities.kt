@@ -98,4 +98,31 @@ data class Poi(
      * edit is newer, so this is what decides a disagreement.
      */
     val updatedAt: Long = 0,
-)
+) {
+    /** How the server knows this place: when it was marked, and where, to the micro-degree. */
+    val serverKey: String
+        get() = "%d:%.6f:%.6f".format(java.util.Locale.US, timestamp, latitude, longitude)
+}
+
+/**
+ * A drive or marked place deleted on this phone, waiting to tell the server. Without it
+ * the server could not tell a deletion from a phone that simply never had the thing.
+ */
+@Entity(tableName = "pending_deletions", primaryKeys = ["kind", "key"])
+data class PendingDeletion(
+    /** [KIND_DRIVE], [KIND_EDGE] or [KIND_POI]. */
+    val kind: String,
+    /**
+     * A drive: when it started, as the server keys it. A street segment it earned: the
+     * segment's key, since the server cannot tell which drive a segment came from. A
+     * place: the server's id for it.
+     */
+    val key: String,
+    val deletedAt: Long,
+) {
+    companion object {
+        const val KIND_DRIVE = "drive"
+        const val KIND_EDGE = "edge"
+        const val KIND_POI = "poi"
+    }
+}

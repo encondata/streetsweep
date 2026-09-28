@@ -34,12 +34,6 @@ class SignInViewModel(private val container: AppContainer) : ViewModel() {
 
     fun clearMessages() { _error.value = null; _notice.value = null }
 
-    /** For the parts of the design that are drawn but have nowhere to go yet. */
-    fun notBuiltYet(what: String) {
-        _error.value = null
-        _notice.value = "$what is not set up yet. An administrator can do it for you in the meantime."
-    }
-
     fun signIn(email: String, password: String) = viewModelScope.launch {
         if (_busy.value) return@launch
         _busy.value = true
@@ -48,8 +42,7 @@ class SignInViewModel(private val container: AppContainer) : ViewModel() {
         try {
             val label = android.os.Build.MODEL?.takeIf { it.isNotBlank() } ?: "Phone"
             val result = container.portalClient.signInDevice(email, password, label)
-            // Storing the token also clears the standalone choice, which is what takes
-            // the gate down.
+            // Storing the token is what takes the gate down.
             container.settings.setPortalIdentity(result.token, result.name, result.email)
         } catch (e: Exception) {
             _error.value = e.message ?: "Could not sign in"
@@ -63,12 +56,6 @@ class SignInViewModel(private val container: AppContainer) : ViewModel() {
         val clean = address.trim()
         if (clean.isEmpty()) return@launch
         container.settings.setPortalUrl(clean)
-        clearMessages()
-    }
-
-    /** "Keep using it on this phone only" — remembered, or it would ask at every launch. */
-    fun useWithoutAnAccount() = viewModelScope.launch {
-        container.settings.setStandalone(true)
         clearMessages()
     }
 

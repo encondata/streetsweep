@@ -39,4 +39,13 @@ interface PoiDao {
 
     @Query("DELETE FROM pois WHERE id = :id")
     suspend fun delete(id: Long)
+
+    @androidx.room.Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    suspend fun addPendingDeletion(d: PendingDeletion)
+
+    @Query("SELECT * FROM pending_deletions")
+    suspend fun pendingDeletions(): List<PendingDeletion>
+
+    @Query("DELETE FROM pending_deletions WHERE kind = :kind AND `key` IN (:keys)")
+    suspend fun clearPendingDeletions(kind: String, keys: List<String>)
 }

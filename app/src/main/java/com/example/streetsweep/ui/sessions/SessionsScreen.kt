@@ -140,7 +140,7 @@ fun SessionsScreen(
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
             title = { Text("Delete this drive?") },
-            text = { Text("${Format.dateTime(s.startedAt)} · ${summaryLine(s)}\n\nThis cannot be undone.") },
+            text = { Text("${Format.dateTime(s.startedAt)} · ${summaryLine(s)}\n\nIt is deleted from the web too, at the next sync, and the streets it counted stop counting. This cannot be undone.") },
             confirmButton = {
                 TextButton(onClick = { viewModel.delete(s.id); pendingDelete = null }) { Text("Delete") }
             },

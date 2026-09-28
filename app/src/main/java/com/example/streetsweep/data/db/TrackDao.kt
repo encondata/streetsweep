@@ -39,6 +39,10 @@ interface TrackDao {
     @Query("DELETE FROM sessions WHERE id = :id")
     suspend fun deleteSession(id: Long)
 
+    /** The server knows a drive by when it started. */
+    @Query("SELECT * FROM sessions WHERE startedAt = :startedAt")
+    suspend fun getSessionsStartedAt(startedAt: Long): List<TrackSession>
+
     @Query("UPDATE sessions SET pausedMs = pausedMs + :millis WHERE id = :id")
     suspend fun addPausedMs(id: Long, millis: Long)
 

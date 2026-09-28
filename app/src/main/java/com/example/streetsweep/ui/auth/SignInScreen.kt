@@ -27,8 +27,6 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -98,14 +96,10 @@ fun SignInScreen(
     /** Saves a new server address. The gate is in front of Settings, so it has to be
      *  changeable from here or a self-hosted server cannot be reached on a fresh phone. */
     onChangeServer: (String) -> Unit,
-    /** Shown on the parts of the design that are drawn but not built yet. */
-    onPlaceholder: (String) -> Unit,
-    onSkip: (() -> Unit)? = null,
 ) {
     var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     var reveal by rememberSaveable { mutableStateOf(false) }
-    var remember by rememberSaveable { mutableStateOf(true) }
     var editingServer by rememberSaveable { mutableStateOf(false) }
     var serverField by rememberSaveable(serverLabel) { mutableStateOf(serverLabel) }
     val focus = LocalFocusManager.current
@@ -252,30 +246,9 @@ fun SignInScreen(
                         modifier = Modifier.fillMaxWidth(),
                     )
 
-                    Spacer(Modifier.height(10.dp))
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(
-                                checked = remember,
-                                onCheckedChange = { remember = it },
-                                colors = CheckboxDefaults.colors(
-                                    checkedColor = GreenDeep,
-                                    uncheckedColor = InkSoft,
-                                    checkmarkColor = Color.White,
-                                ),
-                            )
-                            Text("Stay signed in", color = Ink, fontSize = 13.sp)
-                        }
-                        TextButton(onClick = { onPlaceholder("Resetting your own password") }) {
-                            Text("Forgot password?", color = Color(0xFF57C7FF), fontSize = 13.sp)
-                        }
-                    }
-
-                    Spacer(Modifier.height(6.dp))
+                    // A phone stays signed in until it signs out; accounts and passwords are
+                    // made and reset by an administrator on the web.
+                    Spacer(Modifier.height(16.dp))
                     Button(
                         onClick = { focus.clearFocus(); onSignIn(email, password) },
                         enabled = !busy && email.isNotBlank() && password.isNotBlank(),
@@ -316,20 +289,13 @@ fun SignInScreen(
                     }
 
                     Spacer(Modifier.height(10.dp))
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("New to StreetSweep? ", color = InkSoft, fontSize = 12.5.sp)
-                        Text(
-                            "Create an account",
-                            color = Color(0xFF57C7FF),
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.clickable { onPlaceholder("Signing yourself up") },
-                        )
-                    }
+                    Text(
+                        "Need an account, or a new password? Ask your administrator.",
+                        color = InkSoft,
+                        fontSize = 12.5.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
 
                     Spacer(Modifier.height(10.dp))
                     if (editingServer) {
@@ -375,13 +341,6 @@ fun SignInScreen(
                                 .clickable { editingServer = true },
                         )
                     }
-                }
-            }
-
-            if (onSkip != null) {
-                Spacer(Modifier.height(10.dp))
-                TextButton(onClick = onSkip) {
-                    Text("Keep using it on this phone only", color = InkSoft, fontSize = 13.sp)
                 }
             }
 

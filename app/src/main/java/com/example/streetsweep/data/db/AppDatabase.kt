@@ -15,8 +15,9 @@ import com.example.streetsweep.domain.RoadShape
         TrackSession::class, TrackPoint::class, SnappedPoint::class,
         CoverageArea::class, AreaWay::class, OsmWay::class, StreetChunk::class, DrivenEdge::class,
         Poi::class, StreetExclusion::class, StreetCompletion::class, WayCoverage::class, AreaStatsCache::class,
+        PendingDeletion::class,
     ],
-    version = 14,
+    version = 15,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -218,10 +219,25 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v15: areas can be hidden on the phone (the web deletes them), and drives and
+         * places deleted here wait in pending_deletions until the server has been told.
+         */
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `areas` ADD COLUMN `hidden` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `pending_deletions` (`kind` TEXT NOT NULL, `key` TEXT NOT NULL, " +
+                        "`deletedAt` INTEGER NOT NULL, PRIMARY KEY(`kind`, `key`))",
+                )
+            }
+        }
+
         /** Hand-written migrations, oldest first. Add one for each version bump. */
         val MIGRATIONS: Array<Migration> =
             arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
-                MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
+                MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14,
+                MIGRATION_14_15)
 
         fun build(context: Context): AppDatabase =
             // The phone now holds real drives and areas. Every schema change from version 4 on

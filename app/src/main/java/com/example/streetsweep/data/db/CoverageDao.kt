@@ -31,6 +31,9 @@ interface CoverageDao {
     @Query("UPDATE areas SET parentId = NULL WHERE parentId = :id")
     suspend fun orphanChildren(id: Long)
 
+    @Query("UPDATE areas SET hidden = :hidden WHERE id = :id")
+    suspend fun setHidden(id: Long, hidden: Boolean)
+
     @Query("UPDATE areas SET chunksTotal = :total, chunksDone = :done, lastError = :error, streetsLoadedAt = :loadedAt WHERE id = :id")
     suspend fun setProgress(id: Long, total: Int, done: Int, error: String?, loadedAt: Long?)
 
@@ -306,6 +309,9 @@ interface CoverageDao {
 
     @Query("SELECT DISTINCT wayId FROM driven_edges WHERE sessionId = :sessionId")
     suspend fun wayIdsDrivenIn(sessionId: Long): List<Long>
+
+    @Query("SELECT `key` FROM driven_edges WHERE sessionId = :sessionId")
+    suspend fun edgeKeysDrivenIn(sessionId: Long): List<String>
 
     @Query("SELECT DISTINCT wayId FROM driven_edges")
     suspend fun allDrivenWayIds(): List<Long>

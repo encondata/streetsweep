@@ -53,12 +53,13 @@ private const val SESSION_ROUTE = "session/{id}"
 private val DRIVE_ROUTES = setOf("drives", SESSION_ROUTE, "places")
 
 /**
- * The gate in front of everything. With no token and no decision to go without one, the
- * sign-in screen is the whole screen — not a dialog reached through Settings — and it
- * comes straight back the moment someone signs out.
+ * The gate in front of everything. With no token the sign-in screen is the whole screen —
+ * not a dialog reached through Settings — and it comes straight back the moment someone
+ * signs out.
  *
- * It can be stepped past, because the app records drives perfectly well on its own and
- * a phone with no server to talk to should not be bricked by a login screen.
+ * It cannot be stepped past. The web is the record: areas are drawn there, and every
+ * figure comes from it, so a phone on its own would be a different app with different
+ * numbers. Drives recorded before signing in are kept, and go up at the first sync.
  */
 @Composable
 fun StreetSweepApp() {
@@ -68,7 +69,7 @@ fun StreetSweepApp() {
     val error by auth.error.collectAsStateWithLifecycle()
     val notice by auth.notice.collectAsStateWithLifecycle()
 
-    if (settings.portalToken.isNullOrBlank() && !settings.standalone) {
+    if (settings.portalToken.isNullOrBlank()) {
         SignInScreen(
             busy = busy,
             error = error,
@@ -77,8 +78,6 @@ fun StreetSweepApp() {
                 .removePrefix("https://").removePrefix("http://"),
             onSignIn = auth::signIn,
             onChangeServer = auth::setServer,
-            onPlaceholder = auth::notBuiltYet,
-            onSkip = auth::useWithoutAnAccount,
         )
         return
     }
@@ -89,6 +88,12 @@ fun StreetSweepApp() {
 /** Bottom navigation between the map, the drive list and settings. */
 @Composable
 private fun MainShell() {
+    // Signed in and opened: catch up with the web — its areas, figures and deletions —
+    // and send anything waiting. Once per launch (and again straight after signing in).
+    val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        com.example.streetsweep.data.sync.PortalPushWorker.enqueue(appContext)
+    }
     val navController = rememberNavController()
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route

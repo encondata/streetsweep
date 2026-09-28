@@ -201,7 +201,7 @@ fun PlacesScreen(
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
             title = { Text("Delete this spot?") },
-            text = { Text(p.name ?: p.note ?: Format.dateTime(p.timestamp)) },
+            text = { Text((p.name ?: p.note ?: Format.dateTime(p.timestamp)) + "\n\nIt is deleted from the web too, at the next sync.") },
             confirmButton = { TextButton(onClick = { viewModel.delete(p.id); pendingDelete = null }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Cancel") } },
         )

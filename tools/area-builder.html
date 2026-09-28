@@ -6311,7 +6311,30 @@ window.StreetSweepBases = {
         (d.points ? kv("GPS points", d.points.toLocaleString()) : "") +
         ((d.pausedMs || 0) > 60000 ? kv("Paused", fmtDuration(d.pausedMs)) : "") +
         (d.trigger ? kv("Started by", d.trigger) : "") +
-      "</dl></div>";
+      "</dl></div>" +
+      (canDelete(d.driverId)
+        ? '<div class="row" style="margin-top:12px"><button id="driveDelete" class="danger">Delete this drive</button></div>' +
+          '<p class="hint">Also takes away the streets it counted, and removes it from the phone that recorded it at its next sync.</p>'
+        : "");
+    if (el("driveDelete")) el("driveDelete").addEventListener("click", function () {
+      if (!confirm("Delete this drive from " + new Date(d.startedAt).toLocaleString() +
+          "? The streets it counted stop counting, on the web and on the phone.")) return;
+      el("driveDelete").disabled = true;
+      apiJson("/api/drives/" + d.driverId + "/" + d.startedAt, "DELETE").then(function () {
+        driveLayer.clearLayers();
+        box.hidden = true;
+        renderDrives(driveRows.filter(function (x) { return x !== d; }));
+        status("Drive deleted");
+      }).catch(function (e) {
+        el("driveDelete").disabled = false;
+        status("Not deleted: " + e.message, "bad");
+      });
+    });
+  }
+
+  /** The driver or whoever marked it may delete their own; an administrator anyone's. */
+  function canDelete(ownerId) {
+    return Boolean(me && (me.role === "admin" || (ownerId != null && Number(ownerId) === me.id && canMark())));
   }
 
   function figure2(value, label) {
@@ -6439,7 +6462,24 @@ window.StreetSweepBases = {
       "</div>" +
       '<div class="row" style="margin-top:8px">' +
         '<a class="linkbtn" id="poiZillow" aria-disabled="true" href="#">Zillow</a>' +
-      "</div>";
+      "</div>" +
+      (canDelete(p.userId)
+        ? '<div class="row" style="margin-top:12px"><button id="poiDelete" class="danger">Delete this place</button></div>'
+        : "");
+    if (el("poiDelete")) el("poiDelete").addEventListener("click", function () {
+      if (!confirm("Delete " + (p.name || "this marked place") + ", with its photo? " +
+          "It goes from the phone that marked it too.")) return;
+      el("poiDelete").disabled = true;
+      apiJson(path, "DELETE").then(function () {
+        if (poiMarker) { poiLayer.removeLayer(poiMarker); poiMarker = null; }
+        box.hidden = true;
+        renderPois(poiRows.filter(function (x) { return x !== p; }));
+        status("Place deleted");
+      }).catch(function (e) {
+        el("poiDelete").disabled = false;
+        status("Not deleted: " + e.message, "bad");
+      });
+    });
 
     el("poiName").value = p.name || "";
     el("poiNote").value = p.note || "";

@@ -264,7 +264,8 @@ class TrackingService : LifecycleService() {
         }
         Notifications.showDriveSummary(context, title, added + (areaLine ?: ""))
         CoverageWidget.refresh(context)
-        if (container.settings.current().autoPushEnabled) PortalPushWorker.enqueue(context)
+        // The web is the record, so every drive goes up as soon as there is a network.
+        PortalPushWorker.enqueue(context)
     }
 
     // ---- automatic stop with grace period ---------------------------------------------------
@@ -486,8 +487,8 @@ class TrackingService : LifecycleService() {
             Notifications.showAlert(
                 this,
                 "Recording outside your areas",
-                "This drive is being saved and matched to streets, but it will not count toward any " +
-                    "coverage figure until you add an area here from the map.",
+                "This drive is being saved and matched to streets. It counts toward an area's figure " +
+                    "once an area covering it is drawn on the web.",
             )
         }
     }

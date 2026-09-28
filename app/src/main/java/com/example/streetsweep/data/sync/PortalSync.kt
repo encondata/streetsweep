@@ -3,6 +3,7 @@ package com.example.streetsweep.data.sync
 import android.util.Log
 import com.example.streetsweep.data.CoverageRepository
 import com.example.streetsweep.data.TrackRepository
+import com.example.streetsweep.data.db.PendingDeletion
 import com.example.streetsweep.data.osm.AreaGeoJson
 import com.example.streetsweep.data.osm.ImportedArea
 import com.example.streetsweep.data.osm.ShapeText
@@ -76,6 +77,12 @@ class PortalSync(
      */
     suspend fun pullAreas(): AreaPull {
         val parsed = AreaGeoJson.parse(client.areasGeoJson())
+        // Deleted on the web: gone here too. Never on an empty answer, which is far more
+        // likely a server with a problem than one whose every area was deleted at once.
+        if (parsed.isNotEmpty()) {
+            val removed = coverage.removeAreasGoneFromWeb(parsed.map { it.name.lowercase() }.toSet())
+            if (removed.isNotEmpty()) Log.i(TAG, "areas deleted on the web, removed here: $removed")
+        }
         val onPhone = coverage.getAreas().associateBy { it.name.lowercase() }
 
         val fresh = ArrayList<ImportedArea>()
@@ -96,6 +103,22 @@ class PortalSync(
         val added = if (fresh.isEmpty()) emptyList() else coverage.importAreas(fresh).map { it.id }
         coverage.markPulled(added)
         return AreaPull(added, updated, kept, same)
+    }
+
+    /**
+     * Drives and places deleted on the web since the last time, deleted here too. A server
+     * too old to keep a list answers 404, which is simply nothing to do.
+     */
+    suspend fun pullDeletions(): Int {
+        val since = settings.current().lastDeletionsPullAt
+        val body = runCatching { client.getJson("/api/sync/deleted?since=$since") }.getOrNull() ?: return 0
+        val json = JSONObject(body)
+        val drives = json.optJSONArray("drives")?.let { a -> (0 until a.length()).map { a.getLong(it) } }.orEmpty()
+        val pois = json.optJSONArray("pois")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
+        val n = tracks.applyServerDeletions(drives, pois.toSet())
+        if (n > 0) Log.i(TAG, "deleted $n drives and places that were deleted on the web")
+        settings.setLastDeletionsPullAt(json.optLong("now", since))
+        return n
     }
 
     /** Run after every push; AppContainer uses it to take the web's figures again shortly. */
@@ -124,8 +147,7 @@ class PortalSync(
     }
 
     /** The key the server gives a marked place, so the phone can address one. */
-    private fun poiKey(p: com.example.streetsweep.data.db.Poi): String =
-        "%d:%.6f:%.6f".format(java.util.Locale.US, p.timestamp, p.latitude, p.longitude)
+    private fun poiKey(p: com.example.streetsweep.data.db.Poi): String = p.serverKey
 
     /**
      * Sends any photo the server has not had yet.
@@ -190,13 +212,28 @@ class PortalSync(
         val nameById = areas.associate { it.area.id to it.name }
         val drives = tracks.getAllSessions()
         val pois = tracks.getAllPois()
+        // Deleted here since the last sync. The server no longer reads a drive or place
+        // missing from the lists below as deleted, so it has to be told.
+        val deleted = tracks.pendingDeletions()
+        val deletedDrives = deleted.filter { it.kind == PendingDeletion.KIND_DRIVE }.map { it.key }
+        val deletedPois = deleted.filter { it.kind == PendingDeletion.KIND_POI }.map { it.key }
+        val deletedEdges = deleted.filter { it.kind == PendingDeletion.KIND_EDGE }.map { it.key }
 
         val head = JSONObject()
             .put("areas", JSONArray().apply { areas.forEach { put(areaJson(it, nameById)) } })
             .put("drives", JSONArray().apply { drives.forEach { put(driveJson(it)) } })
             .put("pois", JSONArray().apply { pois.forEach { put(poiJson(it)) } })
-        if (full) head.put("resetEdges", true)
+            .put(
+                "deleted",
+                JSONObject()
+                    .put("drives", JSONArray().apply { deletedDrives.forEach { put(it.toLong()) } })
+                    .put("pois", JSONArray().apply { deletedPois.forEach { put(it) } })
+                    .put("edges", JSONArray().apply { deletedEdges.forEach { put(it) } }),
+            )
         val answer = client.sync(head)
+        tracks.clearPendingDeletions(PendingDeletion.KIND_DRIVE, deletedDrives)
+        tracks.clearPendingDeletions(PendingDeletion.KIND_POI, deletedPois)
+        deletedEdges.chunked(500).forEach { tracks.clearPendingDeletions(PendingDeletion.KIND_EDGE, it) }
         // The web is the record. An area drawn here, or redrawn here since it was last
         // pulled, has just been written there (if this account may edit areas); from now
         // on it is the web's outline, so remember it as pulled and the next pull agrees.
@@ -223,6 +260,9 @@ class PortalSync(
         // it has not heard of. Taking back edits made on the portal goes last, so a name
         // typed there is not overwritten by the push that just went out.
         val photos = runCatching { pushPhotos() }.getOrDefault(0)
+        // Drives and places deleted on the web go from here too.
+        runCatching { pullDeletions() }
+            .onFailure { Log.w(TAG, "could not take the web's deletions: ${it.message}") }
         val pulled = runCatching { pullPlaceEdits() }.getOrDefault(0)
         if (photos > 0 || pulled > 0) Log.d(TAG, "sent $photos photos, took back $pulled edits")
         // Last, and not allowed to fail the push: the drives have gone up either way.

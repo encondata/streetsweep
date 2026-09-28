@@ -16,13 +16,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.runtime.rememberCoroutineScope
+import com.example.streetsweep.data.db.CoverageArea
+import com.example.streetsweep.data.sync.PortalPushWorker
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -45,10 +50,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarHost
-import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -67,7 +70,6 @@ import com.example.streetsweep.data.osm.StreetDownloadWorker
 import com.example.streetsweep.domain.Geo
 import com.example.streetsweep.ui.common.containerViewModel
 import com.example.streetsweep.ui.map.MapFocus
-import com.example.streetsweep.ui.map.RedrawRequest
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -77,55 +79,38 @@ class AreasViewModel(private val container: AppContainer, private val context: C
     val areas: StateFlow<List<AreaWithStats>> = container.coverageRepository.observeAreasWithStats()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** Areas put out of sight on this phone, offered back at the foot of the list. */
+    val hidden: StateFlow<List<CoverageArea>> = container.coverageRepository.observeHiddenAreas()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val wayCount: StateFlow<Int> = container.coverageRepository.observeWayCount()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
-    fun delete(id: Long) = viewModelScope.launch { container.coverageRepository.deleteArea(id) }
+    /** Where areas are drawn, to say so when there are none. */
+    val webAddress: StateFlow<String> = container.settings.settings
+        .map { it.portalUrl.orEmpty().removePrefix("https://").removePrefix("http://").trimEnd('/') }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
+
+    private val _message = MutableStateFlow<String?>(null)
+    val message: StateFlow<String?> = _message
+    fun clearMessage() { _message.value = null }
+
+    /** Areas are the web's to delete; the phone can only put one out of sight. */
+    fun hide(id: Long) = viewModelScope.launch { container.coverageRepository.setHidden(id, true) }
+    fun show(id: Long) = viewModelScope.launch { container.coverageRepository.setHidden(id, false) }
 
     fun redownload(id: Long) = viewModelScope.launch {
         container.coverageRepository.setProgress(id, 0, 0, error = null, loadedAt = null)
         StreetDownloadWorker.enqueue(context, id)
     }
 
-    /** Whether there is a server to download from at all. */
-    val canDownload: StateFlow<Boolean> = container.settings.settings
-        .map { !it.portalUrl.isNullOrBlank() && !it.portalToken.isNullOrBlank() }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
-
-    private val _downloading = MutableStateFlow(false)
-    val downloading: StateFlow<Boolean> = _downloading
-
-    private val _message = MutableStateFlow<String?>(null)
-    val message: StateFlow<String?> = _message
-    fun clearMessage() { _message.value = null }
-
     /**
-     * Brings this phone's areas into line with the portal's. Lives here as well as in
-     * Settings because the Areas screen is where anyone looking for "download my areas"
-     * goes first; buried halfway down Settings as plain text, it went unfound.
+     * Syncs now rather than at the next drive or launch: drives and marks go up, and the
+     * web's areas, figures and deletions come down, with streets for any new area after.
      */
-    fun downloadFromWeb() = viewModelScope.launch {
-        if (_downloading.value) return@launch
-        _downloading.value = true
-        _message.value = try {
-            val pull = container.portalSync.pullAreas()
-            // Anything whose streets never finished goes back on the queue too. A second tap
-            // here is how a download that failed part-way gets finished: its outline already
-            // matches the web, so the pull alone would say there was nothing to do.
-            val unfinished = container.coverageRepository.unfinishedAreaIds()
-            val queued = StreetDownloadWorker.enqueueAll(context, pull.needStreets + unfinished)
-            val retrying = (unfinished - pull.needStreets.toSet()).size
-            listOfNotNull(
-                pull.summary(),
-                if (retrying > 0) "retrying streets for $retrying unfinished ${if (retrying == 1) "area" else "areas"}" else null,
-            ).joinToString(" · ").ifEmpty { null }
-                ?.let { it + if (queued > 0) " — downloading one area at a time" else "" }
-                ?: "Already up to date — this phone has every area on the server"
-        } catch (e: Exception) {
-            "Could not download areas: ${e.message ?: "no answer from the server"}"
-        } finally {
-            _downloading.value = false
-        }
+    fun syncNow() {
+        PortalPushWorker.enqueue(context)
+        _message.value = "Syncing with the web…"
     }
 }
 
@@ -155,39 +140,38 @@ fun AreasScreen(
     viewModel: AreasViewModel = containerViewModel { c, ctx -> AreasViewModel(c, ctx) },
 ) {
     val areas by viewModel.areas.collectAsStateWithLifecycle()
+    val hidden by viewModel.hidden.collectAsStateWithLifecycle()
     val wayCount by viewModel.wayCount.collectAsStateWithLifecycle()
-    val canDownload by viewModel.canDownload.collectAsStateWithLifecycle()
-    val downloading by viewModel.downloading.collectAsStateWithLifecycle()
+    val webAddress by viewModel.webAddress.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
-    var pendingDelete by remember { mutableStateOf<AreaWithStats?>(null) }
     val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     LaunchedEffect(message) { message?.let { snackbar.showSnackbar(it); viewModel.clearMessage() } }
+    // Hiding is one tap and easily undone, so it asks nothing first.
+    fun hideWithUndo(a: AreaWithStats) {
+        viewModel.hide(a.area.id)
+        scope.launch {
+            val r = snackbar.showSnackbar("${a.name} hidden on this phone", actionLabel = "Undo", duration = SnackbarDuration.Short)
+            if (r == SnackbarResult.ActionPerformed) viewModel.show(a.area.id)
+        }
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Areas") },
                 actions = {
-                    if (canDownload) {
-                        if (downloading) {
-                            CircularProgressIndicator(
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.padding(end = 16.dp).size(22.dp),
-                            )
-                        } else {
-                            TextButton(onClick = viewModel::downloadFromWeb) {
-                                Icon(Icons.Default.CloudDownload, contentDescription = null)
-                                Spacer(Modifier.width(6.dp))
-                                Text("Download from web")
-                            }
-                        }
+                    TextButton(onClick = viewModel::syncNow) {
+                        Icon(Icons.Default.Sync, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Sync")
                     }
                 },
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        if (areas.isEmpty()) {
+        if (areas.isEmpty() && hidden.isEmpty()) {
             Column(
                 Modifier.fillMaxSize().padding(padding).padding(32.dp),
                 verticalArrangement = Arrangement.Center,
@@ -198,27 +182,18 @@ fun AreasScreen(
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Spacer(Modifier.height(10.dp))
-                if (canDownload) {
-                    Text(
-                        "Download the ones drawn on the web, or frame one on the Map tab and tap \"Add area\".",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    )
-                    Spacer(Modifier.height(18.dp))
-                    Button(onClick = viewModel::downloadFromWeb, enabled = !downloading) {
-                        Icon(Icons.Default.CloudDownload, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(if (downloading) "Downloading…" else "Download areas from the web")
-                    }
-                } else {
-                    Text(
-                        "On the Map tab, frame a neighbourhood, city or metro and tap \"Add area\". " +
-                            "Nest neighbourhoods inside cities and cities inside a metro to see progress at every level.",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    )
+                Text(
+                    "Areas are drawn on the web" + (if (webAddress.isNotEmpty()) " at $webAddress" else "") +
+                        ", and arrive here, with their streets, at the next sync.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+                Spacer(Modifier.height(18.dp))
+                Button(onClick = viewModel::syncNow) {
+                    Icon(Icons.Default.Sync, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Sync now")
                 }
             }
             return@Scaffold
@@ -275,19 +250,14 @@ fun AreasScreen(
                                         onClick = { menu = false; MapFocus.request(a.bounds); onShowOnMap() },
                                     )
                                     DropdownMenuItem(
-                                        text = { Text("Edit outline") },
-                                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                                        onClick = { menu = false; MapFocus.requestRedraw(RedrawRequest(a.area.id, a.name, a.vertices)); onShowOnMap() },
-                                    )
-                                    DropdownMenuItem(
                                         text = { Text("Re-download streets") },
                                         leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
                                         onClick = { menu = false; viewModel.redownload(a.area.id) },
                                     )
                                     DropdownMenuItem(
-                                        text = { Text("Delete area") },
-                                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                                        onClick = { menu = false; pendingDelete = a },
+                                        text = { Text("Hide on this phone") },
+                                        leadingIcon = { Icon(Icons.Default.VisibilityOff, contentDescription = null) },
+                                        onClick = { menu = false; hideWithUndo(a) },
                                     )
                                 }
                             }
@@ -361,17 +331,43 @@ fun AreasScreen(
                     }
                 }
             }
+            if (hidden.isNotEmpty()) {
+                item {
+                    Text(
+                        "Hidden on this phone",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+                    )
+                    Text(
+                        "Off the map, the lists and guidance here. Still on the web; deleting an area is done there.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                }
+                items(hidden, key = { "hidden-" + it.id }) { h ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(h.name, style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                com.example.streetsweep.domain.AreaLevel.entries.getOrNull(h.level)?.label.orEmpty(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        TextButton(onClick = { viewModel.show(h.id) }) {
+                            Icon(Icons.Default.Visibility, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Show")
+                        }
+                    }
+                }
+            }
             item { Spacer(Modifier.height(24.dp)) }
         }
-    }
-
-    pendingDelete?.let { a ->
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("Delete ${a.name}?") },
-            text = { Text("Removes the area and its progress figure. Downloaded streets and your drives are kept; nested areas move up a level.") },
-            confirmButton = { TextButton(onClick = { viewModel.delete(a.area.id); pendingDelete = null }) { Text("Delete") } },
-            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Cancel") } },
-        )
     }
 }
