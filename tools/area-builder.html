@@ -2393,9 +2393,11 @@ window.StreetSweepBases = {
 
     var cells = cellCount(area.latlngs);
     var sqMiles = areaSquareMiles(area.latlngs);
-    if (isOrganizational(area)) cells = 0;   // nothing is downloaded for a state or country
     var cellWord = cells === 1 ? " map cell" : " map cells";
-    var note = cells > CELL_LIMIT
+    // Nothing is downloaded for a state or country, so its size is no limit.
+    var note = isOrganizational(area)
+      ? LEVELS[area.level] + " — groups the areas inside it; no streets are downloaded"
+      : cells > CELL_LIMIT
       ? "<span class='bad'>" + cells + cellWord + " — over the " + CELL_LIMIT + " the app allows. Split it up.</span>"
       : cells > 120
         ? "<span class='warn'>" + cells + cellWord + " — expect a long download.</span>"
@@ -4875,6 +4877,9 @@ window.StreetSweepBases = {
    * where someone asks for a whole country.
    */
   var MAX_BOUNDARY_CORNERS = 20000;
+  // A state or country only groups the areas inside it, and nothing is downloaded for it,
+  // so its outline needs to be recognisable on the map, not surveyed to the foot.
+  var ORG_BOUNDARY_CORNERS = 2000;
 
   var boundaryPreview = null;
   var boundaryFound = [];
@@ -4943,11 +4948,12 @@ window.StreetSweepBases = {
   }
 
   /** Thins only as much as it has to, so a small outline is left exactly as surveyed. */
-  function fitToCap(ring) {
-    if (ring.length <= MAX_BOUNDARY_CORNERS) return { ring: ring, tolerance: 0 };
+  function fitToCap(ring, cap) {
+    cap = cap || MAX_BOUNDARY_CORNERS;
+    if (ring.length <= cap) return { ring: ring, tolerance: 0 };
     var tolerance = 2;
     var out = ring;
-    for (var i = 0; i < 12 && out.length > MAX_BOUNDARY_CORNERS; i++) {
+    for (var i = 0; i < 16 && out.length > cap; i++) {
       out = thin(ring, tolerance);
       tolerance *= 2;
     }
@@ -4979,12 +4985,15 @@ window.StreetSweepBases = {
     rows.forEach(function (r) {
       var picked = largestRing(r.geojson);
       if (picked.ring.length < 3) return;   // a road or a point has no outline to take
-      var fitted = fitToCap(picked.ring);
+      var kind = r.addresstype || r.type || "place";
+      var org = isOrganizational({ level: levelFor(kind) });
+      var fitted = fitToCap(picked.ring, org ? ORG_BOUNDARY_CORNERS : MAX_BOUNDARY_CORNERS);
       var addr = r.address || {};
       boundaryFound.push({
         name: (r.name || r.display_name.split(",")[0]).trim(),
         full: r.display_name,
-        kind: r.addresstype || r.type || "place",
+        kind: kind,
+        org: org,
         city: addr.city || addr.town || addr.village || addr.county || null,
         ring: fitted.ring,
         original: picked.ring.length,
@@ -5003,14 +5012,15 @@ window.StreetSweepBases = {
     el("boundaryHint").textContent = "Pick one to see it on the map.";
 
     boundaryFound.forEach(function (b, index) {
-      var cells = cellCount(b.ring.map(function (p) { return { lat: p[0], lng: p[1] }; }));
+      var cells = b.org ? 0 : cellCount(b.ring.map(function (p) { return { lat: p[0], lng: p[1] }; }));
       var li = document.createElement("li");
       li.className = "area";
       li.innerHTML =
         '<div class="name">' + escapeHtml(b.name) + "</div>" +
         '<div class="meta">' + escapeHtml(b.kind) + " · " + b.ring.length + " corners · " +
-          cells + (cells === 1 ? " map cell" : " map cells") + "</div>" +
-        (cells > CELL_LIMIT
+          (b.org ? "groups the areas inside it; no streets are downloaded"
+                 : cells + (cells === 1 ? " map cell" : " map cells")) + "</div>" +
+        (!b.org && cells > CELL_LIMIT
           ? '<div class="meta bad">Over the ' + CELL_LIMIT + ' cells the phone will fetch. That limit is about ' +
             "OpenStreetMap's free Overpass service and the phone, not this server. Split it up.</div>"
           : "") +
