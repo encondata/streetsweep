@@ -77,6 +77,7 @@ import com.example.streetsweep.domain.Geo
 import com.example.streetsweep.domain.PointFilter
 import com.example.streetsweep.domain.TrackingMode
 import com.example.streetsweep.tracking.Permissions
+import com.example.streetsweep.tracking.TrackingService
 import com.example.streetsweep.tracking.TrackingStatus
 import com.example.streetsweep.ui.common.Format
 import kotlin.math.roundToInt
@@ -117,6 +118,9 @@ fun HomeScreen(
         hasLocation = Permissions.hasLocation(context)
         viewModel.refreshBluetoothTriggerState()
         viewModel.refreshPosition()
+        // Back in the car after a stop: if the drive's last fix is old, nudge the GPS
+        // rather than show where the car was parked.
+        TrackingService.refreshGps(context)
         onPauseOrDispose { }
     }
     val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -620,6 +624,13 @@ private fun StatusCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    status.gpsQuietSince?.takeIf { !status.isPaused }?.let {
+                        Text(
+                            "No GPS since ${Format.time(it)} · the map shows the last known position · retrying",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                     status.stopScheduledAt?.let {
                         Text(
                             "Car disconnected · stopping at ${Format.time(it)} unless it reconnects",

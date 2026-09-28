@@ -27,6 +27,12 @@ sealed interface TrackingStatus {
          * pausing is for nipping into a shop without turning one drive into two.
          */
         val pausedAt: Long? = null,
+        /**
+         * Set while no fix at all has reached the app for a while — indoors, or the
+         * location provider gone quiet — and cleared by the next one. The screens say so
+         * rather than showing the last position as if it were current.
+         */
+        val gpsQuietSince: Long? = null,
     ) : TrackingStatus {
         val isPaused: Boolean get() = pausedAt != null
     }

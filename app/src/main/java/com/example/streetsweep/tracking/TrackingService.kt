@@ -75,6 +75,7 @@ class TrackingService : LifecycleService() {
             ACTION_RESUME -> resume()
             ACTION_STOP -> lifecycleScope.launch { finishAndStop() }
             ACTION_TRIGGER_DISCONNECTED -> handleTriggerDisconnected()
+            ACTION_REFRESH_GPS -> refreshGps("asked to")
             else -> handleRestart()
         }
         return START_STICKY
@@ -109,6 +110,7 @@ class TrackingService : LifecycleService() {
             startLocationUpdates()
             startCarConnectionObserver()
             startIdleWatchdog()
+            startGpsWatchdog()
             updateNotification()
             Log.i(TAG, "Session ${s.id} started via $trigger")
         }
@@ -127,7 +129,9 @@ class TrackingService : LifecycleService() {
         stopLocationUpdates()
         stopIntervalWatcher()
         cancelPendingStop()
-        TrackingStateHolder.updateRecording { it.copy(pausedAt = System.currentTimeMillis(), stopScheduledAt = null) }
+        TrackingStateHolder.updateRecording {
+            it.copy(pausedAt = System.currentTimeMillis(), stopScheduledAt = null, gpsQuietSince = null)
+        }
         startPauseGuard()
         updateNotification()
         Log.i(TAG, "Session ${current.sessionId} paused")
@@ -203,6 +207,7 @@ class TrackingService : LifecycleService() {
             startLocationUpdates()
             startCarConnectionObserver()
             startIdleWatchdog()
+            startGpsWatchdog()
             updateNotification()
             Log.i(TAG, "Resumed session ${open.id} after restart")
         }
@@ -222,6 +227,8 @@ class TrackingService : LifecycleService() {
         cancelPendingStop()
         idleWatchdog?.cancel()
         idleWatchdog = null
+        gpsWatchdog?.cancel()
+        gpsWatchdog = null
         stopIntervalWatcher()
         stopLocationUpdates()
         stopCarConnectionObserver()
@@ -345,6 +352,11 @@ class TrackingService : LifecycleService() {
 
     private var intervalWatcher: Job? = null
     private var idleWatchdog: Job? = null
+    private var gpsWatchdog: Job? = null
+    /** When the provider last handed over any fix at all, good or bad; and when we last subscribed. */
+    private var lastFixDeliveredAt: Long = 0L
+    private var subscribedAt: Long = 0L
+    private var gpsAlertShown = false
     private var pauseGuard: Job? = null
     private var lastStoredAt: Long = 0L
     private var areaPromptShown = false
@@ -375,6 +387,70 @@ class TrackingService : LifecycleService() {
                     return@launch
                 }
             }
+        }
+    }
+
+    /**
+     * Notices when fixes stop arriving while a drive is running, and gets them going again.
+     *
+     * After a stop — parked, into a shop and back — the location provider could go quiet
+     * and stay quiet once the car moved off: the drive still said "recording" and the map
+     * sat where the car had been parked until the drive was stopped and started again,
+     * which is nothing more than a fresh subscription. This does that by itself, without
+     * splitting the drive: a fresh subscription and a request for a current fix, again
+     * every half minute while nothing comes, and one alert if it lasts two minutes.
+     */
+    private fun startGpsWatchdog() {
+        if (gpsWatchdog?.isActive == true) return
+        gpsWatchdog = lifecycleScope.launch {
+            while (true) {
+                delay(GPS_CHECK_MS)
+                val current = TrackingStateHolder.status.value as? TrackingStatus.Recording ?: continue
+                if (current.isPaused || locationCallback == null) continue
+                val interval = container.settings.current().gpsIntervalMs
+                val quietFor = System.currentTimeMillis() - maxOf(lastFixDeliveredAt, subscribedAt)
+                if (quietFor < maxOf(GPS_QUIET_MS, interval * 3)) continue
+                if (current.gpsQuietSince == null) {
+                    TrackingStateHolder.updateRecording {
+                        it.copy(gpsQuietSince = System.currentTimeMillis() - quietFor)
+                    }
+                    updateNotification()
+                }
+                refreshGps("no fix for ${quietFor / 1000}s")
+                val since = (TrackingStateHolder.status.value as? TrackingStatus.Recording)?.gpsQuietSince ?: continue
+                if (!gpsAlertShown && System.currentTimeMillis() - since >= GPS_ALERT_MS) {
+                    gpsAlertShown = true
+                    Notifications.showAlert(
+                        this@TrackingService,
+                        "Not getting your location",
+                        "The drive is still recording, but no GPS position has come in for " +
+                            "${(System.currentTimeMillis() - since) / 60_000} minutes. StreetSweep keeps " +
+                            "trying; opening the app gives it another push.",
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * A fresh subscription and a one-off request for the current position — what stopping
+     * and starting the drive used to be needed for. Also run when the app is opened and
+     * the last fix is old.
+     */
+    @SuppressLint("MissingPermission")
+    private fun refreshGps(why: String) {
+        val current = TrackingStateHolder.status.value as? TrackingStatus.Recording ?: return
+        if (current.isPaused || session == null) return
+        Log.w(TAG, "Refreshing GPS: $why")
+        lifecycleScope.launch {
+            stopLocationUpdates()
+            subscribeLocation(container.settings.current().gpsIntervalMs)
+            runCatching {
+                val token = com.google.android.gms.tasks.CancellationTokenSource()
+                container.fusedLocationClient
+                    .getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, token.token)
+                    .addOnSuccessListener { loc -> if (loc != null) lifecycleScope.launch { onLocation(loc) } }
+            }.onFailure { Log.w(TAG, "Could not ask for a current fix: ${it.message}") }
         }
     }
 
@@ -410,6 +486,7 @@ class TrackingService : LifecycleService() {
             }
         }
         locationCallback = callback
+        subscribedAt = System.currentTimeMillis()
         try {
             container.fusedLocationClient.requestLocationUpdates(request, callback, Looper.getMainLooper())
         } catch (e: SecurityException) {
@@ -436,6 +513,14 @@ class TrackingService : LifecycleService() {
         if (location.time < s.startedAt - STALE_FIX_TOLERANCE_MS) {
             Log.d(TAG, "Ignoring stale fix from ${s.startedAt - location.time} ms before session start")
             return
+        }
+        // Anything at all from the provider means it is working again.
+        lastFixDeliveredAt = System.currentTimeMillis()
+        (TrackingStateHolder.status.value as? TrackingStatus.Recording)?.gpsQuietSince?.let { since ->
+            Log.i(TAG, "GPS back after ${(lastFixDeliveredAt - since) / 1000}s without a fix")
+            gpsAlertShown = false
+            TrackingStateHolder.updateRecording { it.copy(gpsQuietSince = null) }
+            updateNotification()
         }
         val point = LatLngPoint(location.latitude, location.longitude)
         // Streets for a big area arrive as the car reaches them.
@@ -540,6 +625,7 @@ class TrackingService : LifecycleService() {
         const val ACTION_PAUSE = "com.example.streetsweep.action.PAUSE"
         const val ACTION_RESUME = "com.example.streetsweep.action.RESUME"
         const val ACTION_TRIGGER_DISCONNECTED = "com.example.streetsweep.action.TRIGGER_DISCONNECTED"
+        const val ACTION_REFRESH_GPS = "com.example.streetsweep.action.REFRESH_GPS"
         const val EXTRA_TRIGGER = "trigger"
 
         /** How long an automatic session keeps recording after its trigger disconnects. */
@@ -547,6 +633,12 @@ class TrackingService : LifecycleService() {
 
         /** Long enough for any errand; short of leaving a drive open overnight. */
         const val PAUSE_LIMIT_MS = 4 * 60 * 60 * 1000L
+
+        /** How often the GPS watchdog looks, and how long a silence it lets pass. */
+        const val GPS_CHECK_MS = 15_000L
+        const val GPS_QUIET_MS = 30_000L
+        /** A silence this long is worth telling someone about. */
+        const val GPS_ALERT_MS = 2 * 60_000L
 
         /** Match the newest points to roads every N stored points while driving. */
         const val SNAP_EVERY_POINTS = 20
@@ -585,6 +677,20 @@ class TrackingService : LifecycleService() {
                 context.startService(Intent(context, TrackingService::class.java).setAction(ACTION_STOP))
             }
         }
+
+        /** The app came to the front with an old fix: give the location provider a push. */
+        fun refreshGps(context: Context) {
+            val rec = TrackingStateHolder.status.value as? TrackingStatus.Recording ?: return
+            if (rec.isPaused) return
+            val last = rec.lastFixAt ?: rec.startedAt
+            if (System.currentTimeMillis() - last < STALE_FOR_REFRESH_MS) return
+            runCatching {
+                context.startService(Intent(context, TrackingService::class.java).setAction(ACTION_REFRESH_GPS))
+            }
+        }
+
+        /** Older than this when the app is opened, and the fix is refreshed. */
+        private const val STALE_FOR_REFRESH_MS = 20_000L
 
         fun notifyTriggerDisconnected(context: Context, trigger: TriggerSource) {
             if (!TrackingStateHolder.isRecording) return
