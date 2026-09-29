@@ -14,6 +14,9 @@ PKG=com.example.streetsweep
 
 echo "== is the app there, and where did it come from? =="
 adb -s "$D" shell dumpsys package $PKG | grep -E "versionName|installerPackageName|pkgFlags" | sed 's/^/  /'
+echo "  (installerPackageName=com.android.vending: listed by Android Auto as it is."
+echo "   Anything else, or null: only while Android Auto's Unknown sources is on, which its"
+echo "   updates turn off. ./tools/install-phone.sh reinstalls it the first way.)"
 
 echo
 echo "== does the phone answer Android Auto's own lookup with us? =="

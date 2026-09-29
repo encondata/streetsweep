@@ -622,9 +622,9 @@ private fun CarScreenHealth() {
     ListItem(
         leadingContent = {
             Icon(
-                if (h.looksRight) Icons.Default.CheckCircle else Icons.Default.ErrorOutline,
+                if (h.looksRight && h.trustedInstall) Icons.Default.CheckCircle else Icons.Default.ErrorOutline,
                 contentDescription = null,
-                tint = if (h.looksRight) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                tint = if (h.looksRight && h.trustedInstall) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
             )
         },
         headlineContent = { Text("Car screen") },
@@ -638,11 +638,16 @@ private fun CarScreenHealth() {
                         else -> append("StreetSweep's car screen is installed and switched on.")
                     }
                     h.androidAutoVersion?.let { append(" Android Auto $it.") }
-                    if (h.looksRight) {
+                    if (h.looksRight && h.trustedInstall) {
                         append(
-                            " If it is still missing from the car, Android Auto has stopped trusting it: " +
-                                "turn on Developer settings \u2192 Unknown sources, then reconnect. " +
-                                "The car's app list is only rebuilt when a car connects.",
+                            " Installed so Android Auto lists it without Unknown sources. If it is still " +
+                                "missing, reconnect the car: its app list is only rebuilt when a car connects.",
+                        )
+                    } else if (h.looksRight) {
+                        append(
+                            " Android Auto only lists it while its Developer settings \u2192 Unknown sources " +
+                                "is on, and Android Auto's own updates turn that off, so the car screen comes " +
+                                "and goes. Reinstall it from a computer with tools/install-phone.sh to stop that.",
                         )
                     }
                 },

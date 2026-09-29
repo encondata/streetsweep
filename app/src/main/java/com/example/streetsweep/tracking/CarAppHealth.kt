@@ -19,11 +19,20 @@ data class CarAppHealth(
     val serviceEnabled: Boolean,
     val androidAutoInstalled: Boolean,
     val androidAutoVersion: String?,
+    /**
+     * Whether the phone records the Play Store as having installed this app. Android Auto
+     * lists apps from the Play Store and nothing else unless its Developer settings →
+     * Unknown sources is on — and its own updates turn that off again, which is how the
+     * car screen worked straight after setting it up and then vanished. Installed with
+     * tools/install-phone.sh, it counts as from the Play Store and stays listed.
+     */
+    val trustedInstall: Boolean,
 ) {
     val looksRight: Boolean get() = serviceDeclared && serviceEnabled && androidAutoInstalled
 
     companion object {
         const val ANDROID_AUTO = "com.google.android.projection.gearhead"
+        const val PLAY_STORE = "com.android.vending"
 
         fun read(context: Context): CarAppHealth {
             val pm = context.packageManager
@@ -40,11 +49,19 @@ data class CarAppHealth(
                 else -> true
             }
             val auto = runCatching { pm.getPackageInfo(ANDROID_AUTO, 0) }.getOrNull()
+            val installer = runCatching {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                    pm.getInstallSourceInfo(context.packageName).installingPackageName
+                } else {
+                    @Suppress("DEPRECATION") pm.getInstallerPackageName(context.packageName)
+                }
+            }.getOrNull()
             return CarAppHealth(
                 serviceDeclared = services.isNotEmpty(),
                 serviceEnabled = enabled,
                 androidAutoInstalled = auto != null,
                 androidAutoVersion = auto?.versionName,
+                trustedInstall = installer == PLAY_STORE,
             )
         }
 
