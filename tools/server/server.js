@@ -41,6 +41,28 @@ const ASSETS = new Set(
     ? fs.readdirSync(PUBLIC).filter((f) => f !== "index.html" && ASSET_TYPES[path.extname(f)])
     : []
 );
+// The v2 web app (tools/web, built into public/v2): every file it ships, found once at
+// start-up, so a request can only ever be answered with one of them. Its own pages are
+// routes inside the app, so any other /v2 path gets its index.html.
+const V2_DIR = path.join(PUBLIC, "v2");
+const V2_TYPES = {
+  ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png",
+  ".webp": "image/webp", ".jpg": "image/jpeg", ".ico": "image/x-icon",
+  ".woff2": "font/woff2", ".json": "application/json", ".webmanifest": "application/manifest+json",
+};
+const V2_FILES = new Map();
+(function walk(dir) {
+  if (!fs.existsSync(dir)) return;
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) walk(full);
+    else if (V2_TYPES[path.extname(e.name)]) {
+      V2_FILES.set("/v2/" + path.relative(V2_DIR, full).split(path.sep).join("/"), full);
+    }
+  }
+})(V2_DIR);
+
 // Smallest first; the phone's AreaLevel enum is this same ladder in this same order.
 const LEVEL_ORDER = ["NEIGHBORHOOD", "CITY", "COUNTY", "METRO", "REGION", "STATE", "COUNTRY"];
 const LEVELS = new Set(LEVEL_ORDER);
@@ -443,6 +465,7 @@ async function createArea(area) {
 }
 
 async function updateArea(id, area) {
+  const { rows: was } = await pool.query("SELECT name FROM areas WHERE id=$1", [id]);
   const { rows } = await pool.query(
     `UPDATE areas SET name=$1, level=$2, parent_name=$3, city=$4, notes=$5, color=$6,
                       polygon=$7, min_lat=$8, min_lng=$9, max_lat=$10, max_lng=$11,
@@ -453,6 +476,16 @@ async function updateArea(id, area) {
      area.alsoIn || [], JSON.stringify(area.morePieces || [])],
   );
   if (rows.length) progress.touched(pool, id);
+  // Areas name their parents, so a rename has to follow them all: here, once, rather
+  // than in every page that might rename one.
+  const oldName = was[0] && was[0].name;
+  if (rows.length && oldName && oldName !== area.name) {
+    await pool.query("UPDATE areas SET parent_name=$2 WHERE lower(parent_name)=lower($1)", [oldName, area.name]);
+    await pool.query(
+      `UPDATE areas SET also_in = array(
+         SELECT CASE WHEN lower(n) = lower($1) THEN $2 ELSE n END FROM unnest(also_in) AS n)
+       WHERE EXISTS (SELECT 1 FROM unnest(also_in) AS n WHERE lower(n) = lower($1))`, [oldName, area.name]);
+  }
   return rows.length ? rowToArea(rows[0]) : null;
 }
 
@@ -1115,6 +1148,30 @@ async function handle(req, res) {
     }
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
     return res.end(fs.readFileSync(LOGIN_PAGE));
+  }
+
+  if (route === "/v2" || route.startsWith("/v2/")) {
+    const file = V2_FILES.get(route);
+    if (file) {
+      // Built files carry a hash in their name, so they can be kept; the page itself not.
+      const hashed = /\/assets\//.test(route);
+      res.writeHead(200, {
+        "Content-Type": V2_TYPES[path.extname(file)],
+        "Cache-Control": hashed ? "public, max-age=31536000, immutable" : "no-store",
+      });
+      return res.end(fs.readFileSync(file));
+    }
+    if (path.extname(route) && route !== "/v2/") {
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      return res.end("Not found");
+    }
+    const index = V2_FILES.get("/v2/index.html");
+    if (!index) {
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      return res.end("The new web app is not built into this server yet.");
+    }
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    return res.end(fs.readFileSync(index));
   }
 
   if (route === "/" || route === "/index.html") {
@@ -2082,11 +2139,19 @@ async function handle(req, res) {
       const wayIds = got.lines.map((l) => l.id);
       const marked = await completions.markedAmong(pool, wayIds);
       const excluded = await completions.excludedAmong(pool, wayIds);
+      // ?status=1: each street's length, distance driven and status, as the server counts
+      // them (done / partial / none / marked / excluded). Parallel to lines.
+      const status = url.searchParams.get("status") === "1"
+        ? await progress.streetStatus(pool, got.lines, marked, excluded) : null;
       return sendJson(res, 200, {
         streets: got.lines.length, lines: got.lines.map((l) => l.shape),
         // Parallel to lines, so the page can say which street was clicked and match
         // driven segments to it.
         ids: got.lines.map((l) => l.id), names: got.lines.map((l) => l.name),
+        ...(status ? {
+          lengths: status.map((s) => s.length), driven: status.map((s) => s.driven),
+          status: status.map((s) => s.status),
+        } : {}),
         completed: marked, excluded,
         fetchedAt: got.fetchedAt, cached: got.cached, stale: Boolean(got.stale), cells: got.cells,
       });

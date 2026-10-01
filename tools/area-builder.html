@@ -1906,6 +1906,15 @@
   });
 
   window.StreetSweepViews = { show: show, current: function () { return current; } };
+
+  // /#drives and the like open that screen: how the new site sends you to one it has not
+  // rebuilt yet. Once everything has loaded, so the screen's own loaders are there.
+  window.addEventListener("load", function () {
+    var name = (location.hash || "").slice(1);
+    if (!name) return;
+    var b = document.querySelector('.railbtn[data-view="' + name.replace(/[^a-z]/g, "") + '"]');
+    if (b) b.click();
+  });
 })();
 
 // ---- base maps ---------------------------------------------------------------

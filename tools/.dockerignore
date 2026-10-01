@@ -1,0 +1,6 @@
+# The v2 web app is built inside the image from its sources; local installs and builds
+# (and macOS's iCloud copy of them) stay out of the build context.
+web/node_modules
+web/node_modules.nosync
+web/dist
+**/.DS_Store

@@ -1,3 +1,12 @@
+# The v2 web app (web/): built here from its sources, so a server install needs nothing
+# more than this repository. Only the built files go on to the server image.
+FROM node:22-bookworm-slim AS web
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY web/ ./
+RUN npm run build
+
 # Debian rather than Alpine for osmium-tool, which reads OpenStreetMap map files for the
 # monthly street import (streets-import.js); Alpine does not package it.
 FROM node:22-bookworm-slim
@@ -13,6 +22,7 @@ COPY server/*.js ./
 COPY public/ ./public/
 COPY area-builder.html ./public/index.html
 COPY login.html ./public/login.html
+COPY --from=web /web/dist ./public/v2/
 
 ENV PORT=80
 EXPOSE 80

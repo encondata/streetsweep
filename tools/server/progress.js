@@ -523,4 +523,40 @@ async function storeReplaced(pool) {
   return catchUp(pool);
 }
 
-module.exports = { ensureSchema, forArea, changed, cellRefreshed, storeReplaced, catchUp, touched, coveredLength };
+/**
+ * Each street's own figures, the way the area's are counted: its length, how much of it
+ * has been driven by anyone, and what that makes it. For colouring a map of the area from
+ * the record rather than working it out again in the browser.
+ */
+async function streetStatus(pool, lines, marked, excluded) {
+  const ids = lines.map((l) => l.id);
+  const shapes = new Map(), summed = new Map();
+  if (ids.length) {
+    const { rows } = await pool.query(
+      "SELECT way_id, length_m, shape FROM driven_edges WHERE way_id = ANY($1::bigint[])", [ids]);
+    for (const e of rows) {
+      const id = Number(e.way_id);
+      if (!shapes.has(id)) shapes.set(id, []);
+      shapes.get(id).push(e.shape);
+      summed.set(id, (summed.get(id) || 0) + Number(e.length_m));
+    }
+  }
+  const isMarked = new Set(marked.map((m) => m.wayId));
+  const isExcluded = new Set(excluded.map((x) => x.wayId));
+  return lines.map((l) => {
+    const length = lineLength(l.shape);
+    const s = shapes.get(l.id);
+    const driven = s ? Math.min(coveredLength(l.shape, s), summed.get(l.id) || 0, length) : 0;
+    const f = length > 0 ? driven / length : 0;
+    const status = isExcluded.has(l.id) ? "excluded"
+      : isMarked.has(l.id) ? "marked"
+      : f >= DONE_FRACTION ? "done"
+      : f > PARTIAL_FRACTION ? "partial"
+      : "none";
+    return { length: Math.round(length * 10) / 10, driven: Math.round(driven * 10) / 10, status };
+  });
+}
+
+module.exports = {
+  ensureSchema, forArea, changed, cellRefreshed, storeReplaced, catchUp, touched, coveredLength, streetStatus,
+};

@@ -1,0 +1,193 @@
+/*
+ * StreetSweep v2 design tokens. The brand is v1's: the navy of the logo's pin, the green
+ * of streets already driven, the grey of the ones still waiting. Light by default; dark
+ * follows the system unless chosen (data-theme on <html>).
+ */
+:root {
+  color-scheme: light;
+  --navy-950: #02142a;
+  --navy-900: #0a1f35;
+  --navy-800: #10314f;
+  --green-700: #14701f;
+  --green-600: #1e8a28;
+  --green-500: #299530;
+  --green-400: #45bd23;
+
+  --ground: #eef2f6;
+  --surface: #ffffff;
+  --surface-2: #f5f8fa;
+  --surface-3: #eaf0f5;
+  --ink: #0d1b28;
+  --ink-2: #3c4c5a;
+  --ink-soft: #64748b;
+  --line: #e1e7ee;
+  --line-strong: #c9d4df;
+  --accent: var(--green-600);
+  --accent-ink: #ffffff;
+  --accent-soft: #e5f6e4;
+  --accent-ring: rgba(30, 138, 40, 0.28);
+  --amber: #b26e00;
+  --amber-soft: #fff3db;
+  --danger: #b3261e;
+  --danger-soft: #fdecea;
+  --info: #1b5fa8;
+
+  /* Street status, the same everywhere: map, legend, lists. */
+  --st-done: #1e8a28;
+  --st-partial: #e09a14;
+  --st-none: #8a96a3;
+  --st-marked: #0e7c86;
+  --st-excluded: #b3261e;
+
+  --shadow-1: 0 1px 2px rgba(13, 27, 40, 0.06), 0 1px 6px rgba(13, 27, 40, 0.05);
+  --shadow-2: 0 6px 24px rgba(13, 27, 40, 0.14);
+  --r-sm: 6px;
+  --r: 10px;
+  --r-lg: 14px;
+  --ui: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --rail: 64px;
+  --panel: 380px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #06111c;
+    --surface: #0d1c2b;
+    --surface-2: #122436;
+    --surface-3: #183049;
+    --ink: #e6edf4;
+    --ink-2: #c3cfdb;
+    --ink-soft: #8ea1b3;
+    --line: #1c3146;
+    --line-strong: #2a425b;
+    --accent: #5ed45f;
+    --accent-ink: #04250a;
+    --accent-soft: #123420;
+    --accent-ring: rgba(94, 212, 95, 0.3);
+    --amber: #f0b453;
+    --amber-soft: #3a2a0c;
+    --danger: #ef8076;
+    --danger-soft: #3b1714;
+    --info: #7fb3ec;
+    --st-done: #4fd25a;
+    --st-partial: #f2b33d;
+    --st-none: #6d7e8f;
+    --st-marked: #3cc6d0;
+    --st-excluded: #ef6f63;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45), 0 1px 6px rgba(0, 0, 0, 0.3);
+    --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.55);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #06111c;
+  --surface: #0d1c2b;
+  --surface-2: #122436;
+  --surface-3: #183049;
+  --ink: #e6edf4;
+  --ink-2: #c3cfdb;
+  --ink-soft: #8ea1b3;
+  --line: #1c3146;
+  --line-strong: #2a425b;
+  --accent: #5ed45f;
+  --accent-ink: #04250a;
+  --accent-soft: #123420;
+  --accent-ring: rgba(94, 212, 95, 0.3);
+  --amber: #f0b453;
+  --amber-soft: #3a2a0c;
+  --danger: #ef8076;
+  --danger-soft: #3b1714;
+  --info: #7fb3ec;
+  --st-done: #4fd25a;
+  --st-partial: #f2b33d;
+  --st-none: #6d7e8f;
+  --st-marked: #3cc6d0;
+  --st-excluded: #ef6f63;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45), 0 1px 6px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.55);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font: 14px/1.45 var(--ui);
+  -webkit-font-smoothing: antialiased;
+}
+#app { height: 100%; }
+
+h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+h1 { font-size: 22px; }
+h2 { font-size: 17px; }
+h3 { font-size: 14px; }
+p { margin: 0; }
+a { color: var(--accent); }
+
+.muted { color: var(--ink-soft); }
+.mono { font-family: var(--mono); }
+.num { font-variant-numeric: tabular-nums; }
+.eyebrow {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+/* ---- controls ---- */
+button, .btn {
+  font: inherit; font-weight: 550; font-size: 13px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 34px; padding: 0 12px; border-radius: var(--r-sm);
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink);
+  cursor: pointer; text-decoration: none; white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+button:hover, .btn:hover { background: var(--surface-2); }
+button:focus-visible, .btn:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: none; box-shadow: 0 0 0 3px var(--accent-ring); border-color: var(--accent);
+}
+button:disabled { opacity: 0.5; cursor: default; }
+button.primary, .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+button.primary:hover { filter: brightness(1.05); }
+button.ghost { background: transparent; border-color: transparent; }
+button.ghost:hover { background: var(--surface-2); }
+button.danger { color: var(--danger); }
+button.danger.solid { background: var(--danger); border-color: var(--danger); color: #fff; }
+button.sm { min-height: 28px; padding: 0 9px; font-size: 12px; }
+button.icon { width: 34px; padding: 0; }
+button.icon.sm { width: 28px; }
+
+input[type="text"], input[type="search"], input[type="email"], input[type="password"], select, textarea {
+  font: inherit; color: var(--ink); width: 100%;
+  background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  padding: 7px 10px; min-height: 34px;
+}
+textarea { resize: vertical; min-height: 64px; }
+label.field { display: grid; gap: 5px; }
+label.field > span { font-size: 12px; font-weight: 600; color: var(--ink-2); }
+
+.card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.chip {
+  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px;
+  border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface);
+  font-size: 12px; font-weight: 550; color: var(--ink-2); cursor: pointer;
+}
+.chip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--surface); }
+
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+
+.bar { height: 6px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--st-done); border-radius: inherit; }
+
+.scroll { overflow-y: auto; overscroll-behavior: contain; }
+
+/* MapLibre controls in the theme. */
+.maplibregl-ctrl-group { background: var(--surface) !important; border: 1px solid var(--line) !important; box-shadow: var(--shadow-1) !important; }
+.maplibregl-ctrl-group button { border-radius: 0; min-height: 0; }
+.maplibregl-ctrl-group button + button { border-top: 1px solid var(--line) !important; }
+.maplibregl-ctrl-attrib { font-size: 10px; }

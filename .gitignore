@@ -28,3 +28,8 @@ tools/caddy-config/
 
 # Server data (DATA_DIR default): database, photos, tile cache, map file, Valhalla.
 /data/
+
+# v2 web app: dependencies (kept out of iCloud as .nosync) and build output
+tools/web/node_modules
+tools/web/node_modules.nosync
+tools/web/dist
