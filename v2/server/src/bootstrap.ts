@@ -20,7 +20,7 @@ export async function ensureSiteAdmin(log: (m: string) => void) {
   }
   const given = config.adminPassword;
   const password = given && given.length >= MIN_PASSWORD ? given : randomPassword();
-  await tx((db) => createUser(db, { email: config.adminEmail, displayName: "Admin", password, siteAdmin: true }));
+  await tx((db) => createUser(db, { email: config.adminEmail, displayName: "Admin", password, siteAdmin: true, verified: true }));
   log(given === password
     ? `Created site admin ${config.adminEmail} with ADMIN_PASSWORD.`
     : `Created site admin ${config.adminEmail}. Password (shown once): ${password}`);

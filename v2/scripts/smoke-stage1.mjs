@@ -1,13 +1,13 @@
 // Stage 1 API smoke test: accounts, teams, join requests, roles, drive types, site admin.
 // Runs inside the api container (see scripts/smoke.sh), with fresh addresses each time.
 import { execFileSync } from "node:child_process";
-import { PW, check, client, expect, finish, run } from "./smoke-lib.mjs";
+import { PW, check, client, expect, finish, latestCode, mailCount, run, signUp, sql } from "./smoke-lib.mjs";
 
 const alice = client("alice"), bob = client("bob"), carol = client("carol"), anon = client("anon");
 
 console.log("accounts");
 for (const c of [alice, bob, carol]) {
-  const me = await expect(`sign up ${c.name}`, c.call("POST", "/api/auth/signup", { email: c.email, displayName: c.name[0].toUpperCase() + c.name.slice(1), password: PW }), 201);
+  const me = await signUp(c);
   check(`${c.name} has a personal team`, me.teams?.length === 1 && me.teams[0].kind === "personal" && me.teams[0].role === "owner");
 }
 await expect("duplicate email", anon.call("POST", "/api/auth/signup", { email: alice.email.toUpperCase(), displayName: "X", password: PW }), 409);
@@ -118,5 +118,70 @@ console.log("deleting a team");
 await expect("owner bob deletes Acme", bob.call("DELETE", `/api/teams/${acme.id}`), 200);
 const aliceMe = await expect("alice /me", alice.call("GET", "/api/me"), 200);
 check("Acme gone from alice's teams", !aliceMe.teams.some((t) => t.id === acme.id));
+
+console.log("email confirmation");
+const dave = client("dave");
+let t0 = Date.now() - 1000;
+await expect("dave signs up", dave.call("POST", "/api/auth/signup", { email: dave.email, displayName: "Dave", password: PW }), 202);
+await expect("no session before confirming", dave.call("GET", "/api/me"), 401);
+let mail = await latestCode(dave.email, { after: t0 });
+check("confirmation email with a 6-digit code", !!mail && /confirmation code/.test(mail.subject));
+let r = await dave.call("POST", "/api/auth/login", { email: dave.email, password: PW });
+check("unconfirmed sign-in refused with code 'unverified'", r.status === 403 && r.data.code === "unverified", r);
+r = await dave.call("POST", "/api/auth/device", { email: dave.email, password: PW, deviceName: "Phone" });
+check("unconfirmed phone sign-in refused too", r.status === 403 && r.data.code === "unverified", r);
+const wrong = mail.code === "000000" ? "111111" : "000000";
+r = await dave.call("POST", "/api/auth/verify", { email: dave.email, code: wrong });
+check("wrong code → 400, counts down", r.status === 400 && /4 tries left/.test(r.data.error), r);
+r = await dave.call("POST", "/api/auth/resend", { email: dave.email });
+check("resend inside a minute → 429", r.status === 429 && r.data.code === "too_soon", r);
+await expect("signing up again inside a minute", dave.call("POST", "/api/auth/signup", { email: dave.email, displayName: "Dave", password: PW }), 429);
+await sql(`UPDATE email_codes SET expires_at = now() - interval '1 second'
+            WHERE user_id = (SELECT id FROM users WHERE email = $1)`, [dave.email]);
+r = await dave.call("POST", "/api/auth/verify", { email: dave.email, code: mail.code });
+check("right code after 15 minutes → expired", r.status === 400 && r.data.code === "expired", r);
+await sql(`UPDATE email_codes SET created_at = created_at - interval '2 minutes'
+            WHERE user_id = (SELECT id FROM users WHERE email = $1)`, [dave.email]);
+t0 = Date.now() - 1000;
+await expect("send a new code", dave.call("POST", "/api/auth/resend", { email: dave.email }), 200);
+const fresh = await latestCode(dave.email, { after: t0 });
+check("a new code arrived", !!fresh && fresh.id !== mail.id);
+const confirmed = await expect("confirm with the new code", dave.call("POST", "/api/auth/verify", { email: dave.email, code: fresh.code }), 200);
+check("confirmed: personal team made", confirmed.teams.length === 1 && confirmed.teams[0].kind === "personal");
+await expect("code can't be used twice", dave.call("POST", "/api/auth/verify", { email: dave.email, code: fresh.code }), 409);
+await expect("already confirmed email can't sign up", anon.call("POST", "/api/auth/signup", { email: dave.email, displayName: "X", password: PW }), 409);
+
+console.log("re-signing up an unconfirmed address");
+const erin = client("erin");
+await expect("erin starts signing up", erin.call("POST", "/api/auth/signup", { email: erin.email, displayName: "Wrong Name", password: PW }), 202);
+await sql(`UPDATE email_codes SET created_at = created_at - interval '2 minutes'
+            WHERE user_id = (SELECT id FROM users WHERE email = $1)`, [erin.email]);
+const me2 = await signUp(erin, "Erin Right");
+check("second sign-up replaced the name", me2.user.display_name === "Erin Right");
+
+console.log("password reset by code");
+const before = await mailCount(`ghost-${run}@test.local`);
+await expect("unknown address gets the same answer", anon.call("POST", "/api/auth/forgot", { email: `ghost-${run}@test.local` }), 200);
+check("…and no email", (await mailCount(`ghost-${run}@test.local`)) === before);
+t0 = Date.now() - 1000;
+await expect("dave forgot his password", anon.call("POST", "/api/auth/forgot", { email: dave.email }), 200);
+mail = await latestCode(dave.email, { after: t0 });
+check("reset code emailed", !!mail && /password reset code/.test(mail.subject));
+for (let i = 0; i < 5; i++) await anon.call("POST", "/api/auth/reset", { email: dave.email, code: mail.code === "000000" ? "111111" : "000000", password: "new password 1" });
+r = await anon.call("POST", "/api/auth/reset", { email: dave.email, code: mail.code, password: "new password 1" });
+check("after 5 wrong tries the code is locked", r.status === 400 && r.data.code === "locked", r);
+await sql(`UPDATE email_codes SET created_at = created_at - interval '2 minutes'
+            WHERE user_id = (SELECT id FROM users WHERE email = $1)`, [dave.email]);
+t0 = Date.now() - 1000;
+await expect("ask again", anon.call("POST", "/api/auth/forgot", { email: dave.email }), 200);
+mail = await latestCode(dave.email, { after: t0 });
+await expect("too-short new password", anon.call("POST", "/api/auth/reset", { email: dave.email, code: mail.code, password: "short" }), 400);
+const phone = client("davephone");
+await expect("reset with the code", phone.call("POST", "/api/auth/reset", { email: dave.email, code: mail.code, password: "new password 1" }), 200);
+await expect("reset signed the resetting browser in", phone.call("GET", "/api/me"), 200);
+await expect("dave's old session ended", dave.call("GET", "/api/me"), 401);
+await expect("old password no longer works", dave.call("POST", "/api/auth/login", { email: dave.email, password: PW }), 401);
+await expect("new password works", dave.call("POST", "/api/auth/login", { email: dave.email, password: "new password 1" }), 200);
+await sql(`UPDATE email_codes SET expires_at = now() - interval '1 second' WHERE user_id = (SELECT id FROM users WHERE email = $1)`, [dave.email]);
 
 await finish([[`DELETE FROM drive_types WHERE key = $1`, [`t${run}`.slice(0, 30)]]]);

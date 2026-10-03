@@ -40,6 +40,14 @@ services:
       PORT: "80"
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # Outgoing mail (sign-up codes, password resets). Defaults to the Mailpit below;
+      # for real mail set SMTP_HOST/PORT/SECURE/USER/PASS and MAIL_FROM in .env.
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      MAIL_FROM: ${MAIL_FROM:-StreetSweep <no-reply@streetsweep.local>}
     volumes:
       - ${DATA_DIR:-${HOME}/streetsweep-v2-data}/files:/data
     ports:
@@ -47,11 +55,24 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 6
+    restart: unless-stopped
+
+  # Development mail catcher: every email the app sends lands here instead of a real
+  # inbox. Read them at http://localhost:8025 (MAILPIT_UI_PORT). Nothing is relayed out.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: streetsweep2-mailpit
+    ports:
+      - "${BIND_ADDRESS:-0.0.0.0}:${MAILPIT_UI_PORT:-8025}:8025"
+    environment:
+      MP_MAX_MESSAGES: 2000
     restart: unless-stopped
 
   worker:

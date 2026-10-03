@@ -10,7 +10,9 @@ import {
   requireUser, startSession, tooManyFailures, verifyPassword,
 } from "../auth.js";
 import { audit } from "../audit.js";
-import { createUser } from "../users.js";
+import { confirmUser, createUser } from "../users.js";
+import { CODE_MINUTES, issueCode, sendOrForget, useCode } from "../codes.js";
+import { codeEmail, sendMail } from "../mail.js";
 import { HttpError, badRequest, conflict, notFound } from "../http.js";
 
 const email = { type: "string", format: "email", maxLength: 254 } as const;
@@ -49,13 +51,141 @@ export default async function accountRoutes(app: FastifyInstance) {
     { schema: { body: { type: "object", required: ["email", "displayName", "password"], additionalProperties: false,
         properties: { email, displayName, password, remember: { type: "boolean" } } } } },
     async (req, reply) => {
-      const { email: addr, displayName: name, password: pw, remember = true } = req.body;
+      const { email: addrIn, displayName: nameIn, password: pw } = req.body;
+      const addr = addrIn.trim();
+      const name = nameIn.trim();
       if (pw.length < MIN_PASSWORD) throw badRequest(`Use at least ${MIN_PASSWORD} characters for the password.`);
-      const exists = await query(`SELECT 1 FROM users WHERE email = $1`, [addr.trim()]);
-      if (exists.rows.length) throw conflict("There's already an account for that email. Sign in instead.");
-      const userId = await tx((db) => createUser(db, { email: addr.trim(), displayName: name.trim(), password: pw }));
-      await startSession(req, reply, userId, remember);
-      return reply.code(201).send(await meSummary(userId));
+      // Nothing is usable until the emailed code comes back. An address that was never
+      // confirmed can be signed up again (new name, password and code), so nobody can
+      // squat on someone else's email by starting a sign-up with it.
+      const { userId, code } = await tx(async (db) => {
+        const { rows } = await db.query<{ id: string; verified: boolean }>(
+          `SELECT id, email_verified_at IS NOT NULL AS verified FROM users WHERE email = $1 FOR UPDATE`, [addr],
+        );
+        let id = rows[0]?.id;
+        if (rows[0]?.verified) throw conflict("There's already an account for that email. Sign in instead.");
+        if (id) {
+          await db.query(`UPDATE users SET display_name = $2, password_hash = $3, updated_at = now() WHERE id = $1`,
+            [id, name, await hashPassword(pw)]);
+        } else {
+          id = await createUser(db, { email: addr, displayName: name, password: pw, verified: false });
+        }
+        return { userId: id, code: await issueCode(db, id, "verify") };
+      });
+      await sendOrForget(userId, "verify", () => sendVerifyCode(addr, name, code));
+      return reply.code(202).send({ pending: true, email: addr, expires_in: CODE_MINUTES * 60 });
+    },
+  );
+
+  async function sendVerifyCode(to: string, name: string, code: string) {
+    const m = codeEmail({ name, code,
+      lead: "Here's the code to confirm your email and finish setting up your StreetSweep account:",
+      after: "Enter it on the StreetSweep page where you signed up." });
+    await sendMail(to, `${code} is your StreetSweep confirmation code`, m.text, m.html);
+  }
+
+  // Confirm a new account with its emailed code; signs you in.
+  app.post<{ Body: { email: string; code: string; remember?: boolean } }>(
+    "/api/auth/verify",
+    { schema: { body: { type: "object", required: ["email", "code"], properties: {
+        email: { type: "string", maxLength: 254 }, code: { type: "string", maxLength: 20 }, remember: { type: "boolean" } } } } },
+    async (req, reply) => {
+      if (tooManyFailures(`ip:${req.ip}`)) throw new HttpError(429, "Too many tries. Wait fifteen minutes and try again.");
+      const out = await tx(async (db) => {
+        const { rows } = await db.query<{ id: string; verified: boolean }>(
+          `SELECT id, email_verified_at IS NOT NULL AS verified FROM users WHERE email = $1 AND disabled_at IS NULL`,
+          [req.body.email.trim()],
+        );
+        if (!rows[0]) throw new HttpError(400, "That code has expired. Send yourself a new one.", "expired");
+        if (rows[0].verified) throw new HttpError(409, "That email is already confirmed. Sign in instead.", "verified");
+        const check = await useCode(db, rows[0].id, "verify", req.body.code);
+        if (!check.ok) return check; // commit the counted guess, then refuse
+        await confirmUser(db, rows[0].id);
+        return { ok: true as const, userId: rows[0].id };
+      });
+      if (!out.ok) {
+        noteFailure(`ip:${req.ip}`);
+        throw out.error;
+      }
+      const userId = out.userId;
+      await startSession(req, reply, userId, req.body.remember ?? true);
+      return meSummary(userId);
+    },
+  );
+
+  // Send another confirmation code. Answers the same whether or not the address has
+  // an account waiting, so it can't be used to find out who's signed up.
+  app.post<{ Body: { email: string } }>(
+    "/api/auth/resend",
+    { schema: { body: { type: "object", required: ["email"], properties: { email: { type: "string", maxLength: 254 } } } } },
+    async (req) => {
+      const { rows } = await query<{ id: string; display_name: string; email: string }>(
+        `SELECT id, display_name, email FROM users WHERE email = $1 AND email_verified_at IS NULL AND disabled_at IS NULL`,
+        [req.body.email.trim()],
+      );
+      const u = rows[0];
+      if (u) {
+        const code = await issueCode(pool, u.id, "verify");
+        await sendOrForget(u.id, "verify", () => sendVerifyCode(u.email, u.display_name, code));
+      }
+      return { ok: true, expires_in: CODE_MINUTES * 60 };
+    },
+  );
+
+  // Forgotten password, step 1: email a one-time code. Same answer for unknown
+  // addresses; throttling still applies to real ones.
+  app.post<{ Body: { email: string } }>(
+    "/api/auth/forgot",
+    { schema: { body: { type: "object", required: ["email"], properties: { email: { type: "string", maxLength: 254 } } } } },
+    async (req) => {
+      const { rows } = await query<{ id: string; display_name: string; email: string }>(
+        `SELECT id, display_name, email FROM users WHERE email = $1 AND disabled_at IS NULL`, [req.body.email.trim()],
+      );
+      const u = rows[0];
+      if (u) {
+        const code = await issueCode(pool, u.id, "reset");
+        const m = codeEmail({ name: u.display_name, code,
+          lead: "Someone (hopefully you) asked to reset your StreetSweep password. Here's your one-time code:",
+          after: "Enter it on the StreetSweep sign-in page along with your new password." });
+        await sendOrForget(u.id, "reset", () => sendMail(u.email, `${code} is your StreetSweep password reset code`, m.text, m.html));
+        await audit(pool, { userId: u.id, action: "user.reset_requested", entity: "user", entityId: u.id });
+      }
+      return { ok: true, expires_in: CODE_MINUTES * 60 };
+    },
+  );
+
+  // Forgotten password, step 2: code + new password. Signs you in and ends every other
+  // browser session. (It also proves the address, so an unconfirmed account is confirmed.)
+  app.post<{ Body: { email: string; code: string; password: string; remember?: boolean } }>(
+    "/api/auth/reset",
+    { schema: { body: { type: "object", required: ["email", "code", "password"], properties: {
+        email: { type: "string", maxLength: 254 }, code: { type: "string", maxLength: 20 }, password,
+        remember: { type: "boolean" } } } } },
+    async (req, reply) => {
+      if (req.body.password.length < MIN_PASSWORD) throw badRequest(`Use at least ${MIN_PASSWORD} characters for the password.`);
+      if (tooManyFailures(`ip:${req.ip}`)) throw new HttpError(429, "Too many tries. Wait fifteen minutes and try again.");
+      const out = await tx(async (db) => {
+        const { rows } = await db.query<{ id: string }>(
+          `SELECT id FROM users WHERE email = $1 AND disabled_at IS NULL`, [req.body.email.trim()],
+        );
+        if (!rows[0]) throw new HttpError(400, "That code has expired. Send yourself a new one.", "expired");
+        const check = await useCode(db, rows[0].id, "reset", req.body.code);
+        if (!check.ok) return check; // commit the counted guess, then refuse
+        await db.query(`UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1`,
+          [rows[0].id, await hashPassword(req.body.password)]);
+        await db.query(`DELETE FROM sessions WHERE user_id = $1`, [rows[0].id]);
+        await confirmUser(db, rows[0].id);
+        await audit(db, { userId: rows[0].id, action: "user.password_reset_by_code", entity: "user", entityId: rows[0].id });
+        return { ok: true as const, userId: rows[0].id };
+      });
+      if (!out.ok) {
+        noteFailure(`ip:${req.ip}`);
+        throw out.error;
+      }
+      const userId = out.userId;
+      clearFailures(`email:${req.body.email.trim().toLowerCase()}`);
+      await startSession(req, reply, userId, req.body.remember ?? true);
+      return meSummary(userId);
     },
   );
 
@@ -64,8 +194,8 @@ export default async function accountRoutes(app: FastifyInstance) {
     const addr = emailIn.trim().toLowerCase();
     const keys = [`ip:${ip}`, `email:${addr}`];
     if (tooManyFailures(...keys)) throw new HttpError(429, "Too many tries. Wait fifteen minutes and try again.");
-    const { rows } = await query<{ id: string; password_hash: string; disabled_at: Date | null }>(
-      `SELECT id, password_hash, disabled_at FROM users WHERE email = $1`, [addr],
+    const { rows } = await query<{ id: string; password_hash: string; disabled_at: Date | null; verified: boolean }>(
+      `SELECT id, password_hash, disabled_at, email_verified_at IS NOT NULL AS verified FROM users WHERE email = $1`, [addr],
     );
     const user = rows[0];
     const ok = user ? await verifyPassword(pw, user.password_hash) : (await burnPasswordCheck(pw), false);
@@ -74,6 +204,8 @@ export default async function accountRoutes(app: FastifyInstance) {
       throw new HttpError(401, "That email and password don't match.");
     }
     if (user.disabled_at) throw new HttpError(403, "This account has been switched off. Ask a site admin.");
+    // Right password, but the email was never confirmed: the page offers to send a code.
+    if (!user.verified) throw new HttpError(403, "Confirm your email first. We can send you a new code.", "unverified");
     clearFailures(...keys);
     return user.id;
   }

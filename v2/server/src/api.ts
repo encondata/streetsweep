@@ -33,7 +33,7 @@ app.addHook("onRequest", async (req, reply) => {
 });
 
 app.setErrorHandler((err: any, req, reply) => {
-  if (err instanceof HttpError) return reply.code(err.status).send({ error: err.message });
+  if (err instanceof HttpError) return reply.code(err.status).send({ error: err.message, code: err.code });
   if (err.validation) return reply.code(400).send({ error: friendlyValidation(err) });
   if (err.code === "22P02") return reply.code(404).send({ error: "Not found." }); // malformed uuid in the URL
   if (err.statusCode && err.statusCode < 500) return reply.code(err.statusCode).send({ error: err.message });

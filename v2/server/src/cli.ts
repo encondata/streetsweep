@@ -1,8 +1,9 @@
 // Maintenance from the shell:
 //   docker compose exec api node dist/cli.js make-admin you@example.com
 //   docker compose exec api node dist/cli.js reset-password you@example.com
-import { pool, query } from "./db.js";
+import { pool, query, tx } from "./db.js";
 import { hashPassword, randomPassword } from "./auth.js";
+import { confirmUser } from "./users.js";
 
 async function main() {
   const [cmd, email] = process.argv.slice(2);
@@ -11,6 +12,8 @@ async function main() {
   if (!rows[0]) throw new Error(`No account for ${email}. Sign up first, then run this.`);
   if (cmd === "make-admin") {
     await query(`UPDATE users SET is_site_admin = true WHERE id = $1`, [rows[0].id]);
+    // Promoting from the shell vouches for the address too.
+    await tx((db) => confirmUser(db, rows[0].id));
     console.log(`${email} is now a site admin.`);
   } else if (cmd === "reset-password") {
     const pw = randomPassword();

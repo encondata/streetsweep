@@ -64,6 +64,7 @@ coverage, because the passes are kept.
                  └────────────┘
 ```
 
+- **mailpit**: development mail catcher. The api sends sign-up and reset codes over SMTP.
 - **db**: `postgis/postgis:16-3.5`. All geometry work (area ⟂ street clipping,
   lengths, buffers) moves into SQL instead of hand-written JS.
 - **api**: stateless. Never calls an outside service directly. Long work goes to a job.
@@ -86,6 +87,8 @@ tombstones for sync), `updated_at` on anything an app syncs, geometry in SRID 43
 users           (id, email citext UNIQUE, display_name, password_hash, avatar_path,
                  is_site_admin bool, created_at, disabled_at)
 sessions        (id, user_id, token_hash, user_agent, created_at, last_seen_at, expires_at)
+email_codes     (id, user_id, purpose 'verify'|'reset', code_hash, attempts,
+                 created_at, expires_at, used_at)            -- users.email_verified_at too
 teams           (id, name, kind 'personal'|'shared', created_by, created_at, deleted_at)
 team_members    (team_id, user_id, role 'owner'|'admin'|'driver'|'viewer',
                  joined_at, left_at)                       -- history, not just current
@@ -217,8 +220,16 @@ audit_log       (id, at, user_id, team_id, action, entity, entity_id, data jsonb
    boot, or promote any account with
    `docker compose exec api node dist/cli.js make-admin <email>`. There's no
    "first sign-up becomes admin" rule, because sign-up is open.
-7. **Forgotten passwords.** No email is set up yet, so a site admin resets the password
-   on the Admin page and passes the new one on.
+7. **Email codes.** A new account can't be used until a 6-digit code emailed to it has
+   been entered. "Forgot password?" emails a one-time code, which is entered together with
+   a new password. Both codes:
+   - last **15 minutes**, allow 5 wrong tries, and work once;
+   - are limited to one email a minute and five an hour per account.
+
+   Signing up again with an address that was never confirmed replaces the old attempt.
+   The forgot-password form answers the same whether or not an account exists.
+   Development mail goes to **Mailpit** (http://localhost:8025). Production sets `SMTP_*`.
+   A site admin can still hand out a password from the Admin page.
 
 8. **Holding a car ends with the team.** Leaving a team, being removed, or becoming a
    viewer ends that person's permanent assignments and check-outs on the team's vehicles.
@@ -227,6 +238,9 @@ audit_log       (id, at, user_id, team_id, action, entity, entity_id, data jsonb
    revoked under Fleet → Phones.
 
 ## Still open
+
+- **Changing your email** in the account window doesn't ask for a code yet. It should
+  send one to the new address before switching to it.
 
 - **Finding teams.** Draft: teams are searchable by name, and a team can be made unlisted,
   in which case people join through a link with a code.

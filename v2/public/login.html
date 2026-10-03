@@ -151,6 +151,13 @@
 
   form[hidden] { display: none; }
   .hint { margin: -4px 0 14px; font-size: 12px; color: var(--ink-soft); }
+  input.code {
+    padding: 0 14px 0 45px; letter-spacing: .5em; font: 700 22px ui-monospace, Menlo, monospace;
+  }
+  input.code::placeholder { letter-spacing: .5em; font-weight: 400; }
+  .links { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 16px 0 0; font-size: 13px; }
+  .links a { color: var(--link); text-decoration: none; font-weight: 600; }
+  .links a:hover { text-decoration: underline; }
   .msg {
     margin: 0 0 14px; padding: 10px 12px; border-radius: var(--r); font-size: 13px;
     background: #fdecea; border: 1px solid #f3c3bd; color: var(--danger);
@@ -235,7 +242,7 @@
         <input type="checkbox" id="remember" checked>
         Remember me
       </label>
-      <a href="#" id="forgot">Forgot password?</a>
+      <a href="#" id="forgot-link">Forgot password?</a>
     </div>
 
     <button type="submit" class="go" id="go">
@@ -300,6 +307,65 @@
     <p class="foot">Already have an account? <a href="/login" id="haveaccount">Sign in</a></p>
   </form>
 
+  <!-- Step 2 of signing up (or signing in to an unconfirmed account): the emailed code. -->
+  <form id="verify" novalidate hidden>
+    <h1>Check Your Email</h1>
+    <p class="sub">We sent a 6-digit code to <strong class="to"></strong>. Enter it to finish setting up your account.</p>
+    <p class="msg" hidden role="alert"></p>
+    <div class="field">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="M7 12h.01M10.5 12h.01M14 12h.01M17.5 12h.01"/></svg>
+      <input type="text" id="v-code" class="code" placeholder="000000" inputmode="numeric" pattern="[0-9]*"
+             autocomplete="one-time-code" maxlength="6" required>
+    </div>
+    <p class="hint">The code expires in 15 minutes. Not there? Check spam.</p>
+    <button type="submit" class="go" id="v-go">
+      Confirm Email
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6"/></svg>
+    </button>
+    <p class="links"><a href="#" id="v-resend">Send a new code</a><a href="#" id="v-back">Use a different email</a></p>
+  </form>
+
+  <!-- Forgotten password, step 1: where to send the code. -->
+  <form id="forgot" novalidate hidden>
+    <h1>Reset Password</h1>
+    <p class="sub">Enter your email and we'll send you a one-time code.</p>
+    <p class="msg" hidden role="alert"></p>
+    <div class="field">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><path d="m3 6 9 6.5L21 6"/></svg>
+      <input type="email" id="f-email" placeholder="Email address" autocomplete="username" required>
+    </div>
+    <button type="submit" class="go" id="f-go">
+      Send Code
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6"/></svg>
+    </button>
+    <p class="foot">Remembered it? <a href="/login" class="tosignin">Sign in</a></p>
+  </form>
+
+  <!-- Forgotten password, step 2: code and the new password. -->
+  <form id="reset" novalidate hidden>
+    <h1>Enter Your Code</h1>
+    <p class="sub">If there's an account for <strong class="to"></strong>, we've emailed it a 6-digit code.</p>
+    <p class="msg" hidden role="alert"></p>
+    <div class="field">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="M7 12h.01M10.5 12h.01M14 12h.01M17.5 12h.01"/></svg>
+      <input type="text" id="r-code" class="code" placeholder="000000" inputmode="numeric" pattern="[0-9]*"
+             autocomplete="one-time-code" maxlength="6" required>
+    </div>
+    <div class="field">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10.5" width="16" height="10" rx="2.5"/><path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7"/></svg>
+      <input type="password" id="r-password" placeholder="New password" autocomplete="new-password" minlength="8" required>
+      <button type="button" class="peek" aria-label="Show the password" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+    </div>
+    <p class="hint">At least 8 characters. The code expires in 15 minutes.</p>
+    <button type="submit" class="go" id="r-go">
+      Set New Password
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6"/></svg>
+    </button>
+    <p class="links"><a href="#" id="r-resend">Send a new code</a><a href="/login" class="tosignin">Back to sign in</a></p>
+  </form>
+
   <div id="uses">
     <div>
       <img src="/use_track.png" alt="" width="26" height="22">
@@ -319,11 +385,19 @@
 
 <script>
 (function () {
-  var signin = document.getElementById("signin");
-  var signup = document.getElementById("signup");
-  var go = document.getElementById("go");
-  var pw = document.getElementById("password");
+  var forms = {
+    signin: document.getElementById("signin"),
+    signup: document.getElementById("signup"),
+    verify: document.getElementById("verify"),
+    forgot: document.getElementById("forgot"),
+    reset: document.getElementById("reset")
+  };
+  var TITLES = { signin: "Sign in", signup: "Create account", verify: "Confirm your email", forgot: "Reset password", reset: "Reset password" };
   var email = document.getElementById("email");
+  var pw = document.getElementById("password");
+  var mode = "signin";
+  // The address a code was sent to, kept across a reload of this tab.
+  var pending = "";
 
   function say(form, text, tone) {
     var msg = form.querySelector(".msg");
@@ -337,21 +411,39 @@
     return next && next.charAt(0) === "/" && next.charAt(1) !== "/" ? next : "/";
   }
 
+  function remember(key, value) {
+    try { value ? sessionStorage.setItem(key, value) : sessionStorage.removeItem(key); } catch (e) { /* private window */ }
+  }
+  function recall(key) {
+    try { return sessionStorage.getItem(key) || ""; } catch (e) { return ""; }
+  }
+
   // Already signed in? Straight through.
   fetch("/api/me").then(function (r) { if (r.ok) location.replace(nextUrl()); }).catch(function () {});
 
-  // One page, two forms: /login and /signup. Switching keeps ?next= so the
-  // person still lands where they were heading.
-  function show(mode, push) {
-    var up = mode === "signup";
-    signin.hidden = up;
-    signup.hidden = !up;
-    document.title = (up ? "Create account" : "Sign in") + " · StreetSweep";
-    if (push) history.pushState(null, "", (up ? "/signup" : "/login") + location.search);
-    (up ? document.getElementById("su-name") : (email.value ? pw : email)).focus();
+  // Five steps on one page. Only sign-in and sign-up have their own address
+  // (/login, /signup); the code steps live wherever they were reached from.
+  function show(next, push) {
+    mode = next;
+    Object.keys(forms).forEach(function (k) { forms[k].hidden = k !== next; });
+    document.title = TITLES[next] + " · StreetSweep";
+    if (push && (next === "signin" || next === "signup")) {
+      history.pushState(null, "", (next === "signup" ? "/signup" : "/login") + location.search);
+    }
+    document.querySelectorAll(".to").forEach(function (el) { el.textContent = pending; });
+    remember("streetsweep.step", next === "verify" || next === "reset" ? next + " " + pending : "");
+    var focus = { signin: email.value ? pw : email, signup: document.getElementById("su-name"),
+                  verify: document.getElementById("v-code"), forgot: document.getElementById("f-email"),
+                  reset: document.getElementById("r-code") }[next];
+    if (focus) focus.focus();
   }
+
   document.getElementById("noaccount").addEventListener("click", function (ev) { ev.preventDefault(); show("signup", true); });
   document.getElementById("haveaccount").addEventListener("click", function (ev) { ev.preventDefault(); show("signin", true); });
+  document.querySelectorAll(".tosignin").forEach(function (a) {
+    a.addEventListener("click", function (ev) { ev.preventDefault(); show("signin", true); });
+  });
+  document.getElementById("v-back").addEventListener("click", function (ev) { ev.preventDefault(); show("signup", true); });
   addEventListener("popstate", function () { show(location.pathname === "/signup" ? "signup" : "signin", false); });
 
   // The address is worth remembering; the password is the browser's business, not ours.
@@ -359,7 +451,14 @@
     var last = localStorage.getItem("streetsweep.lastEmail");
     if (last) email.value = last;
   } catch (e) { /* private window */ }
-  show(location.pathname === "/signup" ? "signup" : "signin", false);
+
+  var saved = recall("streetsweep.step").split(" ");
+  if ((saved[0] === "verify" || saved[0] === "reset") && saved[1]) {
+    pending = saved[1];
+    show(saved[0], false);
+  } else {
+    show(location.pathname === "/signup" ? "signup" : "signin", false);
+  }
 
   document.querySelectorAll(".peek").forEach(function (btn) {
     btn.addEventListener("click", function () {
@@ -372,15 +471,19 @@
     });
   });
 
-  document.getElementById("forgot").addEventListener("click", function (ev) {
-    ev.preventDefault();
-    say(signin, "Ask a site admin to reset it for you. They will give you a new password to sign in with.", "info");
+  // Codes: digits only, and a pasted "123 456" still works.
+  document.querySelectorAll("input.code").forEach(function (input) {
+    input.addEventListener("input", function () { input.value = input.value.replace(/\D/g, "").slice(0, 6); });
   });
 
-  async function post(url, data, form, button, busy) {
-    button.disabled = true;
-    var was = button.firstChild.nodeValue;
-    button.firstChild.nodeValue = busy + " ";
+  /** POST JSON; the button shows `busy` meanwhile. Resolves to { ok, status, body }. */
+  async function post(url, data, button, busy) {
+    var was;
+    if (button) {
+      button.disabled = true;
+      was = button.firstChild.nodeValue;
+      button.firstChild.nodeValue = busy + " ";
+    }
     try {
       var res = await fetch(url, {
         method: "POST",
@@ -388,14 +491,15 @@
         body: JSON.stringify(data)
       });
       var body = await res.json().catch(function () { return {}; });
-      if (res.ok) return true;
-      say(form, body.error || "That did not work. Try again.");
+      return { ok: res.ok, status: res.status, body: body };
     } catch (e) {
-      say(form, "Could not reach the server.");
+      return { ok: false, status: 0, body: { error: "Could not reach the server." } };
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.firstChild.nodeValue = was;
+      }
     }
-    button.disabled = false;
-    button.firstChild.nodeValue = was;
-    return false;
   }
 
   function rememberEmail(addr, keep) {
@@ -405,32 +509,119 @@
     } catch (e) { /* nothing to remember with */ }
   }
 
-  signin.addEventListener("submit", async function (ev) {
+  function signedIn(addr, isNew) {
+    remember("streetsweep.step", "");
+    rememberEmail(addr, true);
+    // New accounts start on Teams, where joining one is the obvious next step.
+    location.href = isNew && nextUrl() === "/" ? "/teams?welcome=1" : nextUrl();
+  }
+
+  function toVerify(addr, note, tone) {
+    pending = addr;
+    show("verify", false);
+    document.getElementById("v-code").value = "";
+    say(forms.verify, note || "", tone || "info");
+  }
+
+  async function sendVerify(button) {
+    var r = await post("/api/auth/resend", { email: pending }, button, "Sending…");
+    if (r.ok) say(forms.verify, "New code sent to " + pending + ". Use the newest one.", "info");
+    else say(forms.verify, r.body.error || "That did not work. Try again.");
+  }
+
+  // ---- sign in ----
+  forms.signin.addEventListener("submit", async function (ev) {
     ev.preventDefault();
-    say(signin, "");
-    if (!email.value.trim() || !pw.value) return say(signin, "Fill in both boxes.");
-    var remember = document.getElementById("remember").checked;
-    var ok = await post("/api/auth/login",
-      { email: email.value.trim(), password: pw.value, remember: remember }, signin, go, "Signing in…");
-    if (!ok) return pw.select();
-    rememberEmail(email.value.trim(), remember);
-    location.href = nextUrl();
+    say(forms.signin, "");
+    var addr = email.value.trim();
+    if (!addr || !pw.value) return say(forms.signin, "Fill in both boxes.");
+    var keep = document.getElementById("remember").checked;
+    var r = await post("/api/auth/login", { email: addr, password: pw.value, remember: keep },
+      document.getElementById("go"), "Signing in…");
+    if (r.ok) {
+      rememberEmail(addr, keep);
+      return signedIn(addr, false);
+    }
+    if (r.body.code === "unverified") {
+      // Right password, never confirmed: send a fresh code and ask for it.
+      toVerify(addr, "Your email isn't confirmed yet.", "info");
+      return sendVerify(null);
+    }
+    pw.select();
+    say(forms.signin, r.body.error || "That did not work. Try again.");
   });
 
-  signup.addEventListener("submit", async function (ev) {
+  document.getElementById("forgot-link").addEventListener("click", function (ev) {
     ev.preventDefault();
-    say(signup, "");
+    document.getElementById("f-email").value = email.value.trim();
+    show("forgot", false);
+  });
+
+  // ---- sign up ----
+  forms.signup.addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    say(forms.signup, "");
     var name = document.getElementById("su-name").value.trim();
     var addr = document.getElementById("su-email").value.trim();
     var pass = document.getElementById("su-password").value;
-    if (!name || !addr || !pass) return say(signup, "Fill in all three boxes.");
-    if (pass.length < 8) return say(signup, "Use at least 8 characters for the password.");
-    var ok = await post("/api/auth/signup", { displayName: name, email: addr, password: pass, remember: true },
-      signup, document.getElementById("su-go"), "Creating…");
-    if (!ok) return;
-    rememberEmail(addr, true);
-    // New accounts start on Teams, where joining one is the obvious next step.
-    location.href = nextUrl() === "/" ? "/teams?welcome=1" : nextUrl();
+    if (!name || !addr || !pass) return say(forms.signup, "Fill in all three boxes.");
+    if (pass.length < 8) return say(forms.signup, "Use at least 8 characters for the password.");
+    var r = await post("/api/auth/signup", { displayName: name, email: addr, password: pass },
+      document.getElementById("su-go"), "Creating…");
+    if (r.ok) return toVerify(addr);
+    // Signed up a moment ago and asked again: the first code is still on its way.
+    if (r.body.code === "too_soon") return toVerify(addr, r.body.error, "info");
+    say(forms.signup, r.body.error || "That did not work. Try again.");
+  });
+
+  // ---- confirm email ----
+  forms.verify.addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    say(forms.verify, "");
+    var code = document.getElementById("v-code").value.trim();
+    if (code.length !== 6) return say(forms.verify, "Enter the 6-digit code from the email.");
+    var r = await post("/api/auth/verify", { email: pending, code: code, remember: true },
+      document.getElementById("v-go"), "Confirming…");
+    if (r.ok) return signedIn(pending, true);
+    if (r.body.code === "verified") return show("signin", true);
+    say(forms.verify, r.body.error || "That did not work. Try again.");
+  });
+  document.getElementById("v-resend").addEventListener("click", function (ev) {
+    ev.preventDefault();
+    sendVerify(null);
+  });
+
+  // ---- forgotten password ----
+  async function sendReset(button, form) {
+    var r = await post("/api/auth/forgot", { email: pending }, button, "Sending…");
+    if (!r.ok) { say(form, r.body.error || "That did not work. Try again."); return false; }
+    return true;
+  }
+  forms.forgot.addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    say(forms.forgot, "");
+    var addr = document.getElementById("f-email").value.trim();
+    if (!addr) return say(forms.forgot, "Enter your email address.");
+    pending = addr;
+    if (!(await sendReset(document.getElementById("f-go"), forms.forgot))) return;
+    show("reset", false);
+    say(forms.reset, "");
+  });
+  document.getElementById("r-resend").addEventListener("click", async function (ev) {
+    ev.preventDefault();
+    if (await sendReset(null, forms.reset)) say(forms.reset, "New code sent. Use the newest one.", "info");
+  });
+  forms.reset.addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    say(forms.reset, "");
+    var code = document.getElementById("r-code").value.trim();
+    var pass = document.getElementById("r-password").value;
+    if (code.length !== 6) return say(forms.reset, "Enter the 6-digit code from the email.");
+    if (pass.length < 8) return say(forms.reset, "Use at least 8 characters for the new password.");
+    var r = await post("/api/auth/reset", { email: pending, code: code, password: pass, remember: true },
+      document.getElementById("r-go"), "Saving…");
+    if (r.ok) return signedIn(pending, false);
+    say(forms.reset, r.body.error || "That did not work. Try again.");
   });
 })();
 </script>

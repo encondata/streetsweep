@@ -11,6 +11,14 @@ export const config = {
   valhallaUrl: env.VALHALLA_URL ?? "",
   overpassUrl: env.OVERPASS_URL ?? "",
   osmExtractUrl: env.OSM_EXTRACT_URL ?? "",
+  // Outgoing mail. compose.yaml points this at Mailpit for development; set a real
+  // server (and SMTP_USER/SMTP_PASS) in production.
+  smtpHost: env.SMTP_HOST ?? "mailpit",
+  smtpPort: Number(env.SMTP_PORT ?? 1025),
+  smtpSecure: env.SMTP_SECURE === "true",
+  smtpUser: env.SMTP_USER ?? "",
+  smtpPass: env.SMTP_PASS ?? "",
+  mailFrom: env.MAIL_FROM ?? "StreetSweep <no-reply@streetsweep.local>",
   adminEmail: env.ADMIN_EMAIL ?? "",
   adminPassword: env.ADMIN_PASSWORD ?? "",
   // Resolved against the working directory, which is /app in the image.

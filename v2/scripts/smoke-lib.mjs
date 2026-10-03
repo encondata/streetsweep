@@ -44,12 +44,43 @@ export async function expect(label, promise, status) {
 
 export const PW = "correct horse 1";
 
-export async function signUp(c) {
-  const me = await expect(`sign up ${c.name}`, c.call("POST", "/api/auth/signup",
-    { email: c.email, displayName: c.name[0].toUpperCase() + c.name.slice(1), password: PW }), 201);
+export const MAILPIT = process.env.MAILPIT_URL ?? "http://mailpit:8025";
+
+/** The newest code emailed to `to` (from the subject line), waiting briefly for it to land. */
+export async function latestCode(to, { after = 0 } = {}) {
+  for (let i = 0; i < 20; i++) {
+    const r = await fetch(`${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:"${to}"`)}`).then((x) => x.json());
+    const m = (r.messages ?? []).find((x) => new Date(x.Created).getTime() > after);
+    const code = m?.Subject?.match(/^(\d{6}) /)?.[1];
+    if (code) return { code, subject: m.Subject, id: m.ID };
+    await new Promise((ok) => setTimeout(ok, 150));
+  }
+  return null;
+}
+
+export async function mailCount(to) {
+  const r = await fetch(`${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:"${to}"`)}`).then((x) => x.json());
+  return r.messages_count ?? (r.messages ?? []).length;
+}
+
+/** Sign up and confirm with the emailed code, as a person would. */
+export async function signUp(c, displayName = c.name[0].toUpperCase() + c.name.slice(1)) {
+  const started = Date.now() - 1000;
+  await expect(`sign up ${c.name}`, c.call("POST", "/api/auth/signup", { email: c.email, displayName, password: PW }), 202);
+  const mail = await latestCode(c.email, { after: started });
+  check(`${c.name}'s code arrived by email`, !!mail);
+  const me = await expect(`${c.name} confirms`, c.call("POST", "/api/auth/verify", { email: c.email, code: mail?.code }), 200);
   c.id = me.user.id;
   c.personal = me.teams[0].id;
   return me;
+}
+
+/** Run SQL against the app database (to wind clocks back in tests). */
+export async function sql(text, params) {
+  const { default: pg } = await import("pg");
+  const db = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  await db.connect();
+  try { return (await db.query(text, params)).rows; } finally { await db.end(); }
 }
 
 /** Remove this run's accounts and everything hanging off them, then report. */
@@ -61,8 +92,11 @@ export async function finish(extraSql = []) {
   await db.query(`DELETE FROM teams WHERE created_by IN (SELECT id FROM users WHERE email LIKE $1)`, [like]);
   await db.query(`DELETE FROM audit_log WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)`, [like]);
   await db.query(`DELETE FROM users WHERE email LIKE $1`, [like]);
-  for (const [sql, params] of extraSql) await db.query(sql, params);
+  for (const [q, params] of extraSql) await db.query(q, params);
   await db.end();
+  // And this run's emails from Mailpit.
+  // (No leading "-": in Mailpit's search syntax that means NOT.)
+  await fetch(`${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:"${run}@test.local"`)}`, { method: "DELETE" }).catch(() => {});
   console.log(failures ? `\n${failures} FAILED` : "\nall passed");
   process.exit(failures ? 1 : 0);
 }
