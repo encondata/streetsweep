@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sign in · StreetSweep</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#02142a">
+<style>
+  /* Same tokens as the builder, so the two pages are recognisably one product. */
+  :root {
+    --navy-950: #02142a;
+    --green-700: #14701f;
+    --green-600: #1e8a28;
+    --green-500: #299530;
+    --green-400: #45bd23;
+
+    /* The right-hand side is white in the design, so the ink is dark and the
+       fields are white on an off-white panel. */
+    --panel: #f7f9fb;
+    --ink: #0d1b28;
+    --ink-soft: #5a6a78;
+    --line: #dde4ec;
+    --line-strong: #cfd9e4;
+    --field: #ffffff;
+    --accent: var(--green-600);
+    --link: #1a6fd4;
+    --danger: #b3261e;
+    --ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --r: 12px;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; font-family: var(--ui); color: var(--ink);
+    background: var(--navy-950);
+    position: relative; overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---- the photograph ----------------------------------------------------
+     Full bleed behind everything. The white panel is cut over the top of it,
+     which is what makes the diagonal read as a white slash rather than a dark
+     one: the seam is the edge of the paper, not a gap between two columns. */
+  #art {
+    position: fixed; inset: 0; overflow: hidden;
+    background: linear-gradient(160deg, #0d3350 0%, #02142a 100%);
+  }
+  #photo {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; object-position: 30% 55%;
+    opacity: 0; transition: opacity .4s ease;
+  }
+  #photo.ready { opacity: 1; }
+
+
+  /* ---- the white panel ---------------------------------------------------
+     Measured off the supplied design: its left edge runs from 36% of the width
+     at the top to 22% at the bottom, so the photograph keeps a wedge down the
+     left rather than half the page. */
+  #panel {
+    position: relative; z-index: 1; min-height: 100%;
+    background: var(--panel);
+    /* Roughly 70% photograph, 30% paper, keeping the design's lean: the edge is at
+       74% of the width at the top and 66% at the bottom, so it averages 30%. */
+    clip-path: polygon(74% 0, 100% 0, 100% 100%, 66% 100%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    /* Clear of the widest part of the slash, so nothing sits on the angle. */
+    padding: 44px 3% 44px calc(74% + 22px);
+  }
+  #inner { width: 100%; max-width: 362px; }
+
+  #brand { text-align: center; margin-bottom: 22px; }
+  #brand .mark { width: 104px; height: auto; display: block; margin: 0 auto 12px; }
+  #brand .lockup { width: 100%; max-width: 288px; height: auto; display: block; margin: 0 auto; }
+
+  form { width: 100%; }
+  h1 { margin: 0 0 6px; font-size: 27px; letter-spacing: -.025em; }
+  .sub { margin: 0 0 22px; color: var(--ink-soft); font-size: 14px; }
+
+  .field { position: relative; margin-bottom: 12px; }
+  .field .ico {
+    position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+    width: 17px; height: 17px; stroke: var(--ink-soft); fill: none;
+    stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; pointer-events: none;
+  }
+  input[type=email], input[type=password], input[type=text] {
+    width: 100%; height: 50px; padding: 0 14px 0 45px;
+    font: 500 14.5px var(--ui); color: var(--ink);
+    background: var(--field); border: 1px solid var(--line-strong); border-radius: var(--r);
+    transition: border-color .15s, box-shadow .15s;
+  }
+  input::placeholder { color: var(--ink-soft); font-weight: 400; }
+  input:focus {
+    outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(30,138,40,.18);
+  }
+  #peek {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    width: 34px; height: 34px; display: grid; place-items: center;
+    background: none; border: 0; border-radius: 8px; cursor: pointer; color: var(--ink-soft);
+  }
+  #peek:hover { color: var(--ink); background: #eef2f7; }
+  #peek svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+
+  .row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin: 14px 0 18px; font-size: 13px;
+  }
+  .remember { display: flex; align-items: center; gap: 9px; cursor: pointer; user-select: none; }
+  .remember input { width: 18px; height: 18px; accent-color: var(--link); cursor: pointer; }
+  .row a, .foot a { color: var(--link); text-decoration: none; font-weight: 600; }
+  .row a:hover, .foot a:hover { text-decoration: underline; }
+
+  button.go {
+    width: 100%; height: 52px; border: 0; border-radius: var(--r); cursor: pointer;
+    font: 700 15px var(--ui); color: #fff;
+    background: linear-gradient(135deg, #2fb83a 0%, #1e8a28 100%);
+    box-shadow: 0 6px 18px rgba(30,138,40,.36);
+    display: flex; align-items: center; justify-content: center; gap: 9px;
+    transition: transform .08s, box-shadow .15s, filter .15s;
+  }
+  button.go:hover { filter: brightness(1.06); box-shadow: 0 8px 22px rgba(30,138,40,.46); }
+  button.go:active { transform: translateY(1px); }
+  button.go[disabled] { filter: grayscale(.5) brightness(.8); cursor: progress; }
+  button.go svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2.2; }
+
+  .or {
+    display: flex; align-items: center; gap: 12px;
+    margin: 18px 0; color: var(--ink-soft); font-size: 11px; letter-spacing: .12em;
+  }
+  .or::before, .or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--line); }
+
+  button.sso {
+    width: 100%; height: 46px; border-radius: var(--r); cursor: pointer;
+    font: 600 14px var(--ui); color: var(--ink);
+    background: #fff; border: 1px solid var(--line-strong);
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    margin-bottom: 10px;
+  }
+  button.sso:hover:not([disabled]) { border-color: var(--line-strong); background: #f3f6f9; }
+  /* Drawn as designed, but it cannot pretend to work yet. */
+  button.sso[disabled] { opacity: .5; cursor: not-allowed; }
+  button.sso svg { width: 19px; height: 19px; }
+  .ssonote { margin: 2px 0 0; text-align: center; font-size: 11.5px; color: var(--ink-soft); }
+
+  .foot { margin: 18px 0 0; text-align: center; font-size: 13px; color: var(--ink-soft); }
+
+  #msg {
+    margin: 0 0 14px; padding: 10px 12px; border-radius: var(--r); font-size: 13px;
+    background: #fdecea; border: 1px solid #f3c3bd; color: var(--danger);
+  }
+  #msg[hidden] { display: none; }
+  #msg.info { background: #e8f1fd; border-color: #c2dbf7; color: #14508f; }
+
+  /* ---- the three things it does, along the bottom ------------------------ */
+  #uses {
+    display: flex; gap: 8px; width: 100%; max-width: 396px;
+    justify-content: space-between; text-align: center;
+  }
+  #uses div { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 7px; }
+  #uses img { height: 24px; width: auto; display: block; }
+  #uses span { font-size: 11.5px; line-height: 1.35; color: var(--ink-soft); font-weight: 600; }
+  #uses { margin-top: 26px; }
+
+  /* ---- narrow: the art becomes a header band, as in the phone mockups ---- */
+  /* Narrow: the diagonal has nowhere to go, so the photograph becomes a band
+     across the top and the paper takes the rest, straight-edged. */
+  @media (max-width: 1100px) {
+    /* flow-root, or #panel's top margin collapses through body and takes the
+       photograph down with it — the band ends up under the panel, not above it. */
+    body { display: flow-root; }
+    #art { position: absolute; inset: 0 0 auto 0; height: 190px; }
+    #photo { object-position: 50% 58%; }
+    #panel {
+      clip-path: none; margin-top: 190px; min-height: calc(100% - 190px);
+      padding: 30px 20px 38px; border-radius: 22px 22px 0 0;
+      justify-content: flex-start;
+    }
+    #brand { margin-bottom: 20px; }
+    #brand .mark { width: 96px; }
+    #brand .lockup { width: 252px; }
+    h1 { font-size: 26px; }
+  }
+  @media (max-height: 760px) and (min-width: 1101px) {
+    #brand .mark { width: 92px; margin-bottom: 10px; }
+    #brand .lockup { width: 248px; }
+    #brand { margin-bottom: 18px; }
+    #uses { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div id="art" aria-hidden="true">
+  <img id="photo" src="/login-art.webp" alt="" decoding="async" fetchpriority="low"
+       onload="this.classList.add('ready')">
+</div>
+
+<main id="panel">
+  <div id="inner">
+  <div id="brand">
+    <img class="mark" src="/login-mark.png" alt="" width="384" height="433">
+    <img class="lockup" src="/login-lockup-dark.png" width="810" height="165" alt="StreetSweep — drive, explore, complete">
+  </div>
+
+  <form id="signin" novalidate>
+    <h1>Sign In</h1>
+    <p class="sub">Access your maps, drives, and progress.</p>
+
+    <p id="msg" hidden role="alert"></p>
+
+    <div class="field">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><path d="m3 6 9 6.5L21 6"/></svg>
+      <input type="email" id="email" name="email" placeholder="Email address"
+             autocomplete="username" required autofocus>
+    </div>
+
+    <div class="field">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10.5" width="16" height="10" rx="2.5"/><path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7"/></svg>
+      <input type="password" id="password" name="password" placeholder="Password"
+             autocomplete="current-password" required>
+      <button type="button" id="peek" aria-label="Show the password" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+    </div>
+
+    <div class="row">
+      <label class="remember">
+        <input type="checkbox" id="remember" checked>
+        Remember me
+      </label>
+      <a href="#" id="forgot">Forgot password?</a>
+    </div>
+
+    <button type="submit" class="go" id="go">
+      Sign In
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6"/></svg>
+    </button>
+
+    <div class="or">OR</div>
+    <button type="button" class="sso" id="google" disabled
+            title="Google sign-in has not been set up on this server yet">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="#4285F4" d="M23 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.2a5.3 5.3 0 0 1-2.3 3.5v2.9h3.7c2.2-2 3.4-5 3.4-8.6Z"/>
+        <path fill="#34A853" d="M12 23.5c3.1 0 5.7-1 7.6-2.8l-3.7-2.9c-1 .7-2.3 1.1-3.9 1.1-3 0-5.5-2-6.4-4.7H1.8v3C3.7 20.9 7.6 23.5 12 23.5Z"/>
+        <path fill="#FBBC05" d="M5.6 14.2a6.9 6.9 0 0 1 0-4.4v-3H1.8a11.5 11.5 0 0 0 0 10.4l3.8-3Z"/>
+        <path fill="#EA4335" d="M12 4.8c1.7 0 3.2.6 4.4 1.7l3.3-3.3C17.7 1.3 15.1.3 12 .3 7.6.3 3.7 2.9 1.8 6.8l3.8 3C6.5 7 9 4.8 12 4.8Z"/>
+      </svg>
+      Continue with Google
+    </button>
+    <button type="button" class="sso" id="microsoft" disabled
+            title="Microsoft sign-in has not been set up on this server yet">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="#F25022" d="M2.5 2.5h9v9h-9z"/><path fill="#7FBA00" d="M12.5 2.5h9v9h-9z"/>
+        <path fill="#00A4EF" d="M2.5 12.5h9v9h-9z"/><path fill="#FFB900" d="M12.5 12.5h9v9h-9z"/>
+      </svg>
+      Continue with Microsoft
+    </button>
+    <p class="ssonote">Neither is set up on this server yet.</p>
+
+    <p class="foot">New to StreetSweep? <a href="#" id="noaccount">Create an account</a></p>
+  </form>
+
+  <div id="uses">
+    <div>
+      <img src="/use_track.png" alt="" width="26" height="22">
+      <span>Track<br>Your Drives</span>
+    </div>
+    <div>
+      <img src="/use_progress.png" alt="" width="26" height="18">
+      <span>See Your<br>Progress</span>
+    </div>
+    <div>
+      <img src="/use_complete.png" alt="" width="24" height="22">
+      <span>Complete<br>Every Street</span>
+    </div>
+  </div>
+  </div>
+</main>
+
+<script>
+(function () {
+  var form = document.getElementById("signin");
+  var msg = document.getElementById("msg");
+  var go = document.getElementById("go");
+  var pw = document.getElementById("password");
+  var email = document.getElementById("email");
+
+  function say(text, tone) {
+    msg.textContent = text;
+    msg.hidden = !text;
+    msg.className = tone === "info" ? "info" : "";
+  }
+
+  // The address is worth remembering; the password is the browser's business, not ours.
+  try {
+    var last = localStorage.getItem("streetsweep.lastEmail");
+    if (last) { email.value = last; pw.focus(); }
+  } catch (e) { /* private window */ }
+
+  document.getElementById("peek").addEventListener("click", function () {
+    var showing = pw.type === "text";
+    pw.type = showing ? "password" : "text";
+    this.setAttribute("aria-pressed", String(!showing));
+    this.setAttribute("aria-label", showing ? "Show the password" : "Hide the password");
+    pw.focus();
+  });
+
+  // Both of these are placeholders until there is somewhere for them to go. They are
+  // drawn as the design has them; clicking one says it is not built rather than doing
+  // nothing at all, which would read as a broken link.
+  function notYet(id, what) {
+    document.getElementById(id).addEventListener("click", function (ev) {
+      ev.preventDefault();
+      say(what + " is not set up yet. An administrator can do it for you in the meantime.", "info");
+    });
+  }
+  notYet("forgot", "Resetting your own password");
+  notYet("noaccount", "Signing yourself up");
+
+  form.addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    say("");
+    if (!email.value.trim() || !pw.value) return say("Fill in both boxes.");
+    go.disabled = true;
+    var was = go.firstChild.nodeValue;
+    go.firstChild.nodeValue = "Signing in… ";
+    try {
+      var res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.value.trim(), password: pw.value })
+      });
+      var body = await res.json().catch(function () { return {}; });
+      if (!res.ok) {
+        go.disabled = false;
+        go.firstChild.nodeValue = was;
+        pw.select();
+        return say(body.error || "That did not work. Try again.");
+      }
+      try {
+        if (document.getElementById("remember").checked) {
+          localStorage.setItem("streetsweep.lastEmail", email.value.trim());
+        } else {
+          localStorage.removeItem("streetsweep.lastEmail");
+        }
+      } catch (e) { /* nothing to remember with */ }
+      // Straight in; a signed-in browser asking for /login is sent back here anyway.
+      var next = new URLSearchParams(location.search).get("next");
+      location.href = next && next.charAt(0) === "/" && next.charAt(1) !== "/" ? next : "/";
+    } catch (e) {
+      go.disabled = false;
+      go.firstChild.nodeValue = was;
+      say("Could not reach the server.");
+    }
+  });
+})();
+</script>
+</body>
+</html>

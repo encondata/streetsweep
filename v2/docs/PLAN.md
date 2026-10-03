@@ -1,0 +1,219 @@
+# StreetSweep v2 — plan
+
+Status: **agreed 2026-10-03**. Stage 0 in progress.
+
+v2 is a ground-up, multi-user rebuild. v1 (`tools/`) keeps running untouched beside it
+until v2 replaces it. v2 starts with an empty database — no v1 import.
+
+## Principles
+
+1. **The server is the master.** Only the server talks to OpenStreetMap (extracts,
+   Overpass), Valhalla and tile sources. It builds areas, street segments, coverage and
+   map packages, and distributes them to the apps. Apps and loggers upload raw drives
+   and pull results — they never compute an authoritative figure.
+2. **Multi-user from the first table.** Every row knows who owns it and which team it
+   counts for. There is no "the user".
+3. **Late data is normal.** A Wi-Fi logger may upload a drive hours later. Who drove,
+   in which car, is resolved from *history at the time of the drive*, never from the
+   current state.
+4. **Docker for everything.** One `docker compose up` brings up the whole stack.
+5. **Keep the login page.** v1's `login.html` design and art carry over as-is.
+6. **Graphics come from ChatGPT.** Every image is a named slot in an asset brief
+   (`docs/ASSETS.md`); the code ships placeholders until the real art lands.
+
+## People, cars and loggers
+
+| Concept | What it is |
+|---|---|
+| **User** | A person with a login. Sign-up is open to anyone. Can join any number of teams. |
+| **Team** | A household, a delivery crew, or just "me" (every user gets a personal team on sign-up). Coverage is pooled per team. Roles: owner, admin, driver, viewer. A user **requests to join** and the team's admins approve or decline. |
+| **Drive type** | Personal, Delivery, Commute… The app asks for it when a drive starts. Each team toggles which drive types count toward its coverage. |
+| **Vehicle** | Standalone — not owned by a user. Optionally managed by a team (whose admins control it). |
+| **Assignment** | Links a vehicle to a user. Either **permanent** (my car — several people can hold this, e.g. husband and wife) or **checkout** (van taken out, then returned; only one open checkout per vehicle at a time). Full history is kept. |
+| **Device** | A signed-in phone (per-device token, revocable). |
+| **Logger** | An ESP32 + GPS a user builds and registers. Has its own secret key. Can be **installed** in a vehicle (history kept). Uploads over Wi-Fi; BLE relay through the phone later, using the same signed batch format. |
+
+**Drive attribution.** Phone drive: the user is the signed-in person, and the vehicle is
+the one picked on the phone (defaulting to their open checkout, otherwise their only
+permanent car). Logger drive: the vehicle is the one the logger was installed in at that
+time, and the driver is whoever had that vehicle checked out at that time, otherwise
+its only permanent assignee, otherwise "unknown driver" (fixable on the web).
+
+**Coverage.** A drive counts for a team when the driver belonged to that team at the
+time **and** the team counts that drive's type. Example: a driver in "Household" and
+"Acme Deliveries" marks a drive *Delivery*. Acme counts Delivery. Household has Delivery
+switched off, so the drive counts for Acme only. Every pass is stored with its user and
+vehicle, so you can filter by person or car. Changing a team's toggles re-rolls its
+coverage, because the passes are kept.
+
+## Architecture (Docker Compose)
+
+```
+                 ┌────────────┐
+ browser ───────►│    api     │  Node 22 + TypeScript (Fastify). REST, sessions, uploads.
+ phone   ───────►│  :8430     │  Also serves the built web app.
+ logger  ───────►└─────┬──────┘
+                       │ jobs (pg-boss queue in Postgres)
+                 ┌─────▼──────┐        ┌────────────┐
+                 │   worker   │───────►│  valhalla  │  map matching
+                 │ same image │        └────────────┘
+                 │            │───────► Geofabrik / Overpass / tile sources
+                 └─────┬──────┘
+                 ┌─────▼──────┐
+                 │     db     │  Postgres 16 + PostGIS
+                 └────────────┘
+```
+
+- **db**: `postgis/postgis:16-3.5`. All geometry work (area ⟂ street clipping,
+  lengths, buffers) moves into SQL instead of hand-written JS.
+- **api**: stateless. Never calls an outside service directly. Long work goes to a job.
+- **worker**: OSM extract import (osmium), segmenting, area builds, drive matching,
+  coverage roll-ups, tile/package builds. Retries and backoff in one place.
+- **web**: Svelte 5 + TypeScript + Vite + MapLibre (building on what `tools/web` started),
+  compiled in the Docker build and served by api.
+- **valhalla**: as in v1.
+- Host port **8430**, so it runs alongside v1 on 8420.
+- Migrations: numbered plain-SQL files in `v2/db/migrations`, applied on api start-up.
+
+## Draft schema
+
+Conventions: `uuid` primary keys (client-generatable, so uploads are idempotent),
+`timestamptz` everywhere, soft delete via `deleted_at` (which also gives the apps their
+tombstones for sync), `updated_at` on anything an app syncs, geometry in SRID 4326.
+
+### Identity
+```sql
+users           (id, email citext UNIQUE, display_name, password_hash, avatar_path,
+                 is_site_admin bool, created_at, disabled_at)
+sessions        (id, user_id, token_hash, user_agent, created_at, last_seen_at, expires_at)
+teams           (id, name, kind 'personal'|'shared', created_by, created_at, deleted_at)
+team_members    (team_id, user_id, role 'owner'|'admin'|'driver'|'viewer',
+                 joined_at, left_at)                       -- history, not just current
+team_join_requests
+                (id, team_id, user_id, message, status 'pending'|'approved'|'declined'|'withdrawn',
+                 requested_at, decided_by, decided_at)
+drive_types     (key PK, label, icon, sort, archived_at)     -- site-wide list, site admin edits
+team_drive_types(team_id, drive_type_key, counts bool)       -- each team's toggles
+devices         (id, user_id, name, platform, app_version, token_hash,
+                 last_seen_at, revoked_at)
+```
+
+### Fleet
+```sql
+vehicles        (id, managed_by_team_id NULL, name, make, model, year, color, plate,
+                 photo_path, checkout_policy 'open'|'admin_only',
+                 created_by, created_at, archived_at)
+vehicle_assignments
+                (id, vehicle_id, user_id, kind 'permanent'|'checkout',
+                 during tstzrange,                          -- [start, end) ; open end = active
+                 assigned_by, note)
+  -- EXCLUDE USING gist (vehicle_id WITH =, during WITH &&) WHERE kind='checkout'
+  --   → a van can't be checked out to two people at once
+loggers         (id, owner_user_id, name, hardware_id UNIQUE, key_hash,
+                 firmware_version, last_seen_at, last_battery_mv,
+                 created_at, revoked_at)
+logger_installs (id, logger_id, vehicle_id, during tstzrange)   -- same EXCLUDE per logger
+```
+
+### Map data (server-built)
+```sql
+osm_imports     (id, source_url, region, osm_timestamp, started_at, finished_at, status)
+street_ways     (way_id bigint PK, name, highway, oneway, tags jsonb,
+                 geom LineString, import_id)
+street_segments (id bigint PK, way_id, seq, geom LineString, length_m,
+                 from_node, to_node)                        -- split at intersections
+                 -- the unit of coverage; ids stable across imports where geometry unchanged
+areas           (id, team_id NULL,                          -- NULL = public boundary
+                 parent_id, name, level 'country'|'state'|'county'|'city'|'neighborhood'|'custom',
+                 source 'drawn'|'osm_boundary', osm_relation_id,
+                 geom MultiPolygon, color, notes, created_by,
+                 created_at, updated_at, deleted_at, version int)
+area_segments   (area_id, segment_id, clipped_length_m)     -- built by worker
+area_packages   (id, area_id, version, kind 'streets'|'tiles',
+                 path, bytes, sha256, built_at)              -- what apps download
+jobs            -- managed by pg-boss
+```
+
+### Driving and coverage
+```sql
+drives          (id uuid PK,                                -- generated on the phone/logger
+                 source 'phone'|'logger', device_id NULL, logger_id NULL,
+                 user_id NULL, vehicle_id NULL,             -- resolved, editable on the web
+                 drive_type_key,                            -- asked at start; loggers use a default
+                 attribution 'explicit'|'inferred'|'unknown',
+                 started_at, ended_at, distance_m,
+                 track geometry(LineStringM),               -- raw, M = epoch seconds
+                 raw_path,                                  -- original upload kept on disk
+                 status 'received'|'matching'|'matched'|'failed', error,
+                 created_at, updated_at, deleted_at)
+logger_batches  (logger_id, seq, received_at, via 'wifi'|'ble', drive_id)
+                 PK (logger_id, seq)                         -- idempotent re-uploads
+segment_passes  (segment_id, drive_id, user_id, vehicle_id, driven_at, direction)
+team_coverage   (team_id, segment_id, first_driven_at, first_drive_id,
+                 first_user_id, pass_count)                  -- rolled up by worker
+segment_marks   (team_id, segment_id, kind 'complete'|'excluded',
+                 user_id, note, created_at, deleted_at)
+area_progress   (area_id, team_id, total_m, driven_m, marked_m, updated_at)  -- cache
+```
+
+### Places, achievements, audit
+```sql
+places          (id, team_id, user_id, drive_id NULL, kind, geom Point, note,
+                 created_at, updated_at, deleted_at)
+place_photos    (id, place_id, path, width, height, created_at)
+achievements    (user_id, key, earned_at, drive_id)          -- definitions live in code
+audit_log       (id, at, user_id, team_id, action, entity, entity_id, data jsonb)
+```
+
+## APIs at a glance
+
+- **Web/app (session or device token):** `/api/auth/*`, `/api/me`, `/api/teams/*`,
+  `/api/vehicles/*` (incl. `POST …/checkout`, `POST …/return`), `/api/loggers/*`,
+  `/api/areas/*`, `/api/drives/*`, `/api/coverage`, `/api/places/*`.
+- **App sync:** `GET /api/sync?since=<cursor>` returns changed areas, marks, vehicles,
+  assignments and tombstones. `GET /api/areas/:id/package` downloads a prebuilt
+  street and tile pack.
+- **Upload:** `POST /api/drives` (phone, gzip NDJSON of fixes, idempotent on drive id).
+- **Logger:** `POST /api/logger/batches`, with header `X-Logger-Id`, a body of fixes, and
+  an HMAC-SHA256 signature over the body using the logger key. Idempotent on (logger, seq).
+  A phone relaying over BLE forwards the same signed blob unchanged, so the phone never
+  holds the logger's key.
+- **Logger provisioning:** register on the web, which shows the key once with a QR code
+  and a `curl` line to flash. The logger pulls its time and settings from `GET /api/logger/config`.
+
+## Build stages
+
+0. **Scaffold.** `v2/` folder, compose (db, api, worker, valhalla), migration runner,
+   login page ported and served, health checks. *Done when* `docker compose up` shows
+   the login page on :8430.
+1. **Identity.** Open sign-up/sign-in, sessions, personal team on sign-up, teams,
+   join requests approved by team admins, roles, drive types + team toggles,
+   account modal, site-admin page.
+2. **Fleet.** Vehicles, permanent assignments, checkout/return with history, devices,
+   logger registration and keys.
+3. **Map data.** Geofabrik import, segmenting, public boundaries, drawn areas, area
+   builds as jobs, cached tiles, area packages.
+4. **Drives.** Phone + logger upload, attribution, Valhalla matching, passes, team
+   coverage, marks, drive editing (fix driver/vehicle).
+5. **Insights.** Progress, drives list, places/photos, achievements, leaderboard
+   (per team).
+6. **Apps.** Sync API hardened, then the Android app moved onto v2 (separate go-ahead).
+7. **Logger firmware.** Reference ESP32 sketch for Wi-Fi upload, and BLE after that.
+
+## Decisions (2026-10-03)
+
+1. **Multi-team drivers.** Each drive has a type, which the app asks for at the start.
+   Each team chooses which types count for it.
+2. **Sign-up** is open. Joining a team needs approval from that team's admins.
+3. **Map tiles.** Start with cached raster tiles. Vector tiles (PMTiles) come later,
+   together with the Android app moving to MapLibre.
+4. **Location.** `v2/` sits inside the repo, beside `tools/`. Builds happen inside Docker,
+   so there is no `node_modules` in the synced folder. `DATA_DIR` (Postgres, photos,
+   tiles, OSM) defaults to `~/streetsweep-v2-data`, outside Synology.
+
+## Still open
+
+- **Drive type for logger drives.** A logger can't ask anyone. Draft: each logger has a
+  default type, and the drive can be changed on the web afterwards.
+- **Finding teams.** Draft: teams are searchable by name, and a team can be made unlisted,
+  in which case people join through a link with a code.

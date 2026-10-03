@@ -1,0 +1,13 @@
+/* Brand tokens shared with the login page. */
+:root {
+  --navy-950: #02142a;
+  --navy-900: #0b2340;
+  --green-600: #1e8a28;
+  --green-400: #45bd23;
+  --ink: #e8eef5;
+  --ink-soft: #9fb0c2;
+  --ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { font-family: var(--ui); background: var(--navy-950); color: var(--ink); -webkit-font-smoothing: antialiased; }

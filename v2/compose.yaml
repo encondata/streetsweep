@@ -1,0 +1,86 @@
+# StreetSweep v2. `docker compose up -d --build` from this folder.
+# Runs beside v1 (tools/, port 8420): different container names, port and data folder.
+name: streetsweep-v2
+
+x-app-env: &app-env
+  DATABASE_URL: postgres://streetsweep:${POSTGRES_PASSWORD:-streetsweep}@db:5432/streetsweep
+  TIMEZONE: ${TIMEZONE:-America/Chicago}
+  # Only the worker talks to these. The api never calls out.
+  VALHALLA_URL: ${VALHALLA_URL:-https://valhalla.hackspacelabs.com}
+  OVERPASS_URL: ${OVERPASS_URL:-}
+  OSM_EXTRACT_URL: ${OSM_EXTRACT_URL:-}
+  DATA_DIR: /data
+
+services:
+  db:
+    # Multi-arch PostGIS (postgis/postgis is amd64 only). Same layout as the official image.
+    image: ${POSTGIS_IMAGE:-imresamu/postgis:16-3.5}
+    container_name: streetsweep2-db
+    environment:
+      POSTGRES_USER: streetsweep
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-streetsweep}
+      POSTGRES_DB: streetsweep
+    volumes:
+      # Outside the Synology-synced repo: a live database must never be file-synced.
+      - ${DATA_DIR:-${HOME}/streetsweep-v2-data}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U streetsweep -d streetsweep"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build: .
+    image: streetsweep/v2
+    container_name: streetsweep2-api
+    command: ["node", "dist/api.js"]
+    environment:
+      <<: *app-env
+      PORT: "80"
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    volumes:
+      - ${DATA_DIR:-${HOME}/streetsweep-v2-data}/files:/data
+    ports:
+      - "${BIND_ADDRESS:-0.0.0.0}:${HOST_PORT:-8430}:80"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
+  worker:
+    image: streetsweep/v2
+    container_name: streetsweep2-worker
+    command: ["node", "dist/worker.js"]
+    environment:
+      <<: *app-env
+    volumes:
+      - ${DATA_DIR:-${HOME}/streetsweep-v2-data}/files:/data
+    depends_on:
+      # The api applies migrations on start; the worker waits for it to be healthy.
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Optional private Valhalla: `docker compose --profile valhalla up -d`, then set
+  # VALHALLA_URL=http://valhalla:8002. First start builds routing tiles (an hour or more).
+  valhalla:
+    profiles: ["valhalla"]
+    image: ghcr.io/valhalla/valhalla-scripted:latest
+    container_name: streetsweep2-valhalla
+    environment:
+      tile_urls: ${VALHALLA_PBF_URL:-https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf}
+      use_tiles_ignore_pbf: "True"
+      build_elevation: "False"
+      build_admins: "False"
+      build_time_zones: "False"
+      server_threads: ${VALHALLA_THREADS:-4}
+    volumes:
+      - ${DATA_DIR:-${HOME}/streetsweep-v2-data}/valhalla:/custom_files
+    restart: unless-stopped
