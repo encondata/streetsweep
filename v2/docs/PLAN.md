@@ -1,6 +1,6 @@
 # StreetSweep v2 — plan
 
-Status: **agreed 2026-10-03**. Stages 0–2 and 3a (streets) done. 3b (areas) next.
+Status: **agreed 2026-10-03**. Stages 0–3 done. Stage 4 (drives) next.
 
 v2 is a ground-up, multi-user rebuild. v1 (`tools/`) keeps running untouched beside it
 until v2 replaces it. v2 starts with an empty database — no v1 import.
@@ -135,8 +135,10 @@ areas           (id, team_id NULL,                          -- NULL = public bou
                  geom MultiPolygon, color, notes, created_by,
                  created_at, updated_at, deleted_at, version int)
 area_segments   (area_id, segment_id, clipped_length_m)     -- built by worker
+area_segments   (area_id, segment_id, inside_m)              -- built by the worker
+team_areas      (team_id, area_id, added_by, added_at)       -- public areas a team follows
 area_packages   (id, area_id, version, kind 'streets'|'tiles',
-                 path, bytes, sha256, built_at)              -- what apps download
+                 path, bytes, sha256, built_at)              -- stage 6: what apps download
 jobs            -- managed by pg-boss
 ```
 
@@ -197,8 +199,12 @@ audit_log       (id, at, user_id, team_id, action, entity, entity_id, data jsonb
    account modal, site-admin page.
 2. ✅ **Fleet.** Vehicles, permanent assignments, checkout/return with history, devices,
    logger registration and keys.
-3. ◐ **Map data.** 3a ✅ streets: osmium → segments → PostGIS vector tiles at
-   `/api/tiles/streets/{z}/{x}/{y}` (zoom 12+), a Map page, and Admin → Map data. 3b: areas. Geofabrik import, segmenting, public boundaries, drawn areas, area
+3. ✅ **Map data.**
+   - 3a, streets: osmium → segments → PostGIS vector tiles at `/api/tiles/streets/{z}/{x}/{y}`
+     (zoom 12+), a Map page, and Admin → Map data.
+   - 3b, areas: state, county and city boundaries from the same extract (boundary lines
+     tiled at `/api/tiles/areas`); team-drawn areas; teams following public areas. Each
+     area's street list is built by the worker. Geofabrik import, segmenting, public boundaries, drawn areas, area
    builds as jobs, cached tiles, area packages.
 4. **Drives.** Phone + logger upload, attribution, Valhalla matching, passes, team
    coverage, marks, drive editing (fix driver/vehicle).
@@ -248,6 +254,22 @@ audit_log       (id, at, user_id, team_id, action, entity, entity_id, data jsonb
     checked on Texas with 0 changes. Pieces that disappear are retired, never deleted.
     Texas has 1.2 M streets, 2.46 M segments and about 436 k miles, and imports in about
     2 minutes. It refreshes monthly on the 3rd.
+
+11. **Areas.**
+    - Public boundaries are OSM `boundary=administrative` relations at admin levels 4, 6
+      and 8 (state, county, city), clipped to the state. Texas has 1 state, 254 counties
+      and 1,224 cities. Each boundary's parent is the smallest boundary containing a
+      point inside it.
+    - Teams *follow* public areas. A street list is shared by every team that follows it.
+    - Teams draw their own areas: neighbourhood or custom, several pieces allowed, at
+      most 5,000 km². Only owners and admins can draw, edit, follow or unfollow.
+    - An area's street list (`area_segments`) records how many metres of each segment
+      lie inside it, so edge streets count only for their inside part.
+    - Builds run in the worker: Travis County takes about 5 s, the whole state about 32 s.
+      Outlines are versioned, and a build only lands if the outline didn't change
+      meanwhile.
+    - After every street import, all areas in use are rebuilt.
+    - Area *packages* for the apps move to stage 6, where the apps need them.
 
 ## Still open
 

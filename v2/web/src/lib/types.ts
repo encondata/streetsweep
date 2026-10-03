@@ -179,3 +179,37 @@ export function vehicleLine(v: Pick<Vehicle, "year" | "make" | "model" | "plate"
   const what = [v.year, v.make, v.model].filter(Boolean).join(" ");
   return [what || null, v.color, v.plate].filter(Boolean).join(" · ");
 }
+
+// ---- areas ----
+
+export type AreaLevel = "state" | "county" | "city" | "neighborhood" | "custom";
+export const LEVEL_LABEL: Record<AreaLevel, string> = {
+  state: "State", county: "County", city: "City", neighborhood: "Neighborhood", custom: "Custom area",
+};
+
+export interface Area {
+  id: string;
+  name: string;
+  level: AreaLevel;
+  source: "drawn" | "osm_boundary";
+  team_id: string | null;
+  team_name?: string | null;
+  parent_id: string | null;
+  parent_name: string | null;
+  color: string | null;
+  notes: string | null;
+  version: number;
+  build_status: "none" | "queued" | "building" | "built" | "failed";
+  built_version: number | null;
+  built_at: string | null;
+  build_error?: string | null;
+  segment_count: number | null;
+  street_m: number | null;
+  km2: number;
+  bbox: [number, number, number, number];
+  geometry?: GeoJSON.Polygon | GeoJSON.MultiPolygon;
+  followed?: boolean;
+  followed_by?: string[];
+}
+
+export const AREA_COLORS = ["#1e8a28", "#1a6fd4", "#8e44ad", "#d35400", "#c0392b", "#16a085", "#b7950b", "#2c3e50"];

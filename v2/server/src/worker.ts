@@ -4,11 +4,12 @@ import { PgBoss } from "pg-boss";
 import { config } from "./config.js";
 import { pool } from "./db.js";
 import { regionOf, runImport } from "./osm/import.js";
+import { areasInUse, buildArea, importBoundaries } from "./osm/areas.js";
 
 const boss = new PgBoss({ connectionString: config.databaseUrl });
 boss.on("error", (err) => console.error("pg-boss:", err));
 
-export const QUEUES = { ping: "ping", osmImport: "osm-import" } as const;
+export const QUEUES = { ping: "ping", osmImport: "osm-import", areaBuild: "area-build" } as const;
 type ImportJob = { force?: boolean; requestedBy?: string | null };
 
 async function osmImport(data: ImportJob) {
@@ -21,8 +22,12 @@ async function osmImport(data: ImportJob) {
   const t0 = Date.now();
   console.log(`osm-import #${importId}: ${url}${data.force ? " (forced)" : ""}`);
   try {
-    await runImport({ importId, url, force: !!data.force });
-    console.log(`osm-import #${importId}: finished in ${Math.round((Date.now() - t0) / 1000)} s`);
+    const result = await runImport({ importId, url, force: !!data.force });
+    if (result === "imported") {
+      await finishWithBoundaries(importId, regionOf(url));
+      await rebuildAreasInUse();
+    }
+    console.log(`osm-import #${importId}: ${result} in ${Math.round((Date.now() - t0) / 1000)} s`);
   } catch (err) {
     console.error(`osm-import #${importId} failed:`, err);
     await pool.query(
@@ -31,6 +36,23 @@ async function osmImport(data: ImportJob) {
     );
     throw err;
   }
+}
+
+/** Boundaries come from the same extract; the run is done once they're in. */
+async function finishWithBoundaries(importId: number, region: string) {
+  const step = (s: string) => pool.query(`UPDATE osm_imports SET step = $2 WHERE id = $1`, [importId, s]).then(() => {});
+  const n = await importBoundaries(region, step);
+  await pool.query(`UPDATE osm_imports SET status = 'done', step = 'Done', boundaries = $2, finished_at = now() WHERE id = $1`, [importId, n]);
+}
+
+/** New streets mean every area someone uses needs its street list redone. */
+async function rebuildAreasInUse() {
+  for (const id of await areasInUse()) await queueBuild(id);
+}
+
+async function queueBuild(areaId: string) {
+  await pool.query(`UPDATE areas SET build_status = 'queued' WHERE id = $1 AND build_status <> 'building'`, [areaId]);
+  await boss.send(QUEUES.areaBuild, { areaId }, { singletonKey: areaId });
 }
 
 async function main() {
@@ -45,6 +67,13 @@ async function main() {
   // One import at a time; Texas takes a while, so a generous expiry and one retry.
   await boss.createQueue(QUEUES.osmImport, { policy: "singleton", expireInSeconds: 4 * 3600, retryLimit: 1, retryDelay: 900 });
   await boss.work<ImportJob>(QUEUES.osmImport, async ([job]) => osmImport(job.data ?? {}));
+  // Street lists for areas: a few at a time, a repeat for the same area while one waits is dropped.
+  await boss.createQueue(QUEUES.areaBuild, { expireInSeconds: 3600, retryLimit: 2, retryDelay: 60 });
+  await boss.work<{ areaId: string }>(QUEUES.areaBuild, { localConcurrency: 2 }, async ([job]) => {
+    const t0 = Date.now();
+    await buildArea(job.data.areaId);
+    console.log(`area-build ${job.data.areaId}: ${Date.now() - t0} ms`);
+  });
   // Geofabrik refreshes daily; monthly is plenty for streets (3rd of the month, 04:00).
   await boss.schedule(QUEUES.osmImport, "0 4 3 * *", {}, { tz: config.timezone });
 
@@ -54,6 +83,17 @@ async function main() {
   // First start: no streets yet, so fetch them now rather than waiting for the 3rd.
   const any = await pool.query(`SELECT 1 FROM osm_imports WHERE status = 'done' LIMIT 1`);
   if (!any.rows.length) await boss.send(QUEUES.osmImport, { force: true });
+  else {
+    // Streets but no boundaries yet (an install from before areas existed): add them now.
+    const b = await pool.query(`SELECT 1 FROM areas WHERE source = 'osm_boundary' LIMIT 1`);
+    const last = await pool.query<{ id: number; region: string }>(
+      `SELECT id, region FROM osm_imports WHERE status = 'done' ORDER BY id DESC LIMIT 1`);
+    if (!b.rows.length && last.rows[0]) {
+      const { id, region } = last.rows[0];
+      console.log("boundaries: none yet, importing from the current extract");
+      finishWithBoundaries(id, region).catch((err) => console.error("boundaries failed:", err));
+    }
+  }
 
   console.log("worker ready");
 }

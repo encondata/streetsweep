@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import AreaPanel from "../components/AreaPanel.svelte";
   import { MapController, STREETS_MIN_ZOOM, type Base } from "../lib/map";
   import { api } from "../lib/api";
   import { date } from "../lib/format";
@@ -12,7 +13,9 @@
   };
 
   let box: HTMLDivElement;
-  let ctl: MapController | null = null;
+  let ctl = $state<MapController | null>(null);
+  let panel = $state<ReturnType<typeof AreaPanel>>();
+  const PANEL_W = 360;
   let info = $state<Info | null>(null);
   let zoom = $state(11);
   let base = $state<Base>(readBase());
@@ -61,6 +64,7 @@
     const unwatch = ctl.watchSize(box);
     ctl.map.on("zoomend", () => (zoom = ctl!.map.getZoom()));
     zoom = ctl.map.getZoom();
+    ctl.onAreaClick = (id) => panel?.open(id);
     ctl.onStreetClick = (s, at) => {
       const kind = KIND[s.highway.replace(/_link$/, "")] ?? s.highway;
       const feet = Math.round(s.length_m * 3.28084);
@@ -98,6 +102,8 @@
 <div class="mapwrap">
   <div class="map" bind:this={box}></div>
 
+  {#if ctl}<AreaPanel bind:this={panel} {ctl} panelWidth={PANEL_W} />{/if}
+
   <div class="top">
     <div class="seg" role="group" aria-label="Basemap">
       {#each BASES as b (b.key)}
@@ -129,7 +135,7 @@
   .seg { display: flex; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 3px; box-shadow: var(--shadow); }
   .seg button { height: 30px; border: 0; background: none; padding: 0 12px; font-size: 13px; border-radius: 7px; color: var(--ink-soft); }
   .seg button.on { background: var(--accent-soft); color: var(--green-700); }
-  .bottom { position: absolute; left: 50%; transform: translateX(-50%); bottom: 36px; display: flex; justify-content: center; pointer-events: none; max-width: calc(100% - 32px); }
+  .bottom { position: absolute; left: calc(50% + 187px); transform: translateX(-50%); bottom: 36px; display: flex; justify-content: center; pointer-events: none; max-width: calc(100% - 32px); }
   .chip {
     pointer-events: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 99px; padding: 8px 14px;
     font-size: 13px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 8px; text-align: center;
@@ -141,6 +147,6 @@
   :global(.maplibregl-popup-content .muted) { color: var(--ink-soft); }
   @media (max-width: 760px) {
     .mapwrap { height: calc(100dvh - 64px - env(safe-area-inset-bottom)); }
-    .bottom { bottom: 28px; }
+    .bottom { bottom: auto; top: 60px; left: 50%; }
   }
 </style>

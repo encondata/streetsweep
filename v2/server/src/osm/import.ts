@@ -118,7 +118,8 @@ function oneway(tags: Record<string, string>): boolean {
   return v === "yes" || v === "1" || v === "true" || v === "-1" || tags.junction === "roundabout";
 }
 
-export async function runImport(opts: { importId: number; url: string; force: boolean }): Promise<void> {
+/** Streets only; the caller finishes the run (boundaries, then status 'done'). */
+export async function runImport(opts: { importId: number; url: string; force: boolean }): Promise<"imported" | "skipped"> {
   const { importId, url } = opts;
   const progress: Progress = async (step, extra = {}) => {
     const sets = ["step = $2", ...Object.keys(extra).map((k, i) => `${k} = $${i + 3}`)];
@@ -145,7 +146,7 @@ export async function runImport(opts: { importId: number; url: string; force: bo
     );
     if (prev.rows.length) {
       await pool.query(`UPDATE osm_imports SET status = 'skipped', step = 'Already up to date', finished_at = now() WHERE id = $1`, [importId]);
-      return;
+      return "skipped";
     }
   }
 
@@ -245,7 +246,7 @@ export async function runImport(opts: { importId: number; url: string; force: bo
     await client.query(`DROP INDEX IF EXISTS import_segments_way_id_from_node_to_node_dup_idx`);
     await client.query(`DROP INDEX IF EXISTS import_ways_way_id_idx`);
     await client.query(
-      `UPDATE osm_imports SET status = 'done', step = 'Done', finished_at = now(), ways = $2, segments = $3,
+      `UPDATE osm_imports SET step = 'Streets saved', ways = $2, segments = $3,
               added = $4, changed = $5, retired = $6 WHERE id = $1`,
       [importId, ways, segments, merged.rows[0].added, merged.rows[0].changed, retired.rowCount ?? 0],
     );
@@ -258,4 +259,5 @@ export async function runImport(opts: { importId: number; url: string; force: bo
   }
   await pool.query("ANALYZE street_segments");
   await pool.query("ANALYZE street_ways");
+  return "imported";
 }
