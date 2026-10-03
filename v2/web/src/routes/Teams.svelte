@@ -7,6 +7,7 @@
   import { router } from "../lib/router.svelte";
   import { session } from "../lib/session.svelte";
   import { ago } from "../lib/format";
+  import { formValues } from "../lib/forms";
   import { ROLE_LABEL, type Role, type TeamDetail } from "../lib/types";
 
   type Found = { id: string; name: string; member_count: number; my_role: Role | null; requested: boolean };
@@ -166,7 +167,7 @@
         <input type="search" placeholder="Search teams by name" bind:value={q} aria-label="Search teams" />
       </label>
       <form class="code" onsubmit={(e) => { e.preventDefault(); useCode(); }}>
-        <input type="text" placeholder="Join code or link" bind:value={code} aria-label="Join code" />
+        <input type="text" placeholder="Join code or link" bind:value={code} autocomplete="off" aria-label="Join code" />
         <button type="submit" disabled={!code.trim()}>Go</button>
       </form>
     </div>
@@ -207,8 +208,8 @@
 </Modal>
 
 <Modal bind:open={creating} title="New team">
-  <form id="new-team" class="stack" onsubmit={(e) => { e.preventDefault(); createTeam(); }}>
-    <label class="field">Name <input type="text" bind:value={newName} maxlength="80" placeholder="e.g. The Hendersons, Acme Deliveries" required /></label>
+  <form id="new-team" class="stack" onsubmit={(e) => { e.preventDefault(); newName = formValues(e.currentTarget).name ?? newName; createTeam(); }}>
+    <label class="field">Name <input type="text" name="name" bind:value={newName} maxlength="80" autocomplete="off" placeholder="e.g. The Hendersons, Acme Deliveries" required /></label>
     <label class="toggle">
       <span class="switch"><input type="checkbox" bind:checked={newListed} /><span></span></span>
       <span><strong>Show in search</strong><br /><span class="muted small">Off: people can only find it with the join link.</span></span>
@@ -217,7 +218,7 @@
   </form>
   {#snippet footer()}
     <button class="ghost" onclick={() => (creating = false)}>Cancel</button>
-    <button class="primary" type="submit" form="new-team" disabled={busy || !newName.trim()}>Create team</button>
+    <button class="primary" type="submit" form="new-team" disabled={busy}>Create team</button>
   {/snippet}
 </Modal>
 

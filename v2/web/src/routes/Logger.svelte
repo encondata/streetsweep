@@ -4,6 +4,7 @@
   import { api, errorText } from "../lib/api";
   import { router } from "../lib/router.svelte";
   import { ago, date, span } from "../lib/format";
+  import { formValues } from "../lib/forms";
   import type { DriveType, LoggerDetail, LoggerSetup, Vehicle } from "../lib/types";
 
   let { id }: { id: string } = $props();
@@ -134,13 +135,13 @@
     </section>
 
     {#if !l.revoked_at}
-      <form class="card pad stack" onsubmit={(e) => { e.preventDefault(); save(); }}>
+      <form class="card pad stack" onsubmit={(e) => { e.preventDefault(); name = formValues(e.currentTarget).name ?? name; save(); }}>
         <h2>Settings</h2>
-        <label class="field">Name <input type="text" bind:value={name} maxlength="60" required /></label>
+        <label class="field">Name <input type="text" name="name" bind:value={name} maxlength="60" autocomplete="off" required /></label>
         <label class="field">Drive type for its drives
           <select bind:value={type}>{#each types as t (t.key)}<option value={t.key}>{t.label}</option>{/each}</select>
         </label>
-        <div><button type="submit" disabled={busy || !name.trim() || (name === l.name && type === l.default_drive_type_key)}>Save</button></div>
+        <div><button type="submit" disabled={busy}>Save</button></div>
       </form>
 
       <section class="card pad stack">

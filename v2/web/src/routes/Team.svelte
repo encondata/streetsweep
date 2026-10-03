@@ -7,6 +7,7 @@
   import { router } from "../lib/router.svelte";
   import { session } from "../lib/session.svelte";
   import { ago, date } from "../lib/format";
+  import { formValues } from "../lib/forms";
   import { ROLE_HELP, ROLE_LABEL, type Role, type TeamDetail, type TeamPreview, type Member } from "../lib/types";
 
   let { id, tab }: { id: string; tab: string } = $props();
@@ -254,16 +255,16 @@
       {#if !detail.can_admin}<p class="muted small">Only this team's admins can change these.</p>{/if}
 
     {:else if current === "settings"}
-      <form class="card pad stack" onsubmit={(e) => { e.preventDefault(); saveSettings(); }}>
+      <form class="card pad stack" onsubmit={(e) => { e.preventDefault(); name = formValues(e.currentTarget).name ?? name; saveSettings(); }}>
         <h2>Team</h2>
-        <label class="field">Name <input type="text" bind:value={name} maxlength="80" required /></label>
+        <label class="field">Name <input type="text" name="name" bind:value={name} maxlength="80" autocomplete="off" required /></label>
         {#if !personal}
           <label class="toggle">
             <span class="switch"><input type="checkbox" bind:checked={listed} /><span></span></span>
             <span><strong>Show in search</strong><br /><span class="muted small">Off: people can only find the team with the join link.</span></span>
           </label>
         {/if}
-        <div><button type="submit" disabled={busy || !name.trim() || (name === detail.team.name && listed === detail.team.listed)}>Save</button></div>
+        <div><button type="submit" disabled={busy}>Save</button></div>
       </form>
 
       {#if !personal}

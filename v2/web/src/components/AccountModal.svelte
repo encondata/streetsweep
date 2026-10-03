@@ -5,6 +5,7 @@
   import { api, errorText } from "../lib/api";
   import { session } from "../lib/session.svelte";
   import { cropToBlob } from "../lib/image";
+  import { formValues } from "../lib/forms";
   import type { Me } from "../lib/types";
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
@@ -77,20 +78,20 @@
 
   {#if msg}<p class="notice" class:error={msg.error}>{msg.text}</p>{/if}
 
-  <form class="stack" onsubmit={(e) => { e.preventDefault(); saveProfile(); }}>
-    <label class="field">Name <input type="text" bind:value={name} maxlength="80" required /></label>
-    <label class="field">Email <input type="email" bind:value={email} required /></label>
-    <div><button type="submit" disabled={busy || (name === user.display_name && email === user.email)}>Save</button></div>
+  <form class="stack" onsubmit={(e) => { e.preventDefault(); const f = formValues(e.currentTarget); name = f.name ?? name; email = f.email ?? email; saveProfile(); }}>
+    <label class="field">Name <input type="text" name="name" bind:value={name} maxlength="80" autocomplete="name" required /></label>
+    <label class="field">Email <input type="email" name="email" bind:value={email} autocomplete="email" required /></label>
+    <div><button type="submit" disabled={busy}>Save</button></div>
   </form>
 
   <hr />
 
-  <form class="stack" onsubmit={(e) => { e.preventDefault(); changePassword(); }}>
+  <form class="stack" onsubmit={(e) => { e.preventDefault(); const f = formValues(e.currentTarget); current = f.current ?? current; next = f.next ?? next; changePassword(); }}>
     <h3>Change password</h3>
-    <label class="field">Current password <input type="password" bind:value={current} autocomplete="current-password" required /></label>
+    <label class="field">Current password <input type="password" name="current" bind:value={current} autocomplete="current-password" required /></label>
     <label class="field">New password <span class="help">At least 8 characters.</span>
-      <input type="password" bind:value={next} autocomplete="new-password" minlength="8" required /></label>
-    <div><button type="submit" disabled={busy || !current || next.length < 8}>Change password</button></div>
+      <input type="password" name="next" bind:value={next} autocomplete="new-password" minlength="8" required /></label>
+    <div><button type="submit" disabled={busy}>Change password</button></div>
   </form>
 
   {#snippet footer()}

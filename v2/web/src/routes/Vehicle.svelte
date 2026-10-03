@@ -8,6 +8,7 @@
   import { session } from "../lib/session.svelte";
   import { ago, date, span } from "../lib/format";
   import { cropToBlob } from "../lib/image";
+  import { syncFrom } from "../lib/forms";
   import { formToBody, vehicleToForm, emptyVehicleForm } from "../lib/vehicleForm";
   import { ROLE_LABEL, vehicleLine, type VehicleDetail } from "../lib/types";
 
@@ -250,10 +251,10 @@
     </section>
 
     {#if d.can_admin}
-      <form class="card pad stack" onsubmit={(e) => { e.preventDefault(); save(); }}>
+      <form class="card pad stack" onsubmit={(e) => { e.preventDefault(); syncFrom(form, e.currentTarget); save(); }}>
         <h2>Details</h2>
         <VehicleForm bind:value={form} {shared} />
-        <div><button type="submit" disabled={busy || !form.name.trim()}>Save</button></div>
+        <div><button type="submit" disabled={busy}>Save</button></div>
       </form>
 
       <section class="card pad stack">

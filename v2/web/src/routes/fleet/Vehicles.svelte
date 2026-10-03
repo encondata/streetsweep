@@ -10,6 +10,7 @@
   import { session } from "../../lib/session.svelte";
   import { ago } from "../../lib/format";
   import { emptyVehicleForm, formToBody } from "../../lib/vehicleForm";
+  import { syncFrom } from "../../lib/forms";
   import { vehicleLine, type Vehicle, type VehicleDetail } from "../../lib/types";
 
   let showArchived = $derived(router.query.get("archived") === "1");
@@ -155,7 +156,7 @@
 {/each}
 
 <Modal bind:open={adding} title="Add vehicle" width={560}>
-  <form id="add-vehicle" class="stack" onsubmit={(e) => { e.preventDefault(); add(); }}>
+  <form id="add-vehicle" class="stack" onsubmit={(e) => { e.preventDefault(); syncFrom(form, e.currentTarget); add(); }}>
     <label class="field">Managed by
       <span class="help">That team's admins look after it. Its drivers can take it.</span>
       <select bind:value={teamId}>
@@ -166,7 +167,7 @@
   </form>
   {#snippet footer()}
     <button class="ghost" onclick={() => (adding = false)}>Cancel</button>
-    <button class="primary" type="submit" form="add-vehicle" disabled={busy === "add" || !form.name.trim() || !teamId}>Add vehicle</button>
+    <button class="primary" type="submit" form="add-vehicle" disabled={busy === "add" || !teamId}>Add vehicle</button>
   {/snippet}
 </Modal>
 

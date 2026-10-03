@@ -5,6 +5,7 @@
   import SetupModal from "../../components/SetupModal.svelte";
   import { api, errorText } from "../../lib/api";
   import { ago } from "../../lib/format";
+  import { formValues } from "../../lib/forms";
   import type { DriveType, Logger, LoggerDetail, LoggerSetup } from "../../lib/types";
 
   let loggers = $state<Logger[] | null>(null);
@@ -88,8 +89,8 @@
 {/if}
 
 <Modal bind:open={adding} title="Register a logger">
-  <form id="new-logger" class="stack" onsubmit={(e) => { e.preventDefault(); register(); }}>
-    <label class="field">Name <input type="text" bind:value={name} maxlength="60" placeholder="e.g. Van 1 logger" required /></label>
+  <form id="new-logger" class="stack" onsubmit={(e) => { e.preventDefault(); name = formValues(e.currentTarget).name ?? name; register(); }}>
+    <label class="field">Name <input type="text" name="name" bind:value={name} maxlength="60" autocomplete="off" placeholder="e.g. Van 1 logger" required /></label>
     <label class="field">Drive type for its drives
       <span class="help">A logger can't ask, so its drives get this type. You can change a drive's type afterwards.</span>
       <select bind:value={type}>{#each types as t (t.key)}<option value={t.key}>{t.label}</option>{/each}</select>
@@ -98,7 +99,7 @@
   </form>
   {#snippet footer()}
     <button class="ghost" onclick={() => (adding = false)}>Cancel</button>
-    <button class="primary" type="submit" form="new-logger" disabled={busy || !name.trim()}>Register</button>
+    <button class="primary" type="submit" form="new-logger" disabled={busy}>Register</button>
   {/snippet}
 </Modal>
 

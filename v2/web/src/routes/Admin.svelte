@@ -7,6 +7,7 @@
   import { api, errorText } from "../lib/api";
   import { session } from "../lib/session.svelte";
   import { ago, date } from "../lib/format";
+  import { formValues } from "../lib/forms";
 
   let { tab }: { tab: string } = $props();
 
@@ -188,11 +189,11 @@
         </tbody>
       </table>
     </div>
-    <form class="card pad add" onsubmit={(e) => { e.preventDefault(); addType(); }}>
-      <label class="field">New type <input type="text" bind:value={newLabel} onblur={suggestKey} maxlength="40" placeholder="e.g. Rideshare" /></label>
+    <form class="card pad add" onsubmit={(e) => { e.preventDefault(); const f = formValues(e.currentTarget); newLabel = f.label ?? newLabel; newKey = f.key ?? newKey; addType(); }}>
+      <label class="field">New type <input type="text" name="label" bind:value={newLabel} onblur={suggestKey} maxlength="40" autocomplete="off" placeholder="e.g. Rideshare" required /></label>
       <label class="field">Key <span class="help">Lowercase, can't change later.</span>
-        <input type="text" bind:value={newKey} maxlength="32" pattern="[a-z][a-z0-9_]+" placeholder="rideshare" /></label>
-      <button type="submit" class="primary" disabled={busy || !newLabel.trim() || !newKey.trim()}><Icon name="plus" size={16} /> Add</button>
+        <input type="text" name="key" bind:value={newKey} maxlength="32" pattern="[a-z][a-z0-9_]+" autocomplete="off" placeholder="rideshare" required /></label>
+      <button type="submit" class="primary" disabled={busy}><Icon name="plus" size={16} /> Add</button>
     </form>
   {/if}
 </div>

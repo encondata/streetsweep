@@ -7,14 +7,14 @@
 
 <div class="grid">
   <label class="field wide">Name <span class="help">What people call it: "Van 3", "Mum's car".</span>
-    <input type="text" bind:value={value.name} maxlength="60" required /></label>
+    <input type="text" name="name" bind:value={value.name} maxlength="60" autocomplete="off" required /></label>
   <label class="field">Type
     <select bind:value={value.kind}>{#each VEHICLE_KINDS as k}<option value={k.key}>{k.label}</option>{/each}</select></label>
-  <label class="field">Year <input type="number" bind:value={value.year} min="1900" max="2100" placeholder="2022" /></label>
-  <label class="field">Make <input type="text" bind:value={value.make} maxlength="40" placeholder="Ford" /></label>
-  <label class="field">Model <input type="text" bind:value={value.model} maxlength="40" placeholder="Transit" /></label>
-  <label class="field">Colour <input type="text" bind:value={value.color} maxlength="30" placeholder="White" /></label>
-  <label class="field">Plate <input type="text" bind:value={value.plate} maxlength="20" /></label>
+  <label class="field">Year <input type="number" name="year" bind:value={value.year} min="1900" max="2100" autocomplete="off" placeholder="2022" /></label>
+  <label class="field">Make <input type="text" name="make" bind:value={value.make} maxlength="40" autocomplete="off" placeholder="Ford" /></label>
+  <label class="field">Model <input type="text" name="model" bind:value={value.model} maxlength="40" autocomplete="off" placeholder="Transit" /></label>
+  <label class="field">Colour <input type="text" name="color" bind:value={value.color} maxlength="30" autocomplete="off" placeholder="White" /></label>
+  <label class="field">Plate <input type="text" name="plate" bind:value={value.plate} maxlength="20" autocomplete="off" /></label>
   {#if shared}
     <label class="field wide">Who can take it out
       <select bind:value={value.checkout_policy}>
