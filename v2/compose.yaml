@@ -8,7 +8,12 @@ x-app-env: &app-env
   # Only the worker talks to these. The api never calls out.
   VALHALLA_URL: ${VALHALLA_URL:-https://valhalla.hackspacelabs.com}
   OVERPASS_URL: ${OVERPASS_URL:-}
+  # Empty = Texas (https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf).
   OSM_EXTRACT_URL: ${OSM_EXTRACT_URL:-}
+  # Sent in the User-Agent to Geofabrik, OpenStreetMap and Esri, as their usage policies ask.
+  CONTACT_EMAIL: ${CONTACT_EMAIL:-${ADMIN_EMAIL:-}}
+  TILE_URL_OSM: ${TILE_URL_OSM:-}
+  TILE_TTL_DAYS: ${TILE_TTL_DAYS:-30}
   DATA_DIR: /data
 
 services:

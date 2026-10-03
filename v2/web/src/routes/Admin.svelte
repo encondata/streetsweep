@@ -17,10 +17,19 @@
   };
   type AdminTeam = { id: string; name: string; listed: boolean; created_at: string; member_count: number; pending_requests: number };
   type DriveType = { key: string; label: string; icon: string | null; sort: number; archived_at: string | null };
+  type ImportRun = {
+    id: number; region: string; status: "running" | "done" | "failed" | "skipped"; step: string | null;
+    osm_timestamp: string | null; file_bytes: number | null; ways: number | null; segments: number | null;
+    added: number | null; changed: number | null; retired: number | null; error: string | null;
+    started_at: string; finished_at: string | null; requested_by_name: string | null;
+  };
+  type MapData = { source_url: string; region: string; runs: ImportRun[]; totals: { segments: number; meters: number; ways: number } };
 
   let users = $state<AdminUser[]>([]);
   let teams = $state<AdminTeam[]>([]);
   let types = $state<DriveType[]>([]);
+  let mapData = $state<MapData | null>(null);
+  let queued = $state(false);
   let q = $state("");
   let error = $state<string | null>(null);
   let busy = $state(false);
@@ -32,7 +41,10 @@
   let newLabel = $state("");
 
   const me = session.me!.user;
-  const TABS = [{ key: "users", label: "Users" }, { key: "teams", label: "Teams" }, { key: "drive-types", label: "Drive types" }];
+  const TABS = [
+    { key: "users", label: "Users" }, { key: "teams", label: "Teams" },
+    { key: "drive-types", label: "Drive types" }, { key: "map-data", label: "Map data" },
+  ];
 
   async function run<T>(fn: () => Promise<T>): Promise<T | undefined> {
     busy = true;
@@ -50,10 +62,41 @@
   const loadTeams = () => run(async () => (teams = (await api<{ teams: AdminTeam[] }>("/api/admin/teams")).teams));
   const loadTypes = () => run(async () => (types = (await api<{ drive_types: DriveType[] }>("/api/drive-types")).drive_types));
 
+  // While an import runs (or one was just asked for), keep the page current.
+  let mapTimer: ReturnType<typeof setTimeout> | undefined;
+  async function loadMapData() {
+    clearTimeout(mapTimer);
+    try {
+      mapData = await api<MapData>("/api/admin/osm-imports");
+      if (mapData.runs[0]?.status === "running") queued = false;
+      if (tab === "map-data" && (queued || mapData.runs[0]?.status === "running")) mapTimer = setTimeout(loadMapData, 4000);
+    } catch (e) {
+      error = errorText(e);
+    }
+  }
+  $effect(() => () => clearTimeout(mapTimer));
+
+  async function startImport() {
+    if (!confirm("Download the latest extract and re-import the streets now? Takes a few minutes; the map keeps working meanwhile.")) return;
+    const r = await run(() => api<{ queued: boolean }>("/api/admin/osm-imports", { body: { force: true } }));
+    if (r) {
+      queued = true;
+      if (!r.queued) error = "An import is already waiting or running.";
+      loadMapData();
+    }
+  }
+
+  const took = (r: ImportRun) => {
+    if (!r.finished_at) return "";
+    const s = Math.round((new Date(r.finished_at).getTime() - new Date(r.started_at).getTime()) / 1000);
+    return s < 90 ? `${s} s` : `${Math.round(s / 60)} min`;
+  };
+  const n = (v: number | null) => (v == null ? "—" : v.toLocaleString());
+
   // Reload when the tab changes, and only then (the search box has its own timer).
   $effect(() => {
     const t = tab;
-    untrack(() => (t === "users" ? loadUsers() : t === "teams" ? loadTeams() : loadTypes()));
+    untrack(() => (t === "users" ? loadUsers() : t === "teams" ? loadTeams() : t === "map-data" ? loadMapData() : loadTypes()));
   });
 
   let timer: ReturnType<typeof setTimeout>;
@@ -196,6 +239,56 @@
       <button type="submit" class="primary" disabled={busy}><Icon name="plus" size={16} /> Add</button>
     </form>
   {/if}
+{#if tab === "map-data"}
+    {#if mapData}
+      <div class="card pad stack">
+        <div class="section-head">
+          <div>
+            <h2>Streets for {mapData.region[0].toUpperCase() + mapData.region.slice(1)}</h2>
+            <p class="muted small">From <code>{mapData.source_url}</code>. Refreshed automatically on the 3rd of each month.</p>
+          </div>
+          <button class="primary" disabled={busy || queued || mapData.runs[0]?.status === "running"} onclick={startImport}>Import now</button>
+        </div>
+        <div class="facts">
+          <div><span class="muted small">Streets</span><strong>{n(mapData.totals.ways)}</strong></div>
+          <div><span class="muted small">Segments</span><strong>{n(mapData.totals.segments)}</strong></div>
+          <div><span class="muted small">Length</span><strong>{Math.round(mapData.totals.meters / 1609.34).toLocaleString()} mi</strong></div>
+          <div><span class="muted small">OpenStreetMap data from</span><strong>{mapData.runs.find((r) => r.status === "done")?.osm_timestamp ? date(mapData.runs.find((r) => r.status === "done")!.osm_timestamp!) : "—"}</strong></div>
+        </div>
+      </div>
+
+      <div class="card scroll">
+        <table class="data">
+          <thead><tr><th>Run</th><th>Status</th><th>Data from</th><th>Segments</th><th>Added · changed · retired</th><th>Took</th></tr></thead>
+          <tbody>
+            {#if queued && mapData.runs[0]?.status !== "running"}
+              <tr><td colspan="6"><span class="badge warn">Waiting</span> <span class="muted">The worker will pick it up in a moment.</span></td></tr>
+            {/if}
+            {#each mapData.runs as r (r.id)}
+              <tr>
+                <td class="muted">{ago(r.started_at)}{r.requested_by_name ? ` · ${r.requested_by_name}` : " · scheduled"}</td>
+                <td>
+                  {#if r.status === "running"}<span class="badge warn">Running</span> <span class="small">{r.step}</span>
+                  {:else if r.status === "done"}<span class="badge green">Done</span>
+                  {:else if r.status === "skipped"}<span class="badge">Up to date</span>
+                  {:else}<span class="badge err">Failed</span> <span class="small muted">{r.error}</span>{/if}
+                </td>
+                <td class="muted">{r.osm_timestamp ? date(r.osm_timestamp) : "—"}</td>
+                <td>{n(r.segments)}</td>
+                <td class="muted">{r.status === "done" ? `${n(r.added)} · ${n(r.changed)} · ${n(r.retired)}` : "—"}</td>
+                <td class="muted">{took(r)}</td>
+              </tr>
+            {:else}
+              <tr><td colspan="6" class="muted">No imports yet. The worker starts one on its first run.</td></tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {:else}
+      <p class="muted">Loading…</p>
+    {/if}
+{/if}
+
 </div>
 
 <Modal bind:open={resetOpen} title="New password">
@@ -211,6 +304,11 @@
 
 <style>
   .wide { max-width: 1120px; }
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+  .facts div { display: grid; gap: 2px; }
+  .facts strong { font-size: 18px; }
+  .badge.err { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
+  code { font-size: 12px; word-break: break-all; }
   .scroll { overflow-x: auto; }
   .who { display: flex; align-items: center; gap: 10px; }
   tr.off td { opacity: .55; }

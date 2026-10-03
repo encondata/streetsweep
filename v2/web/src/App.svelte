@@ -8,6 +8,7 @@
   import Fleet from "./routes/Fleet.svelte";
   import Vehicle from "./routes/Vehicle.svelte";
   import Logger from "./routes/Logger.svelte";
+  import MapPage from "./routes/MapPage.svelte";
   import { router, match } from "./lib/router.svelte";
   import { session } from "./lib/session.svelte";
   import { errorText } from "./lib/api";
@@ -44,7 +45,7 @@
     {:else if adminParams && session.me.user.is_site_admin}
       <Admin tab={adminParams.tab} />
     {:else if router.path === "/map"}
-      <Soon title="Map" stage={3} art="empty-areas.png">Areas, streets and your coverage, drawn and built on the server.</Soon>
+      <MapPage />
     {:else if router.path === "/drives"}
       <Soon title="Drives" stage={4} art="empty-drives.png">Every drive from phones and loggers, matched to streets and counted for your teams.</Soon>
     {:else if vehicleParams}

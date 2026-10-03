@@ -10,7 +10,12 @@ export const config = {
   dataDir: env.DATA_DIR ?? "/data",
   valhallaUrl: env.VALHALLA_URL ?? "",
   overpassUrl: env.OVERPASS_URL ?? "",
-  osmExtractUrl: env.OSM_EXTRACT_URL ?? "",
+  // The region the server imports streets and boundaries for (a Geofabrik extract).
+  osmExtractUrl: env.OSM_EXTRACT_URL || "https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf",
+  // Basemap tiles come from these, through the server's cache. Override for a private tile server.
+  tileUrlOsm: env.TILE_URL_OSM || "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+  tileTtlDays: Number(env.TILE_TTL_DAYS ?? 30),
+  contactEmail: env.CONTACT_EMAIL || env.ADMIN_EMAIL || "",
   // Outgoing mail. compose.yaml points this at Mailpit for development; set a real
   // server (and SMTP_USER/SMTP_PASS) in production.
   smtpHost: env.SMTP_HOST ?? "mailpit",

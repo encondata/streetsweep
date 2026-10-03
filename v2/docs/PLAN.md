@@ -1,6 +1,6 @@
 # StreetSweep v2 — plan
 
-Status: **agreed 2026-10-03**. Stages 0–2 done. Stage 3 (map data) next.
+Status: **agreed 2026-10-03**. Stages 0–2 and 3a (streets) done. 3b (areas) next.
 
 v2 is a ground-up, multi-user rebuild. v1 (`tools/`) keeps running untouched beside it
 until v2 replaces it. v2 starts with an empty database — no v1 import.
@@ -67,7 +67,10 @@ coverage, because the passes are kept.
 - **mailpit**: development mail catcher. The api sends sign-up and reset codes over SMTP.
 - **db**: `postgis/postgis:16-3.5`. All geometry work (area ⟂ street clipping,
   lengths, buffers) moves into SQL instead of hand-written JS.
-- **api**: stateless. Never calls an outside service directly. Long work goes to a job.
+- **api**: stateless. Long work goes to a job. The one outside call it makes is the basemap
+  tile relay: tiles have to arrive while you look at the map, so the api fetches each tile
+  once (OSM no more than 2 at a time, with a contact User-Agent) and keeps it on disk for
+  `TILE_TTL_DAYS`.
 - **worker**: OSM extract import (osmium), segmenting, area builds, drive matching,
   coverage roll-ups, tile/package builds. Retries and backoff in one place.
 - **web**: Svelte 5 + TypeScript + Vite + MapLibre (building on what `tools/web` started),
@@ -194,7 +197,8 @@ audit_log       (id, at, user_id, team_id, action, entity, entity_id, data jsonb
    account modal, site-admin page.
 2. ✅ **Fleet.** Vehicles, permanent assignments, checkout/return with history, devices,
    logger registration and keys.
-3. **Map data.** Geofabrik import, segmenting, public boundaries, drawn areas, area
+3. ◐ **Map data.** 3a ✅ streets: osmium → segments → PostGIS vector tiles at
+   `/api/tiles/streets/{z}/{x}/{y}` (zoom 12+), a Map page, and Admin → Map data. 3b: areas. Geofabrik import, segmenting, public boundaries, drawn areas, area
    builds as jobs, cached tiles, area packages.
 4. **Drives.** Phone + logger upload, attribution, Valhalla matching, passes, team
    coverage, marks, drive editing (fix driver/vehicle).
@@ -236,6 +240,14 @@ audit_log       (id, at, user_id, team_id, action, entity, entity_id, data jsonb
    A team that still manages active vehicles can't be deleted.
 9. **Phones** sign in with `POST /api/auth/device` and get a bearer token, which can be
    revoked under Fleet → Phones.
+
+10. **Streets.** These road types count: primary, secondary, tertiary, unclassified,
+    residential and living_street, plus their `_link` ramps (the same set as v1). A way is
+    cut at every node it shares with another street. Each segment's identity is
+    `(way, from node, to node, dup)`, so a re-import keeps unchanged pieces' ids; that was
+    checked on Texas with 0 changes. Pieces that disappear are retired, never deleted.
+    Texas has 1.2 M streets, 2.46 M segments and about 436 k miles, and imports in about
+    2 minutes. It refreshes monthly on the 3rd.
 
 ## Still open
 

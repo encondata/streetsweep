@@ -12,7 +12,7 @@ docker compose logs -f api worker
 |---|---|
 | `db` | Postgres 16 + PostGIS. Data in `$DATA_DIR/postgres` (default `~/streetsweep-v2-data`). |
 | `api` | Fastify + TypeScript. Applies `db/migrations/*.sql` on start. Serves `/api`, `/login` and the web app. |
-| `worker` | pg-boss jobs. The only thing that calls OSM, Overpass, Valhalla or tile servers. |
+| `worker` | pg-boss jobs: the monthly street import (Geofabrik extract → osmium → PostGIS), later drive matching. Starts an import itself on first run. |
 | `mailpit` | Catches every email the app sends (sign-up and reset codes). Inbox at http://localhost:8025. Set `SMTP_*` in `.env` for real mail. |
 | `valhalla` | Optional (`--profile valhalla`). |
 

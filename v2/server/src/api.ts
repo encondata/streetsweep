@@ -16,6 +16,9 @@ import adminRoutes from "./routes/admin.js";
 import vehicleRoutes from "./routes/vehicles.js";
 import loggerRoutes from "./routes/loggers.js";
 import deviceRoutes from "./routes/devices.js";
+import tileRoutes from "./routes/tiles.js";
+import mapRoutes from "./routes/map.js";
+import { stopJobs } from "./jobs.js";
 
 const app = Fastify({ logger: { level: "info" }, trustProxy: true });
 
@@ -55,6 +58,8 @@ app.register(adminRoutes);
 app.register(vehicleRoutes);
 app.register(loggerRoutes);
 app.register(deviceRoutes);
+app.register(tileRoutes);
+app.register(mapRoutes);
 
 app.get("/api/health", async (_req, reply) => {
   try {
@@ -101,6 +106,7 @@ async function main() {
 for (const sig of ["SIGTERM", "SIGINT"] as const) {
   process.on(sig, async () => {
     await app.close();
+    await stopJobs();
     await pool.end();
     process.exit(0);
   });
