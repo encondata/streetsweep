@@ -13,6 +13,9 @@ import { HttpError } from "./http.js";
 import accountRoutes from "./routes/account.js";
 import teamRoutes from "./routes/teams.js";
 import adminRoutes from "./routes/admin.js";
+import vehicleRoutes from "./routes/vehicles.js";
+import loggerRoutes from "./routes/loggers.js";
+import deviceRoutes from "./routes/devices.js";
 
 const app = Fastify({ logger: { level: "info" }, trustProxy: true });
 
@@ -49,6 +52,9 @@ function friendlyValidation(err: { validation: { instancePath: string; message?:
 app.register(accountRoutes);
 app.register(teamRoutes);
 app.register(adminRoutes);
+app.register(vehicleRoutes);
+app.register(loggerRoutes);
+app.register(deviceRoutes);
 
 app.get("/api/health", async (_req, reply) => {
   try {

@@ -84,6 +84,7 @@ export default async function adminRoutes(app: FastifyInstance) {
         [req.params.id, req.body.is_site_admin ?? null, req.body.disabled ?? null],
       );
       if (!rowCount) throw notFound("No such user.");
+      // Disabled accounts are refused at sign-in and token check; drop browser sessions too.
       if (req.body.disabled) await query(`DELETE FROM sessions WHERE user_id = $1`, [req.params.id]);
       await audit(pool, { userId: me.id, action: "user.admin_updated", entity: "user", entityId: req.params.id, data: req.body });
       return { ok: true };

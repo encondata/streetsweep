@@ -1,6 +1,6 @@
 # StreetSweep v2 — plan
 
-Status: **agreed 2026-10-03**. Stages 0 and 1 done. Stage 2 (fleet) next.
+Status: **agreed 2026-10-03**. Stages 0–2 done. Stage 3 (map data) next.
 
 v2 is a ground-up, multi-user rebuild. v1 (`tools/`) keeps running untouched beside it
 until v2 replaces it. v2 starts with an empty database — no v1 import.
@@ -28,10 +28,10 @@ until v2 replaces it. v2 starts with an empty database — no v1 import.
 | **User** | A person with a login. Sign-up is open to anyone. Can join any number of teams. |
 | **Team** | A household, a delivery crew, or just "me" (every user gets a personal team on sign-up). Coverage is pooled per team. Roles: owner, admin, driver, viewer. A user **requests to join** and the team's admins approve or decline. |
 | **Drive type** | Personal, Delivery, Commute… The app asks for it when a drive starts. Each team toggles which drive types count toward its coverage. |
-| **Vehicle** | Standalone — not owned by a user. Optionally managed by a team (whose admins control it). |
+| **Vehicle** | Owned by no person. It is **managed by a team**, which decides who edits it and who may drive it. A personal car sits under your personal team (you become its permanent driver automatically), a shared family car under a household team, and a van under the company team. A car can move between teams you run. Archiving it hands it back from everyone and takes its loggers out. |
 | **Assignment** | Links a vehicle to a user. Either **permanent** (my car — several people can hold this, e.g. husband and wife) or **checkout** (van taken out, then returned; only one open checkout per vehicle at a time). Full history is kept. |
 | **Device** | A signed-in phone (per-device token, revocable). |
-| **Logger** | An ESP32 + GPS a user builds and registers. Has its own secret key. Can be **installed** in a vehicle (history kept). Uploads over Wi-Fi; BLE relay through the phone later, using the same signed batch format. |
+| **Logger** | An ESP32 + GPS a user builds and registers. Has its own secret key, which signs every request with HMAC-SHA256. The server stores the secret itself, because HMAC needs it (see `docs/LOGGER-PROTOCOL.md`). It can be **installed** in any vehicle its builder may drive, with history kept, and has a default drive type. It uploads over Wi-Fi, with a BLE relay through the phone later that forwards the same signed requests. |
 
 **Drive attribution.** Phone drive: the user is the signed-in person, and the vehicle is
 the one picked on the phone (defaulting to their open checkout, otherwise their only
@@ -109,7 +109,7 @@ vehicle_assignments
                  assigned_by, note)
   -- EXCLUDE USING gist (vehicle_id WITH =, during WITH &&) WHERE kind='checkout'
   --   → a van can't be checked out to two people at once
-loggers         (id, owner_user_id, name, hardware_id UNIQUE, key_hash,
+loggers         (id, owner_user_id, name, secret, default_drive_type_key, hardware_id,
                  firmware_version, last_seen_at, last_battery_mv,
                  created_at, revoked_at)
 logger_installs (id, logger_id, vehicle_id, during tstzrange)   -- same EXCLUDE per logger
@@ -189,7 +189,7 @@ audit_log       (id, at, user_id, team_id, action, entity, entity_id, data jsonb
 1. ✅ **Identity.** Open sign-up/sign-in, sessions, personal team on sign-up, teams,
    join requests approved by team admins, roles, drive types + team toggles,
    account modal, site-admin page.
-2. **Fleet.** Vehicles, permanent assignments, checkout/return with history, devices,
+2. ✅ **Fleet.** Vehicles, permanent assignments, checkout/return with history, devices,
    logger registration and keys.
 3. **Map data.** Geofabrik import, segmenting, public boundaries, drawn areas, area
    builds as jobs, cached tiles, area packages.
@@ -220,9 +220,13 @@ audit_log       (id, at, user_id, team_id, action, entity, entity_id, data jsonb
 7. **Forgotten passwords.** No email is set up yet, so a site admin resets the password
    on the Admin page and passes the new one on.
 
+8. **Holding a car ends with the team.** Leaving a team, being removed, or becoming a
+   viewer ends that person's permanent assignments and check-outs on the team's vehicles.
+   A team that still manages active vehicles can't be deleted.
+9. **Phones** sign in with `POST /api/auth/device` and get a bearer token, which can be
+   revoked under Fleet → Phones.
+
 ## Still open
 
-- **Drive type for logger drives.** A logger can't ask anyone. Draft: each logger has a
-  default type, and the drive can be changed on the web afterwards.
 - **Finding teams.** Draft: teams are searchable by name, and a team can be made unlisted,
   in which case people join through a link with a code.

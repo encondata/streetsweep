@@ -8,6 +8,7 @@ import { newJoinCode } from "../users.js";
 import { badRequest, conflict, forbidden, notFound } from "../http.js";
 import { isAdminRole, loadTeam, ownerCount, requireTeamAdmin, roleIn, type Role } from "../teams.js";
 import { avatarUrl } from "./account.js";
+import { endAssignmentsInTeam } from "../fleet.js";
 
 const teamName = { type: "string", minLength: 1, maxLength: 80 } as const;
 const message = { type: "string", maxLength: 500 } as const;
@@ -169,6 +170,8 @@ export default async function teamRoutes(app: FastifyInstance) {
       const team = await lockTeam(db, req.params.id);
       if (team.kind === "personal") throw forbidden("Your personal team can't be deleted.");
       if ((await roleIn(team.id, me.id, db)) !== "owner" && !me.is_site_admin) throw forbidden("Only an owner can delete the team.");
+      const cars = await db.query(`SELECT 1 FROM vehicles WHERE managed_by_team_id = $1 AND archived_at IS NULL LIMIT 1`, [team.id]);
+      if (cars.rows.length) throw conflict("This team still manages vehicles. Move them to another team or archive them first.");
       await db.query(`UPDATE teams SET deleted_at = now() WHERE id = $1`, [team.id]);
       await db.query(`UPDATE team_members SET left_at = now() WHERE team_id = $1 AND left_at IS NULL`, [team.id]);
       await db.query(`UPDATE team_join_requests SET status = 'declined', decided_at = now(), decided_by = $2
@@ -279,6 +282,8 @@ export default async function teamRoutes(app: FastifyInstance) {
         }
         await db.query(`UPDATE team_members SET role = $3 WHERE team_id = $1 AND user_id = $2 AND left_at IS NULL`,
           [team.id, req.params.userId, next]);
+        // Viewers don't drive, so a viewer lets go of the team's vehicles.
+        if (next === "viewer") await endAssignmentsInTeam(db, team.id, req.params.userId, me.id);
         await audit(db, { userId: me.id, teamId: team.id, action: "team.role_changed", entity: "user",
           entityId: req.params.userId, data: { from: current, to: next } });
       });
@@ -306,6 +311,8 @@ export default async function teamRoutes(app: FastifyInstance) {
       }
       await db.query(`UPDATE team_members SET left_at = now() WHERE team_id = $1 AND user_id = $2 AND left_at IS NULL`,
         [team.id, req.params.userId]);
+      // Leaving the team hands back its vehicles.
+      await endAssignmentsInTeam(db, team.id, req.params.userId, me.id);
       await audit(db, { userId: me.id, teamId: team.id, action: self ? "team.left" : "team.member_removed",
         entity: "user", entityId: req.params.userId });
     });

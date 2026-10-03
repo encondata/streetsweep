@@ -1,50 +1,9 @@
 // Stage 1 API smoke test: accounts, teams, join requests, roles, drive types, site admin.
-// Runs inside the api container against its own port, with fresh addresses each time:
-//   docker compose cp scripts/smoke-stage1.mjs api:/app/smoke.mjs
-//   docker compose exec api node smoke.mjs
+// Runs inside the api container (see scripts/smoke.sh), with fresh addresses each time.
 import { execFileSync } from "node:child_process";
-
-const BASE = process.env.BASE ?? "http://localhost";
-const run = Date.now().toString(36);
-let failures = 0;
-
-function client(name) {
-  let cookie = "";
-  return {
-    name,
-    email: `${name}-${run}@test.local`,
-    async call(method, path, body, headers = {}) {
-      const init = { method, headers: { ...headers } };
-      if (cookie) init.headers.cookie = cookie;
-      if (body !== undefined && !(body instanceof Uint8Array)) {
-        init.headers["content-type"] ??= "application/json";
-        init.body = typeof body === "string" ? body : JSON.stringify(body);
-      } else if (body) init.body = body;
-      const res = await fetch(BASE + path, init);
-      const set = res.headers.get("set-cookie");
-      if (set) cookie = set.split(";")[0].endsWith("=") ? "" : set.split(";")[0];
-      const type = res.headers.get("content-type") ?? "";
-      const data = type.includes("json") ? await res.json() : await res.arrayBuffer();
-      return { status: res.status, data };
-    },
-  };
-}
-
-function check(label, cond, extra) {
-  if (cond) console.log(`  ok   ${label}`);
-  else {
-    failures++;
-    console.log(`  FAIL ${label}`, extra === undefined ? "" : JSON.stringify(extra).slice(0, 300));
-  }
-}
-const expect = async (label, promise, status) => {
-  const r = await promise;
-  check(`${label} → ${status}`, r.status === status, { got: r.status, data: r.data });
-  return r.data;
-};
+import { PW, check, client, expect, finish, run } from "./smoke-lib.mjs";
 
 const alice = client("alice"), bob = client("bob"), carol = client("carol"), anon = client("anon");
-const PW = "correct horse 1";
 
 console.log("accounts");
 for (const c of [alice, bob, carol]) {
@@ -160,16 +119,4 @@ await expect("owner bob deletes Acme", bob.call("DELETE", `/api/teams/${acme.id}
 const aliceMe = await expect("alice /me", alice.call("GET", "/api/me"), 200);
 check("Acme gone from alice's teams", !aliceMe.teams.some((t) => t.id === acme.id));
 
-// Leave nothing behind: this run's accounts, their teams, and the test drive type.
-const { default: pg } = await import("pg");
-const db = new pg.Client({ connectionString: process.env.DATABASE_URL });
-await db.connect();
-const like = `%-${run}@test.local`;
-await db.query(`DELETE FROM teams WHERE created_by IN (SELECT id FROM users WHERE email LIKE $1)`, [like]);
-await db.query(`DELETE FROM audit_log WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)`, [like]);
-await db.query(`DELETE FROM users WHERE email LIKE $1`, [like]);
-await db.query(`DELETE FROM drive_types WHERE key = $1`, [`t${run}`.slice(0, 30)]);
-await db.end();
-
-console.log(failures ? `\n${failures} FAILED` : "\nall passed");
-process.exit(failures ? 1 : 0);
+await finish([[`DELETE FROM drive_types WHERE key = $1`, [`t${run}`.slice(0, 30)]]]);

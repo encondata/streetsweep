@@ -43,7 +43,7 @@ export function randomPassword(): string {
   return Array.from(crypto.randomBytes(12), (b) => abc[b % abc.length]).join("");
 }
 
-const sha256 = (s: string) => crypto.createHash("sha256").update(s).digest();
+export const sha256 = (s: string) => crypto.createHash("sha256").update(s).digest();
 
 export interface SessionUser {
   id: string;
@@ -51,7 +51,9 @@ export interface SessionUser {
   display_name: string;
   avatar_path: string | null;
   is_site_admin: boolean;
-  session_id: string;
+  /** Browser session, or null when signed in with a phone's device token. */
+  session_id: string | null;
+  device_id: string | null;
 }
 
 declare module "fastify" {
@@ -93,8 +95,16 @@ export async function endSession(req: FastifyRequest, reply: FastifyReply) {
   setCookie(req, reply, "", 0);
 }
 
-/** onRequest hook: attaches req.user when the cookie names a live session. */
+/** Mint a token for a phone. Returned once; only its hash is stored. */
+export function newDeviceToken() {
+  const token = "ssd_" + crypto.randomBytes(32).toString("base64url");
+  return { token, hash: sha256(token) };
+}
+
+/** onRequest hook: attaches req.user for a live browser session or phone token. */
 export async function loadUser(req: FastifyRequest) {
+  const auth = req.headers.authorization;
+  if (auth?.startsWith("Bearer ")) return loadDevice(req, auth.slice(7).trim());
   const token = readCookie(req, COOKIE);
   if (!token) return;
   const { rows } = await query<SessionUser & { last_seen_at: Date; persistent: boolean }>(
@@ -116,7 +126,23 @@ export async function loadUser(req: FastifyRequest) {
     );
   }
   const { last_seen_at: _l, persistent: _p, ...user } = row;
-  req.user = user;
+  req.user = { ...user, device_id: null };
+}
+
+async function loadDevice(req: FastifyRequest, token: string) {
+  const { rows } = await query<Omit<SessionUser, "session_id"> & { last_seen_at: Date | null }>(
+    `SELECT u.id, u.email, u.display_name, u.avatar_path, u.is_site_admin, d.id AS device_id, d.last_seen_at
+       FROM devices d JOIN users u ON u.id = d.user_id
+      WHERE d.token_hash = $1 AND d.revoked_at IS NULL AND u.disabled_at IS NULL`,
+    [sha256(token)],
+  );
+  const row = rows[0];
+  if (!row) return;
+  if (!row.last_seen_at || Date.now() - row.last_seen_at.getTime() > 5 * 60_000) {
+    await query(`UPDATE devices SET last_seen_at = now() WHERE id = $1`, [row.device_id]);
+  }
+  const { last_seen_at: _l, ...user } = row;
+  req.user = { ...user, session_id: null };
 }
 
 export function requireUser(req: FastifyRequest): SessionUser {

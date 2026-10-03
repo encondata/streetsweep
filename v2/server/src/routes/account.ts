@@ -6,7 +6,7 @@ import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
 import { pool, query, tx } from "../db.js";
 import {
-  MIN_PASSWORD, burnPasswordCheck, clearFailures, endSession, hashPassword, noteFailure,
+  MIN_PASSWORD, burnPasswordCheck, clearFailures, endSession, hashPassword, newDeviceToken, noteFailure,
   requireUser, startSession, tooManyFailures, verifyPassword,
 } from "../auth.js";
 import { audit } from "../audit.js";
@@ -59,27 +59,54 @@ export default async function accountRoutes(app: FastifyInstance) {
     },
   );
 
+  // Shared by browser sign-in and phone sign-in: throttled, timing-safe, one message for both misses.
+  async function checkCredentials(ip: string, emailIn: string, pw: string) {
+    const addr = emailIn.trim().toLowerCase();
+    const keys = [`ip:${ip}`, `email:${addr}`];
+    if (tooManyFailures(...keys)) throw new HttpError(429, "Too many tries. Wait fifteen minutes and try again.");
+    const { rows } = await query<{ id: string; password_hash: string; disabled_at: Date | null }>(
+      `SELECT id, password_hash, disabled_at FROM users WHERE email = $1`, [addr],
+    );
+    const user = rows[0];
+    const ok = user ? await verifyPassword(pw, user.password_hash) : (await burnPasswordCheck(pw), false);
+    if (!ok || !user) {
+      noteFailure(...keys);
+      throw new HttpError(401, "That email and password don't match.");
+    }
+    if (user.disabled_at) throw new HttpError(403, "This account has been switched off. Ask a site admin.");
+    clearFailures(...keys);
+    return user.id;
+  }
+
+  // The phone app signs in here and keeps the token until it's revoked on the web.
+  app.post<{ Body: { email: string; password: string; deviceName: string; platform?: string; appVersion?: string } }>(
+    "/api/auth/device",
+    { schema: { body: { type: "object", required: ["email", "password", "deviceName"], properties: {
+        email: { type: "string", maxLength: 254 }, password,
+        deviceName: { type: "string", minLength: 1, maxLength: 60 },
+        platform: { type: "string", enum: ["android", "ios", "other"] },
+        appVersion: { type: "string", maxLength: 40 } } } } },
+    async (req, reply) => {
+      const userId = await checkCredentials(req.ip, req.body.email, req.body.password);
+      const { token, hash } = newDeviceToken();
+      const { rows } = await query<{ id: string }>(
+        `INSERT INTO devices (user_id, name, platform, app_version, token_hash, last_seen_at)
+         VALUES ($1, $2, $3, $4, $5, now()) RETURNING id`,
+        [userId, req.body.deviceName.trim(), req.body.platform ?? "android", req.body.appVersion ?? null, hash],
+      );
+      await audit(pool, { userId, action: "device.signed_in", entity: "device", entityId: rows[0].id });
+      return reply.code(201).send({ token, device_id: rows[0].id, ...(await meSummary(userId)) });
+    },
+  );
+
   app.post<{ Body: { email: string; password: string; remember?: boolean } }>(
     "/api/auth/login",
     { schema: { body: { type: "object", required: ["email", "password"],
         properties: { email: { type: "string", maxLength: 254 }, password, remember: { type: "boolean" } } } } },
     async (req, reply) => {
-      const addr = req.body.email.trim().toLowerCase();
-      const keys = [`ip:${req.ip}`, `email:${addr}`];
-      if (tooManyFailures(...keys)) throw new HttpError(429, "Too many tries. Wait fifteen minutes and try again.");
-      const { rows } = await query<{ id: string; password_hash: string; disabled_at: Date | null }>(
-        `SELECT id, password_hash, disabled_at FROM users WHERE email = $1`, [addr],
-      );
-      const user = rows[0];
-      const ok = user ? await verifyPassword(req.body.password, user.password_hash) : (await burnPasswordCheck(req.body.password), false);
-      if (!ok || !user) {
-        noteFailure(...keys);
-        throw new HttpError(401, "That email and password don't match.");
-      }
-      if (user.disabled_at) throw new HttpError(403, "This account has been switched off. Ask a site admin.");
-      clearFailures(...keys);
-      await startSession(req, reply, user.id, req.body.remember ?? true);
-      return meSummary(user.id);
+      const userId = await checkCredentials(req.ip, req.body.email, req.body.password);
+      await startSession(req, reply, userId, req.body.remember ?? true);
+      return meSummary(userId);
     },
   );
 
@@ -117,7 +144,7 @@ export default async function accountRoutes(app: FastifyInstance) {
       if (!(await verifyPassword(req.body.current, rows[0].password_hash))) throw badRequest("Your current password isn't right.");
       await query(`UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1`, [me.id, await hashPassword(req.body.next)]);
       // Every other browser has to sign in again; this one stays.
-      await query(`DELETE FROM sessions WHERE user_id = $1 AND id <> $2`, [me.id, me.session_id]);
+      await query(`DELETE FROM sessions WHERE user_id = $1 AND id IS DISTINCT FROM $2`, [me.id, me.session_id]);
       await audit(pool, { userId: me.id, action: "user.password_changed", entity: "user", entityId: me.id });
       return { ok: true };
     },

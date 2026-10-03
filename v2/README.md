@@ -22,12 +22,15 @@ Web dev with hot reload: `cd web && npm i && npm run dev`. That proxies to the s
 Migrations: add `db/migrations/NNNN_name.sql`. Each one runs once, in order, inside a
 transaction. Never edit one that has already shipped.
 
-API smoke test (creates throwaway accounts, then deletes them):
+API smoke tests (create throwaway accounts, then delete them):
 
 ```
-docker compose cp scripts/smoke-stage1.mjs api:/app/smoke.mjs
-docker compose exec api node smoke.mjs
+./scripts/smoke.sh            # every stage
+./scripts/smoke.sh stage2     # one stage
 ```
+
+The logger protocol (signing, config endpoint, an ESP32 example) is in
+[docs/LOGGER-PROTOCOL.md](docs/LOGGER-PROTOCOL.md).
 
 First site admin: set `ADMIN_EMAIL` before first boot, or promote an existing account with
 `docker compose exec api node dist/cli.js make-admin you@example.com`.

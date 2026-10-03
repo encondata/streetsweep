@@ -5,6 +5,9 @@
   import Join from "./routes/Join.svelte";
   import Admin from "./routes/Admin.svelte";
   import Soon from "./routes/Soon.svelte";
+  import Fleet from "./routes/Fleet.svelte";
+  import Vehicle from "./routes/Vehicle.svelte";
+  import Logger from "./routes/Logger.svelte";
   import { router, match } from "./lib/router.svelte";
   import { session } from "./lib/session.svelte";
   import { errorText } from "./lib/api";
@@ -15,10 +18,14 @@
   // Until the map arrives (stage 3), Teams is home.
   $effect(() => {
     if (router.path === "/") router.go("/teams", true);
+    if (router.path === "/fleet") router.go("/fleet/vehicles", true);
   });
 
   let teamParams = $derived(match("/teams/:id", router.path) ?? match("/teams/:id/:tab", router.path));
   let joinParams = $derived(match("/join/:code", router.path));
+  let vehicleParams = $derived(match("/fleet/vehicles/:id", router.path));
+  let loggerParams = $derived(match("/fleet/loggers/:id", router.path));
+  let fleetParams = $derived(match("/fleet/:tab", router.path));
   let adminParams = $derived(router.path === "/admin" ? { tab: "users" } : match("/admin/:tab", router.path));
 </script>
 
@@ -40,8 +47,12 @@
       <Soon title="Map" stage={3} art="empty-areas.png">Areas, streets and your coverage, drawn and built on the server.</Soon>
     {:else if router.path === "/drives"}
       <Soon title="Drives" stage={4} art="empty-drives.png">Every drive from phones and loggers, matched to streets and counted for your teams.</Soon>
-    {:else if router.path === "/fleet"}
-      <Soon title="Fleet" stage={2} art="empty-vehicles.png">Cars, permanent assignments, check-out and return, phones and GPS loggers.</Soon>
+    {:else if vehicleParams}
+      {#key vehicleParams.id}<Vehicle id={vehicleParams.id} />{/key}
+    {:else if loggerParams}
+      {#key loggerParams.id}<Logger id={loggerParams.id} />{/key}
+    {:else if fleetParams}
+      <Fleet tab={fleetParams.tab} />
     {:else}
       <Soon title="Not found" art={undefined}>There's nothing at this address. <a href="/teams">Go to Teams</a>.</Soon>
     {/if}

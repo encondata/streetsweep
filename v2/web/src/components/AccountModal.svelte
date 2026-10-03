@@ -4,6 +4,7 @@
   import Avatar from "./Avatar.svelte";
   import { api, errorText } from "../lib/api";
   import { session } from "../lib/session.svelte";
+  import { cropToBlob } from "../lib/image";
   import type { Me } from "../lib/types";
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
@@ -48,18 +49,10 @@
       current = next = "";
     }, "Password changed. Other browsers will need to sign in again.");
 
-  // Crop to a centred square and shrink to 256 px in the browser, so the server stores
-  // something small and never needs an image library.
   async function pickPicture(file: File | undefined) {
     if (!file) return;
     await run(async () => {
-      const bmp = await createImageBitmap(file);
-      const side = Math.min(bmp.width, bmp.height);
-      const canvas = document.createElement("canvas");
-      canvas.width = canvas.height = 256;
-      canvas.getContext("2d")!.drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, 256, 256);
-      const blob = await new Promise<Blob>((ok, bad) => canvas.toBlob((b) => (b ? ok(b) : bad(new Error("Couldn't read that picture."))), "image/webp", 0.85));
-      session.set(await api<Me>("/api/me/avatar", { method: "PUT", raw: blob }));
+      session.set(await api<Me>("/api/me/avatar", { method: "PUT", raw: await cropToBlob(file, 256, 256) }));
     }, "Picture updated.");
     fileInput.value = "";
   }

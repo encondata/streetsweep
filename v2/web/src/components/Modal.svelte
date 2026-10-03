@@ -30,5 +30,7 @@
   dialog::backdrop { background: rgba(2, 20, 42, .55); }
   header { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px 6px; }
   .body { padding: 10px 18px 18px; display: grid; gap: 14px; }
+  /* Grid items default to their content's width; long code lines would widen the dialog. */
+  .body > :global(*) { min-width: 0; }
   footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--line); background: var(--surface-2); border-radius: 0 0 16px 16px; }
 </style>
