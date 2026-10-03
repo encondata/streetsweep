@@ -21,3 +21,13 @@ Web dev with hot reload: `cd web && npm i && npm run dev`. That proxies to the s
 
 Migrations: add `db/migrations/NNNN_name.sql`. Each one runs once, in order, inside a
 transaction. Never edit one that has already shipped.
+
+API smoke test (creates throwaway accounts, then deletes them):
+
+```
+docker compose cp scripts/smoke-stage1.mjs api:/app/smoke.mjs
+docker compose exec api node smoke.mjs
+```
+
+First site admin: set `ADMIN_EMAIL` before first boot, or promote an existing account with
+`docker compose exec api node dist/cli.js make-admin you@example.com`.

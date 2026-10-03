@@ -1,6 +1,6 @@
 # StreetSweep v2 — plan
 
-Status: **agreed 2026-10-03**. Stage 0 in progress.
+Status: **agreed 2026-10-03**. Stages 0 and 1 done. Stage 2 (fleet) next.
 
 v2 is a ground-up, multi-user rebuild. v1 (`tools/`) keeps running untouched beside it
 until v2 replaces it. v2 starts with an empty database — no v1 import.
@@ -183,10 +183,10 @@ audit_log       (id, at, user_id, team_id, action, entity, entity_id, data jsonb
 
 ## Build stages
 
-0. **Scaffold.** `v2/` folder, compose (db, api, worker, valhalla), migration runner,
+0. ✅ **Scaffold.** `v2/` folder, compose (db, api, worker, valhalla), migration runner,
    login page ported and served, health checks. *Done when* `docker compose up` shows
    the login page on :8430.
-1. **Identity.** Open sign-up/sign-in, sessions, personal team on sign-up, teams,
+1. ✅ **Identity.** Open sign-up/sign-in, sessions, personal team on sign-up, teams,
    join requests approved by team admins, roles, drive types + team toggles,
    account modal, site-admin page.
 2. **Fleet.** Vehicles, permanent assignments, checkout/return with history, devices,
@@ -210,6 +210,15 @@ audit_log       (id, at, user_id, team_id, action, entity, entity_id, data jsonb
 4. **Location.** `v2/` sits inside the repo, beside `tools/`. Builds happen inside Docker,
    so there is no `node_modules` in the synced folder. `DATA_DIR` (Postgres, photos,
    tiles, OSM) defaults to `~/streetsweep-v2-data`, outside Synology.
+
+5. **Look.** The web app is light only, with no automatic dark mode. Brand navy is used
+   only as an accent and on the sign-in page.
+6. **First site admin.** Set `ADMIN_EMAIL` (and optionally `ADMIN_PASSWORD`) before first
+   boot, or promote any account with
+   `docker compose exec api node dist/cli.js make-admin <email>`. There's no
+   "first sign-up becomes admin" rule, because sign-up is open.
+7. **Forgotten passwords.** No email is set up yet, so a site admin resets the password
+   on the Admin page and passes the new one on.
 
 ## Still open
 

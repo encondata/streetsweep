@@ -7,8 +7,48 @@ import path from "node:path";
 import { config } from "./config.js";
 import { pool, query } from "./db.js";
 import { migrate } from "./migrate.js";
+import { loadUser } from "./auth.js";
+import { ensureSiteAdmin } from "./bootstrap.js";
+import { HttpError } from "./http.js";
+import accountRoutes from "./routes/account.js";
+import teamRoutes from "./routes/teams.js";
+import adminRoutes from "./routes/admin.js";
 
 const app = Fastify({ logger: { level: "info" }, trustProxy: true });
+
+// Pictures arrive as raw bytes (the browser has already cropped them).
+app.addContentTypeParser(["image/png", "image/jpeg", "image/webp"], { parseAs: "buffer" }, (_req, body, done) => done(null, body));
+
+// Cookies are SameSite=Lax; on top of that, writes must not be something a plain HTML
+// form on another site could send, which rules out cross-site form posts entirely.
+const FORM_TYPES = /^(application\/x-www-form-urlencoded|multipart\/form-data|text\/plain)/i;
+app.addHook("onRequest", async (req, reply) => {
+  if (req.method !== "GET" && req.method !== "HEAD" && FORM_TYPES.test(req.headers["content-type"] ?? "")) {
+    return reply.code(415).send({ error: "Send JSON." });
+  }
+  if (req.url.startsWith("/api/")) await loadUser(req);
+});
+
+app.setErrorHandler((err: any, req, reply) => {
+  if (err instanceof HttpError) return reply.code(err.status).send({ error: err.message });
+  if (err.validation) return reply.code(400).send({ error: friendlyValidation(err) });
+  if (err.code === "22P02") return reply.code(404).send({ error: "Not found." }); // malformed uuid in the URL
+  if (err.statusCode && err.statusCode < 500) return reply.code(err.statusCode).send({ error: err.message });
+  req.log.error(err);
+  return reply.code(500).send({ error: "Something went wrong on the server." });
+});
+
+function friendlyValidation(err: { validation: { instancePath: string; message?: string; keyword: string }[] }) {
+  const v = err.validation[0];
+  const field = v.instancePath.replace(/^\//, "");
+  if (v.keyword === "format" && field === "email") return "That doesn't look like an email address.";
+  if (v.keyword === "minLength") return `${field || "A field"} can't be empty.`;
+  return `${field || "Request"} ${v.message ?? "is not valid"}.`;
+}
+
+app.register(accountRoutes);
+app.register(teamRoutes);
+app.register(adminRoutes);
 
 app.get("/api/health", async (_req, reply) => {
   try {
@@ -22,18 +62,15 @@ app.get("/api/health", async (_req, reply) => {
   }
 });
 
-// Sign-in lands in stage 1. Until then the login page gets a clear answer, not a 404.
-app.post("/api/auth/login", async (_req, reply) =>
-  reply.code(501).send({ error: "Sign-in arrives in stage 1 of v2." }),
-);
-
 app.all("/api/*", async (_req, reply) => reply.code(404).send({ error: "Not found" }));
 
 // Login page and brand assets (public/), then the web app (web/) with SPA fallback.
 // wildcard: false registers one route per file at start-up, so "/" and client routes
 // fall through to the web app instead of hitting a directory listing (403).
 app.register(fastifyStatic, { root: config.publicDir, prefix: "/", index: false, wildcard: false });
+// One page for both: it shows the sign-up form at /signup.
 app.get("/login", (_req, reply) => reply.sendFile("login.html", config.publicDir));
+app.get("/signup", (_req, reply) => reply.sendFile("login.html", config.publicDir));
 
 const webIndex = path.join(config.webDir, "index.html");
 if (fs.existsSync(webIndex)) {
@@ -51,6 +88,7 @@ if (fs.existsSync(webIndex)) {
 
 async function main() {
   await migrate((m) => app.log.info(m));
+  await ensureSiteAdmin((m) => app.log.warn(m));
   await app.listen({ port: config.port, host: "0.0.0.0" });
 }
 

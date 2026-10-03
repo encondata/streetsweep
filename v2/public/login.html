@@ -98,13 +98,13 @@
     outline: none; border-color: var(--accent);
     box-shadow: 0 0 0 3px rgba(30,138,40,.18);
   }
-  #peek {
+  .peek {
     position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
     width: 34px; height: 34px; display: grid; place-items: center;
     background: none; border: 0; border-radius: 8px; cursor: pointer; color: var(--ink-soft);
   }
-  #peek:hover { color: var(--ink); background: #eef2f7; }
-  #peek svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+  .peek:hover { color: var(--ink); background: #eef2f7; }
+  .peek svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; }
 
   .row {
     display: flex; align-items: center; justify-content: space-between;
@@ -149,12 +149,14 @@
 
   .foot { margin: 18px 0 0; text-align: center; font-size: 13px; color: var(--ink-soft); }
 
-  #msg {
+  form[hidden] { display: none; }
+  .hint { margin: -4px 0 14px; font-size: 12px; color: var(--ink-soft); }
+  .msg {
     margin: 0 0 14px; padding: 10px 12px; border-radius: var(--r); font-size: 13px;
     background: #fdecea; border: 1px solid #f3c3bd; color: var(--danger);
   }
-  #msg[hidden] { display: none; }
-  #msg.info { background: #e8f1fd; border-color: #c2dbf7; color: #14508f; }
+  .msg[hidden] { display: none; }
+  .msg.info { background: #e8f1fd; border-color: #c2dbf7; color: #14508f; }
 
   /* ---- the three things it does, along the bottom ------------------------ */
   #uses {
@@ -211,7 +213,7 @@
     <h1>Sign In</h1>
     <p class="sub">Access your maps, drives, and progress.</p>
 
-    <p id="msg" hidden role="alert"></p>
+    <p class="msg" hidden role="alert"></p>
 
     <div class="field">
       <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><path d="m3 6 9 6.5L21 6"/></svg>
@@ -223,7 +225,7 @@
       <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10.5" width="16" height="10" rx="2.5"/><path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7"/></svg>
       <input type="password" id="password" name="password" placeholder="Password"
              autocomplete="current-password" required>
-      <button type="button" id="peek" aria-label="Show the password" aria-pressed="false">
+      <button type="button" class="peek" aria-label="Show the password" aria-pressed="false">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></svg>
       </button>
     </div>
@@ -262,7 +264,40 @@
     </button>
     <p class="ssonote">Neither is set up on this server yet.</p>
 
-    <p class="foot">New to StreetSweep? <a href="#" id="noaccount">Create an account</a></p>
+    <p class="foot">New to StreetSweep? <a href="/signup" id="noaccount">Create an account</a></p>
+  </form>
+
+  <form id="signup" novalidate hidden>
+    <h1>Create Account</h1>
+    <p class="sub">Start sweeping. Join a team once you're in.</p>
+
+    <p class="msg" hidden role="alert"></p>
+
+    <div class="field">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20.5c1.4-3.6 4.4-5.5 8-5.5s6.6 1.9 8 5.5"/></svg>
+      <input type="text" id="su-name" placeholder="Your name" autocomplete="name" maxlength="80" required>
+    </div>
+
+    <div class="field">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><path d="m3 6 9 6.5L21 6"/></svg>
+      <input type="email" id="su-email" placeholder="Email address" autocomplete="username" required>
+    </div>
+
+    <div class="field">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10.5" width="16" height="10" rx="2.5"/><path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7"/></svg>
+      <input type="password" id="su-password" placeholder="Password" autocomplete="new-password" minlength="8" required>
+      <button type="button" class="peek" aria-label="Show the password" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+    </div>
+    <p class="hint">At least 8 characters.</p>
+
+    <button type="submit" class="go" id="su-go">
+      Create Account
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6"/></svg>
+    </button>
+
+    <p class="foot">Already have an account? <a href="/login" id="haveaccount">Sign in</a></p>
   </form>
 
   <div id="uses">
@@ -284,79 +319,118 @@
 
 <script>
 (function () {
-  var form = document.getElementById("signin");
-  var msg = document.getElementById("msg");
+  var signin = document.getElementById("signin");
+  var signup = document.getElementById("signup");
   var go = document.getElementById("go");
   var pw = document.getElementById("password");
   var email = document.getElementById("email");
 
-  function say(text, tone) {
+  function say(form, text, tone) {
+    var msg = form.querySelector(".msg");
     msg.textContent = text;
     msg.hidden = !text;
-    msg.className = tone === "info" ? "info" : "";
+    msg.className = "msg" + (tone === "info" ? " info" : "");
   }
+
+  function nextUrl() {
+    var next = new URLSearchParams(location.search).get("next");
+    return next && next.charAt(0) === "/" && next.charAt(1) !== "/" ? next : "/";
+  }
+
+  // Already signed in? Straight through.
+  fetch("/api/me").then(function (r) { if (r.ok) location.replace(nextUrl()); }).catch(function () {});
+
+  // One page, two forms: /login and /signup. Switching keeps ?next= so the
+  // person still lands where they were heading.
+  function show(mode, push) {
+    var up = mode === "signup";
+    signin.hidden = up;
+    signup.hidden = !up;
+    document.title = (up ? "Create account" : "Sign in") + " · StreetSweep";
+    if (push) history.pushState(null, "", (up ? "/signup" : "/login") + location.search);
+    (up ? document.getElementById("su-name") : (email.value ? pw : email)).focus();
+  }
+  document.getElementById("noaccount").addEventListener("click", function (ev) { ev.preventDefault(); show("signup", true); });
+  document.getElementById("haveaccount").addEventListener("click", function (ev) { ev.preventDefault(); show("signin", true); });
+  addEventListener("popstate", function () { show(location.pathname === "/signup" ? "signup" : "signin", false); });
 
   // The address is worth remembering; the password is the browser's business, not ours.
   try {
     var last = localStorage.getItem("streetsweep.lastEmail");
-    if (last) { email.value = last; pw.focus(); }
+    if (last) email.value = last;
   } catch (e) { /* private window */ }
+  show(location.pathname === "/signup" ? "signup" : "signin", false);
 
-  document.getElementById("peek").addEventListener("click", function () {
-    var showing = pw.type === "text";
-    pw.type = showing ? "password" : "text";
-    this.setAttribute("aria-pressed", String(!showing));
-    this.setAttribute("aria-label", showing ? "Show the password" : "Hide the password");
-    pw.focus();
+  document.querySelectorAll(".peek").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var input = btn.parentNode.querySelector("input");
+      var showing = input.type === "text";
+      input.type = showing ? "password" : "text";
+      btn.setAttribute("aria-pressed", String(!showing));
+      btn.setAttribute("aria-label", showing ? "Show the password" : "Hide the password");
+      input.focus();
+    });
   });
 
-  // Both of these are placeholders until there is somewhere for them to go. They are
-  // drawn as the design has them; clicking one says it is not built rather than doing
-  // nothing at all, which would read as a broken link.
-  function notYet(id, what) {
-    document.getElementById(id).addEventListener("click", function (ev) {
-      ev.preventDefault();
-      say(what + " is not set up yet. An administrator can do it for you in the meantime.", "info");
-    });
-  }
-  notYet("forgot", "Resetting your own password");
-  notYet("noaccount", "Signing yourself up");
-
-  form.addEventListener("submit", async function (ev) {
+  document.getElementById("forgot").addEventListener("click", function (ev) {
     ev.preventDefault();
-    say("");
-    if (!email.value.trim() || !pw.value) return say("Fill in both boxes.");
-    go.disabled = true;
-    var was = go.firstChild.nodeValue;
-    go.firstChild.nodeValue = "Signing in… ";
+    say(signin, "Ask a site admin to reset it for you. They will give you a new password to sign in with.", "info");
+  });
+
+  async function post(url, data, form, button, busy) {
+    button.disabled = true;
+    var was = button.firstChild.nodeValue;
+    button.firstChild.nodeValue = busy + " ";
     try {
-      var res = await fetch("/api/auth/login", {
+      var res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.value.trim(), password: pw.value })
+        body: JSON.stringify(data)
       });
       var body = await res.json().catch(function () { return {}; });
-      if (!res.ok) {
-        go.disabled = false;
-        go.firstChild.nodeValue = was;
-        pw.select();
-        return say(body.error || "That did not work. Try again.");
-      }
-      try {
-        if (document.getElementById("remember").checked) {
-          localStorage.setItem("streetsweep.lastEmail", email.value.trim());
-        } else {
-          localStorage.removeItem("streetsweep.lastEmail");
-        }
-      } catch (e) { /* nothing to remember with */ }
-      // Straight in; a signed-in browser asking for /login is sent back here anyway.
-      var next = new URLSearchParams(location.search).get("next");
-      location.href = next && next.charAt(0) === "/" && next.charAt(1) !== "/" ? next : "/";
+      if (res.ok) return true;
+      say(form, body.error || "That did not work. Try again.");
     } catch (e) {
-      go.disabled = false;
-      go.firstChild.nodeValue = was;
-      say("Could not reach the server.");
+      say(form, "Could not reach the server.");
     }
+    button.disabled = false;
+    button.firstChild.nodeValue = was;
+    return false;
+  }
+
+  function rememberEmail(addr, keep) {
+    try {
+      if (keep) localStorage.setItem("streetsweep.lastEmail", addr);
+      else localStorage.removeItem("streetsweep.lastEmail");
+    } catch (e) { /* nothing to remember with */ }
+  }
+
+  signin.addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    say(signin, "");
+    if (!email.value.trim() || !pw.value) return say(signin, "Fill in both boxes.");
+    var remember = document.getElementById("remember").checked;
+    var ok = await post("/api/auth/login",
+      { email: email.value.trim(), password: pw.value, remember: remember }, signin, go, "Signing in…");
+    if (!ok) return pw.select();
+    rememberEmail(email.value.trim(), remember);
+    location.href = nextUrl();
+  });
+
+  signup.addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    say(signup, "");
+    var name = document.getElementById("su-name").value.trim();
+    var addr = document.getElementById("su-email").value.trim();
+    var pass = document.getElementById("su-password").value;
+    if (!name || !addr || !pass) return say(signup, "Fill in all three boxes.");
+    if (pass.length < 8) return say(signup, "Use at least 8 characters for the password.");
+    var ok = await post("/api/auth/signup", { displayName: name, email: addr, password: pass, remember: true },
+      signup, document.getElementById("su-go"), "Creating…");
+    if (!ok) return;
+    rememberEmail(addr, true);
+    // New accounts start on Teams, where joining one is the obvious next step.
+    location.href = nextUrl() === "/" ? "/teams?welcome=1" : nextUrl();
   });
 })();
 </script>

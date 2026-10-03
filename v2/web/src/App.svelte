@@ -1,35 +1,55 @@
 <script lang="ts">
-  // Stage 0 shell: proves the build and the api round trip. The signed-in app
-  // (sidebar, map, teams, fleet) replaces this from stage 1.
-  type Health = { ok: boolean; postgis?: string; migrations?: number; error?: string };
-  let health = $state<Health | null>(null);
+  import Shell from "./components/Shell.svelte";
+  import Teams from "./routes/Teams.svelte";
+  import Team from "./routes/Team.svelte";
+  import Join from "./routes/Join.svelte";
+  import Admin from "./routes/Admin.svelte";
+  import Soon from "./routes/Soon.svelte";
+  import { router, match } from "./lib/router.svelte";
+  import { session } from "./lib/session.svelte";
+  import { errorText } from "./lib/api";
 
-  fetch("/api/health")
-    .then((r) => r.json())
-    .then((h: Health) => (health = h))
-    .catch((e) => (health = { ok: false, error: String(e) }));
+  let failed = $state<string | null>(null);
+  session.load().catch((e) => (failed = errorText(e)));
+
+  // Until the map arrives (stage 3), Teams is home.
+  $effect(() => {
+    if (router.path === "/") router.go("/teams", true);
+  });
+
+  let teamParams = $derived(match("/teams/:id", router.path) ?? match("/teams/:id/:tab", router.path));
+  let joinParams = $derived(match("/join/:code", router.path));
+  let adminParams = $derived(router.path === "/admin" ? { tab: "users" } : match("/admin/:tab", router.path));
 </script>
 
-<main>
-  <img src="/wordmark-light.png" srcset="/wordmark-light@2x.png 2x" alt="StreetSweep" />
-  <p class="tag">v2 is under construction.</p>
-  <p class="status" class:bad={health && !health.ok}>
-    {#if !health}
-      Checking the server…
-    {:else if health.ok}
-      Server ready. PostGIS {health.postgis}, {health.migrations} migration{health.migrations === 1 ? "" : "s"} applied.
+{#if failed}
+  <div class="boot"><p>{failed}</p><button onclick={() => location.reload()}>Try again</button></div>
+{:else if !session.me}
+  <div class="boot"><img src="/login-mark.png" alt="" width="64" /></div>
+{:else}
+  <Shell>
+    {#if router.path === "/teams"}
+      <Teams />
+    {:else if teamParams}
+      {#key teamParams.id}<Team id={teamParams.id} tab={teamParams.tab ?? "members"} />{/key}
+    {:else if joinParams}
+      {#key joinParams.code}<Join code={joinParams.code} />{/key}
+    {:else if adminParams && session.me.user.is_site_admin}
+      <Admin tab={adminParams.tab} />
+    {:else if router.path === "/map"}
+      <Soon title="Map" stage={3} art="empty-areas.png">Areas, streets and your coverage, drawn and built on the server.</Soon>
+    {:else if router.path === "/drives"}
+      <Soon title="Drives" stage={4} art="empty-drives.png">Every drive from phones and loggers, matched to streets and counted for your teams.</Soon>
+    {:else if router.path === "/fleet"}
+      <Soon title="Fleet" stage={2} art="empty-vehicles.png">Cars, permanent assignments, check-out and return, phones and GPS loggers.</Soon>
     {:else}
-      Server problem: {health.error}
+      <Soon title="Not found" art={undefined}>There's nothing at this address. <a href="/teams">Go to Teams</a>.</Soon>
     {/if}
-  </p>
-  <a href="/login">Go to sign in</a>
-</main>
+  </Shell>
+{/if}
 
 <style>
-  main { min-height: 100%; display: grid; place-content: center; gap: 12px; text-align: center; padding: 24px; }
-  img { width: min(320px, 80vw); margin: 0 auto; }
-  .tag { color: var(--ink-soft); margin: 0; }
-  .status { margin: 0; color: var(--green-400); }
-  .status.bad { color: #ff8a80; }
-  a { color: var(--green-400); }
+  .boot { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 12px; background: var(--bg); color: var(--ink); }
+  .boot img { animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .5; } }
 </style>
