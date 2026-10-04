@@ -5,6 +5,7 @@
   import Icon from "./Icon.svelte";
   import { api, errorText } from "../lib/api";
   import { session } from "../lib/session.svelte";
+  import { defaultTeam } from "../lib/settings";
   import { OutlineDraw, ringsOf } from "../lib/draw.svelte";
   import { formValues } from "../lib/forms";
   import { miles, percent } from "../lib/format";
@@ -21,7 +22,7 @@
   type Mode = "list" | "detail" | "draw";
   let mode = $state<Mode>("list");
   let teams = $derived(session.me!.teams);
-  let teamId = $state(readTeam());
+  let teamId = $state(defaultTeam("streetsweep.areasTeam"));
   let areas = $state<Area[]>([]);
   let canEdit = $state(false);
   let loading = $state(true);
@@ -44,13 +45,6 @@
   let draw = $state<OutlineDraw | null>(null);
   let redrawing = $state<Area | null>(null);
 
-  function readTeam(): string {
-    try {
-      const t = localStorage.getItem("streetsweep.areasTeam");
-      if (t && session.me!.teams.some((x) => x.id === t)) return t;
-    } catch { /* fine */ }
-    return session.me!.teams.find((t) => t.kind === "personal")?.id ?? session.me!.teams[0]?.id ?? "";
-  }
 
   let team = $derived(teams.find((t) => t.id === teamId));
   // Colours are automatic: no area shares one with an area it touches.

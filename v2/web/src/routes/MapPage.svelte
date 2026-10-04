@@ -9,6 +9,7 @@
   import type { Place } from "../lib/types";
   import { MapController, STREETS_MIN_ZOOM, EXCLUDED_COLOR, type Base } from "../lib/map";
   import { myColors } from "../lib/colors";
+  import { mySettings } from "../lib/settings";
   import { session } from "../lib/session.svelte";
   import { api } from "../lib/api";
   import { date } from "../lib/format";
@@ -48,7 +49,7 @@
       const b = localStorage.getItem("streetsweep.base");
       if (b === "map" || b === "satellite" || b === "hybrid") return b;
     } catch { /* private window */ }
-    return "map";
+    return mySettings().base ?? "map";
   }
 
   function setBase(b: Base) {

@@ -8,6 +8,7 @@
   import WeekChart from "../components/WeekChart.svelte";
   import { api, errorText } from "../lib/api";
   import { session } from "../lib/session.svelte";
+  import { defaultTeam } from "../lib/settings";
   import { duration, miles, percent } from "../lib/format";
   import { assignAreaColors } from "../lib/areaColors";
   import { AREA_COLORS } from "../lib/types";
@@ -15,7 +16,7 @@
 
   let teams = $derived(session.me!.teams);
   let me = $derived(session.me!.user);
-  let teamId = $state(readTeam());
+  let teamId = $state(defaultTeam("streetsweep.homeTeam"));
   let team = $derived(teams.find((t) => t.id === teamId) ?? teams[0]);
   let personal = $derived(team?.kind === "personal");
   let isAdmin = $derived(team?.role === "owner" || team?.role === "admin");
@@ -30,13 +31,6 @@
   let period = $state<Period>("week");
   let rows = $state<LeaderRow[] | null>(null);
 
-  function readTeam() {
-    try {
-      const t = localStorage.getItem("streetsweep.homeTeam");
-      if (t && session.me!.teams.some((x) => x.id === t)) return t;
-    } catch { /* fine */ }
-    return session.me!.teams.find((t) => t.kind === "personal")?.id ?? session.me!.teams[0]?.id ?? "";
-  }
 
   $effect(() => {
     const t = team;

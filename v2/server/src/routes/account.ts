@@ -258,12 +258,17 @@ export default async function accountRoutes(app: FastifyInstance) {
 
   // Your preferences, merged: send only what changes. Unknown keys are refused, so a
   // typo can't quietly store nothing useful.
-  app.patch<{ Body: { map_colors?: MapColors; onboarded?: boolean } }>(
+  app.patch<{ Body: { map_colors?: MapColors; onboarded?: boolean; settings?: Record<string, unknown> } }>(
     "/api/me/preferences",
     { schema: { body: { type: "object", additionalProperties: false, properties: {
         map_colors: { type: "object", additionalProperties: false, required: ["driven", "undriven"], properties: {
           driven: COLOR_SPEC, undriven: COLOR_SPEC } },
-        onboarded: { type: "boolean" } } } } },
+        onboarded: { type: "boolean" },
+        // How the app behaves for you: where it opens, the map style, the team shown first.
+        settings: { type: "object", additionalProperties: false, properties: {
+          start_page: { type: "string", enum: ["home", "map", "drives"] },
+          base: { type: "string", enum: ["map", "satellite", "hybrid"] },
+          team_id: { type: ["string", "null"], format: "uuid" } } } } } } },
     async (req) => {
       const me = requireUser(req);
       await query(`UPDATE users SET preferences = preferences || $2::jsonb, updated_at = now() WHERE id = $1`,

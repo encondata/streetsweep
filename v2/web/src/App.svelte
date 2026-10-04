@@ -22,7 +22,13 @@
   import { errorText } from "./lib/api";
 
   let failed = $state<string | null>(null);
-  session.load().catch((e) => (failed = errorText(e)));
+  // Opened at the root: go to the start page from Settings (Home unless you chose otherwise).
+  // Only on arrival; the Home link in the sidebar still goes home.
+  const arrivedAt = location.pathname;
+  session.load().then(() => {
+    const start = session.me?.user.preferences?.settings?.start_page;
+    if (arrivedAt === "/" && router.path === "/" && start && start !== "home") router.go(`/${start}`, true);
+  }, (e) => (failed = errorText(e)));
 
   $effect(() => {
     if (router.path === "/fleet") router.go("/fleet/vehicles", true);
