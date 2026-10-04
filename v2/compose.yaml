@@ -13,7 +13,7 @@ x-app-env: &app-env
   # Empty = Texas (https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf).
   OSM_EXTRACT_URL: ${OSM_EXTRACT_URL:-}
   # Sent in the User-Agent to Geofabrik, OpenStreetMap and Esri, as their usage policies ask.
-  CONTACT_EMAIL: ${CONTACT_EMAIL:-${ADMIN_EMAIL:-}}
+  CONTACT_EMAIL: ${CONTACT_EMAIL:-}
   TILE_URL_OSM: ${TILE_URL_OSM:-}
   TILE_TTL_DAYS: ${TILE_TTL_DAYS:-30}
   DATA_DIR: /data
@@ -28,8 +28,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-streetsweep}
       POSTGRES_DB: streetsweep
     volumes:
-      # Outside the Synology-synced repo: a live database must never be file-synced.
-      - ${DATA_DIR:-${HOME}/streetsweep-v2-data}/postgres:/var/lib/postgresql/data
+      # DATA_DIR (in .env) should be outside any file-synced folder: a live database must
+      # never be file-synced. No nested defaults anywhere: older Compose (Unraid's) can't
+      # read them.
+      - ${DATA_DIR:-./data}/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U streetsweep -d streetsweep"]
       interval: 5s
@@ -56,7 +58,7 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       MAIL_FROM: ${MAIL_FROM:-StreetSweep <no-reply@streetsweep.local>}
     volumes:
-      - ${DATA_DIR:-${HOME}/streetsweep-v2-data}/files:/data
+      - ${DATA_DIR:-./data}/files:/data
     ports:
       - "${BIND_ADDRESS:-0.0.0.0}:${HOST_PORT:-8430}:80"
     depends_on:
@@ -89,7 +91,7 @@ services:
     environment:
       <<: *app-env
     volumes:
-      - ${DATA_DIR:-${HOME}/streetsweep-v2-data}/files:/data
+      - ${DATA_DIR:-./data}/files:/data
     depends_on:
       # The api applies migrations on start; the worker waits for it to be healthy.
       api:
@@ -119,5 +121,5 @@ services:
       # Two threads keeps the first build (and its memory) within a laptop's Docker VM.
       server_threads: ${VALHALLA_THREADS:-2}
     volumes:
-      - ${DATA_DIR:-${HOME}/streetsweep-v2-data}/valhalla:/custom_files
+      - ${DATA_DIR:-./data}/valhalla:/custom_files
     restart: unless-stopped
