@@ -211,6 +211,8 @@
 
   /** An area clicked on the map: how far along it is, and where to manage it. */
   function showArea(id: string, at?: [number, number]) {
+    // Looking at another area: the highlight of the last one goes.
+    if (missingFor && missingFor.id !== id) missingFor = null;
     const a = teamAreas.find((x) => x.id === id);
     if (!a || !ctl) return;
     const where = at ?? [(a.bbox[0] + a.bbox[2]) / 2, (a.bbox[1] + a.bbox[3]) / 2] as [number, number];
@@ -230,6 +232,7 @@
 
   // "Highlight what's left" in one area, for the team whose coverage is showing.
   let missingFor = $state<{ id: string; name: string; team: string } | null>(null);
+  let missingPanel = $state<ReturnType<typeof MissingPanel>>();
   $effect(() => {
     // Another team's coverage means another answer: start again from the popup.
     if (missingFor && missingFor.team !== coverageTeam) missingFor = null;
@@ -283,7 +286,7 @@
       const team = ctl!.coverageTeam;
       const comp = mount(StreetPopup, {
         target: el,
-        props: { hit, teamId: team, teamLabel: teamLabel(team), onchange: () => { ctl?.refreshCoverage(); loadAreas(); loadCells(); } },
+        props: { hit, teamId: team, teamLabel: teamLabel(team), onchange: () => { ctl?.refreshCoverage(); loadAreas(); loadCells(); missingPanel?.refresh(); } },
       });
       ctl!.showPopupEl(at, el, () => unmount(comp));
     };
@@ -394,7 +397,7 @@
 
   {#if ctl && missingFor}
     {#key missingFor.id + missingFor.team}
-      <MissingPanel ctl={ctl} areaId={missingFor.id} areaName={missingFor.name} teamId={missingFor.team} onclose={() => (missingFor = null)} />
+      <MissingPanel bind:this={missingPanel} ctl={ctl} areaId={missingFor.id} areaName={missingFor.name} teamId={missingFor.team} onclose={() => (missingFor = null)} />
     {/key}
   {/if}
 

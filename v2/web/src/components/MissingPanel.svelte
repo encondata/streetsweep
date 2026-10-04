@@ -21,14 +21,26 @@
   let error = $state<string | null>(null);
   let total = $derived((streets ?? []).reduce((t, s) => t + s.meters, 0));
 
+  async function load(fit: boolean) {
+    try {
+      const r = await api<{ streets: Missing[]; truncated: boolean }>(`/api/areas/${areaId}/missing?team=${teamId}`);
+      // Asked again after a street was marked, and nothing's left: the highlight has done its job.
+      if (!fit && !r.streets.length) return onclose();
+      streets = r.streets;
+      truncated = r.truncated;
+      ctl.setMissing(r.streets, { left, fit });
+    } catch (e) {
+      error = errorText(e);
+    }
+  }
+
+  /** A street was marked done or left out: drop it from the highlight, staying where you are. */
+  export function refresh() {
+    load(false);
+  }
+
   onMount(() => {
-    api<{ streets: Missing[]; truncated: boolean }>(`/api/areas/${areaId}/missing?team=${teamId}`)
-      .then((r) => {
-        streets = r.streets;
-        truncated = r.truncated;
-        ctl.setMissing(r.streets, { left });
-      })
-      .catch((e) => (error = errorText(e)));
+    load(true);
     return () => ctl.setMissing(null);
   });
 

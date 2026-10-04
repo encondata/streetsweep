@@ -83,7 +83,8 @@
 <div class="wrap">
   <div class="map" bind:this={box}></div>
   {#if ctl}<AreaPanel bind:this={panel} {ctl} panelWidth={PANEL_W} {shown} onshow={() => setShown(true)} onhide={() => setShown(false)}
-    onmissing={(a, team) => (missingFor = { id: a.id, name: a.name, team })} />{/if}
+    onmissing={(a, team) => (missingFor = { id: a.id, name: a.name, team })}
+    onarea={(id) => { if (missingFor && id !== missingFor.id) missingFor = null; }} />{/if}
   {#if ctl && missingFor}
     {#key missingFor.id + missingFor.team}
       <MissingPanel ctl={ctl} areaId={missingFor.id} areaName={missingFor.name} teamId={missingFor.team}

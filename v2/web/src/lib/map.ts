@@ -387,14 +387,14 @@ export class MapController {
    * Highlight what's left in an area (null clears it): each street's pieces as lines, and
    * a dot on each. Zooms to them, so a lone stub at the edge is brought into view.
    */
-  setMissing(streets: { geometry: GeoJSON.Geometry; at: [number, number] }[] | null, opts: { left?: number } = {}) {
+  setMissing(streets: { geometry: GeoJSON.Geometry; at: [number, number] }[] | null, opts: { left?: number; fit?: boolean } = {}) {
     this.whenReady(() => {
       const features: GeoJSON.Feature[] = (streets ?? []).flatMap((st) => [
         { type: "Feature", properties: {}, geometry: st.geometry },
         { type: "Feature", properties: {}, geometry: { type: "Point", coordinates: st.at } },
       ]);
       (this.map.getSource("missing") as GeoJSONSource).setData({ type: "FeatureCollection", features });
-      if (!streets?.length) return;
+      if (!streets?.length || opts.fit === false) return;
       const xs = streets.map((st) => st.at[0]), ys = streets.map((st) => st.at[1]);
       const pad = 0.0015;
       this.fitBounds([Math.min(...xs) - pad, Math.min(...ys) - pad, Math.max(...xs) + pad, Math.max(...ys) + pad], { left: opts.left, animate: true });

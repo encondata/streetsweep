@@ -14,10 +14,12 @@
   import { assignAreaColors } from "../lib/areaColors";
   import { areaFeatures } from "../lib/teamAreas";
 
-  let { ctl, panelWidth = 360, onteam, shown = true, onshow, onhide, onmissing }: {
+  let { ctl, panelWidth = 360, onteam, shown = true, onshow, onhide, onmissing, onarea }: {
     ctl: MapController; panelWidth?: number; onteam?: (teamId: string) => void;
     /** "Highlight what's left" in this area, for this team. */
     onmissing?: (area: Area, teamId: string) => void;
+    /** The area open in the panel changed (null: back to the list). */
+    onarea?: (id: string | null) => void;
     /** Hidden, the panel keeps working (team, areas on the map); it's just out of the way. */
     shown?: boolean; onshow?: () => void; onhide?: () => void;
   } = $props();
@@ -41,6 +43,10 @@
   let lookingUp = $state(false);
 
   let area = $state<Area | null>(null);
+  $effect(() => {
+    const id = area?.id ?? null;
+    if (mode === "detail") onarea?.(id);
+  });
   let areaCanEdit = $state(false);
   let editing = $state(false);
   let form = $state({ name: "", notes: "", level: "neighborhood" as DrawnLevel });
