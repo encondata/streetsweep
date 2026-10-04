@@ -28,3 +28,19 @@ is a plain pin-and-tick outline: the themed icon is flattened to one colour by t
 and the full mark becomes a blob when that happens.
 
 Requires Pillow and NumPy.
+
+## Play Store listing
+
+`brand/play/` holds what the Play Console asks for:
+
+- `icon-512.png`: written by `python3 brand/03-play.py`, the launcher icon's card and pin at 512 px.
+- `feature-1024x500.png`: `feature.html` rendered by headless Chrome:
+
+  ```bash
+  cd brand/play && "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new \
+    --hide-scrollbars --force-device-scale-factor=1 --window-size=1024,500 --allow-file-access-from-files \
+    --screenshot="$PWD/feature-1024x500.png" "file://$PWD/feature.html"
+  ```
+- `screenshots/`: 1080 x 1920 (9:16) captures from the emulator (`adb shell wm size 1080x1920`), signed in
+  to a local stack seeded with `v2/scripts/seed-demo.mjs` then `seed-showcase.mjs`, with the status bar
+  in demo mode. All 24-bit PNG, no alpha, as Play requires.

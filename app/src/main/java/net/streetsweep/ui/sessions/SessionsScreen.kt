@@ -2,6 +2,9 @@
 
 package net.streetsweep.ui.sessions
 
+import net.streetsweep.ui.map.DrivenTrack
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -100,7 +103,7 @@ fun SessionsScreen(
                     Column(Modifier.fillMaxWidth().padding(16.dp)) {
                         Text("All time", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                         Text(
-                            "${t.drives} drives · ${Geo.formatDistance(t.meters ?: 0.0)} · ${Format.duration(t.durationMs ?: 0L)}",
+                            "${t.drives} drive${if (t.drives == 1) "" else "s"} · ${Geo.formatDistance(t.meters ?: 0.0)} · ${Format.duration(t.durationMs ?: 0L)}",
                             style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
                         )
                         Text(
@@ -182,6 +185,7 @@ fun SessionDetailScreen(
     val raw by viewModel.raw.collectAsStateWithLifecycle()
     val snapped by viewModel.snapped.collectAsStateWithLifecycle()
     val snapping by viewModel.snapping.collectAsStateWithLifecycle()
+    val palette by viewModel.palette.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
 
@@ -207,13 +211,18 @@ fun SessionDetailScreen(
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            // A drive still going is drawn as one (dashed fixes, the car); a finished one as
+            // the route it took, in your driven colour.
+            val live = session?.isOpen == true
             TrackMap(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                layers = MapLayers(activeRaw = raw, activeMatched = snapped),
+                // The map view paints past its own bounds unless clipped.
+                modifier = Modifier.weight(1f).fillMaxWidth().clipToBounds(),
+                layers = if (live) MapLayers(activeRaw = raw, activeMatched = snapped, palette = palette)
+                    else MapLayers(drivenEdges = listOf(DrivenTrack(raw, session?.startedAt ?: 0L)), palette = palette),
                 mapController = mapController,
             )
             session?.let { s ->
-                Column(Modifier.padding(16.dp)) {
+                Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(16.dp)) {
                     Text(summaryLine(s), style = MaterialTheme.typography.bodyMedium)
                     if (s.newStreets > 0) {
                         Text(

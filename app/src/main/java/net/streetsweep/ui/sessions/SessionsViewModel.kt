@@ -35,6 +35,10 @@ class SessionDetailViewModel(private val container: AppContainer, private val se
     val session: StateFlow<TrackSession?> = container.trackRepository.observeSession(sessionId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    /** Your street colours, so the route is drawn in your "driven" colour. */
+    val palette: StateFlow<net.streetsweep.data.prefs.MapPalette> = container.settings.settings.map { it.mapPalette }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), net.streetsweep.data.prefs.MapPalette.DEFAULT)
+
     val raw: StateFlow<List<LatLngPoint>> = container.trackRepository.observePoints(sessionId)
         .map { pts -> pts.map { LatLngPoint(it.latitude, it.longitude) } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
