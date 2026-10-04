@@ -21,6 +21,8 @@ import mapRoutes from "./routes/map.js";
 import areaRoutes from "./routes/areas.js";
 import driveRoutes from "./routes/drives.js";
 import loggerBatchRoutes from "./routes/loggerBatches.js";
+import insightRoutes from "./routes/insights.js";
+import placeRoutes from "./routes/places.js";
 import { stopJobs } from "./jobs.js";
 
 const app = Fastify({ logger: { level: "info" }, trustProxy: true });
@@ -66,6 +68,8 @@ app.register(mapRoutes);
 app.register(areaRoutes);
 app.register(driveRoutes);
 app.register(loggerBatchRoutes);
+app.register(insightRoutes);
+app.register(placeRoutes);
 
 app.get("/api/health", async (_req, reply) => {
   try {

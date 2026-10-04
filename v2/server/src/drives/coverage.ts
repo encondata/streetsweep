@@ -7,7 +7,7 @@ import { pool } from "../db.js";
 type Db = pg.Pool | pg.PoolClient;
 
 // The rule above, as SQL over a drive row `d`, for team `$team`.
-const COUNTS_FOR = (team: string) => `
+export const COUNTS_FOR = (team: string) => `
   coalesce((SELECT counts FROM team_drive_types tdt WHERE tdt.team_id = ${team} AND tdt.drive_type_key = d.drive_type_key), true)
   AND (
     (d.user_id IS NOT NULL AND EXISTS (

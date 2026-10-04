@@ -7,7 +7,8 @@ import { regionOf, runImport } from "./osm/import.js";
 import { areasInUse, buildArea, importBoundaries } from "./osm/areas.js";
 import { matchDrive, ValhallaDown } from "./drives/match.js";
 import { assembleLogger, loggersWithOpenPoints } from "./drives/assemble.js";
-import { rebuildTeam } from "./drives/coverage.js";
+import { rebuildTeam, teamsForDrive } from "./drives/coverage.js";
+import { evaluatePerson, evaluateTeam } from "./insights/achievements.js";
 
 const boss = new PgBoss({ connectionString: config.databaseUrl });
 boss.on("error", (err) => console.error("pg-boss:", err));
@@ -15,6 +16,7 @@ boss.on("error", (err) => console.error("pg-boss:", err));
 export const QUEUES = {
   ping: "ping", osmImport: "osm-import", areaBuild: "area-build",
   driveMatch: "drive-match", loggerAssemble: "logger-assemble", loggerSweep: "logger-sweep", coverageRebuild: "coverage-rebuild",
+  achievements: "achievements",
 } as const;
 type ImportJob = { force?: boolean; requestedBy?: string | null };
 
@@ -88,6 +90,7 @@ async function main() {
     try {
       const r = await matchDrive(driveId);
       console.log(`drive-match ${driveId}: ${r.segments} segments (${r.method})`);
+      await boss.send(QUEUES.achievements, { driveId });
     } catch (err) {
       if (err instanceof ValhallaDown) {
         await pool.query(`UPDATE drives SET status = 'received', match_error = $2 WHERE id = $1`, [driveId, `Waiting: ${err.message}`]);
@@ -116,7 +119,23 @@ async function main() {
   await boss.work<{ teamId: string }>(QUEUES.coverageRebuild, async ([job]) => {
     const t0 = Date.now();
     await rebuildTeam(job.data.teamId);
+    await boss.send(QUEUES.achievements, { teamId: job.data.teamId });
     console.log(`coverage-rebuild ${job.data.teamId}: ${Date.now() - t0} ms`);
+  });
+
+  // Achievements: after a drive lands (its driver and the teams it counts for), and after a
+  // team is recounted. Awards are only ever added, so running one twice is harmless.
+  await boss.createQueue(QUEUES.achievements, { expireInSeconds: 600, retryLimit: 2, retryDelay: 30 });
+  await boss.work<{ driveId?: string; teamId?: string }>(QUEUES.achievements, async ([job]) => {
+    const { driveId, teamId } = job.data;
+    let added = 0;
+    if (teamId) added += await evaluateTeam(pool, teamId);
+    if (driveId) {
+      const { rows } = await pool.query<{ user_id: string | null }>(`SELECT user_id FROM drives WHERE id = $1`, [driveId]);
+      if (rows[0]?.user_id) added += await evaluatePerson(pool, rows[0].user_id);
+      for (const t of await teamsForDrive(pool, driveId)) added += await evaluateTeam(pool, t);
+    }
+    if (added) console.log(`achievements ${driveId ?? teamId}: ${added} new`);
   });
 
   // Geofabrik refreshes daily; monthly is plenty for streets (3rd of the month, 04:00).

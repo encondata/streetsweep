@@ -251,6 +251,7 @@ export default async function driveRoutes(app: FastifyInstance) {
         [team.id, req.params.segmentId, req.body.kind, me.id, req.body.note?.trim() || null],
       );
       await audit(pool, { userId: me.id, teamId: team.id, action: `street.${req.body.kind}`, entity: "segment", entityId: req.params.segmentId });
+      await sendJob("achievements", { teamId: team.id }, { singletonKey: team.id });
       return { ok: true };
     },
   );

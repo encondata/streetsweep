@@ -271,6 +271,16 @@ audit_log       (id, at, user_id, team_id, action, entity, entity_id, data jsonb
     - After every street import, all areas in use are rebuilt.
     - Area *packages* for the apps move to stage 6, where the apps need them.
 
+12. **Insights (stage 5), decided 2026-10-03.**
+    - **Achievements:** v1's set (ladders plus named badges), earned per person from the
+      drives credited to them, *plus team achievements* earned by a team as a whole.
+    - **Leaderboards:** several boards per team (new streets swept, total miles,
+      drives), each for this week, this month or all time.
+    - **Places:** private to the person who marks them, and shareable with any of
+      their teams. Added from the web map now, and from the phone in stage 6.
+    - **Home:** a new Home page (stats, area progress, recent drives, achievements,
+      with a team switcher) replaces Teams as the landing page.
+
 ## Still open
 
 - **Changing your email** in the account window doesn't ask for a code yet. It should
