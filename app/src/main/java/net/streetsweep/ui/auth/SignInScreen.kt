@@ -97,6 +97,8 @@ fun SignInScreen(
      *  changeable from here or a self-hosted server cannot be reached on a fresh phone. */
     onChangeServer: (String) -> Unit,
 ) {
+    // White icons over the dusk photo; the rest of the app goes back to dark ones.
+    net.streetsweep.ui.theme.StatusBarIcons(darkIcons = false)
     var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     var reveal by rememberSaveable { mutableStateOf(false) }

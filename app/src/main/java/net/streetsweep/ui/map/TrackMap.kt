@@ -369,6 +369,9 @@ class LayersOverlay : Overlay() {
                 canvas.drawPath(poly, if (a.focused) areaFocused else areaStroke)
             }
             proj.toPixels(GeoPoint(a.bounds.north, a.bounds.west), pt)
+            // Its top edge is off the screen: the status card up there names the area you're
+            // in, and a label pinned to the edge would sit under the status bar.
+            if (pt.y < 0) return@forEach
             val label = "${a.name} · ${a.percent}%"
             val w = areaLabel.measureText(label)
             val lx = pt.x.toFloat().coerceAtLeast(8f); val ly = pt.y.toFloat().coerceAtLeast(8f)

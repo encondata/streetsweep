@@ -3,6 +3,11 @@
 
     <style name="Theme.StreetSweep" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/brand_window</item>
+        <!-- Dark status and navigation icons: the screens are light, the map pale. The
+             splash hand-over re-applies these, so they have to be said here as well as in
+             StatusBarIcons, which turns them light over the sign-in photo. -->
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
     </style>
 
     <!-- What the launcher draws while the process starts. Only the pin and the brand

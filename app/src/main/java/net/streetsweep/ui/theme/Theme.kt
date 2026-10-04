@@ -94,6 +94,7 @@ fun StreetSweepTheme(
         else -> LightColorScheme
     }
 
+    StatusBarIcons(darkIcons = !darkTheme)
     MaterialTheme(
         colorScheme = colorScheme,
         typography = Typography,

@@ -83,8 +83,6 @@ class AreasViewModel(private val container: AppContainer, private val context: C
     val hidden: StateFlow<List<CoverageArea>> = container.coverageRepository.observeHiddenAreas()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val wayCount: StateFlow<Int> = container.coverageRepository.observeWayCount()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     /** Where areas are drawn, to say so when there are none. */
     val webAddress: StateFlow<String> = container.settings.settings
@@ -141,7 +139,6 @@ fun AreasScreen(
 ) {
     val areas by viewModel.areas.collectAsStateWithLifecycle()
     val hidden by viewModel.hidden.collectAsStateWithLifecycle()
-    val wayCount by viewModel.wayCount.collectAsStateWithLifecycle()
     val webAddress by viewModel.webAddress.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -201,7 +198,7 @@ fun AreasScreen(
         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp)) {
             item {
                 Text(
-                    "$wayCount streets loaded from OpenStreetMap",
+                    "Street maps © OpenStreetMap contributors",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 8.dp),
