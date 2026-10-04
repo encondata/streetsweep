@@ -33,10 +33,14 @@ services:
       # read them.
       - ${DATA_DIR:-./data}/postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U streetsweep -d streetsweep"]
+      # Over TCP, as the api connects. On the very first start Postgres runs a temporary
+      # server on its Unix socket only while it sets up; a socket check passes then, and
+      # the api, let in too early, finds nothing listening.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U streetsweep -d streetsweep"]
       interval: 5s
       timeout: 3s
-      retries: 20
+      retries: 30
+      start_period: 20s
     restart: unless-stopped
 
   api:
