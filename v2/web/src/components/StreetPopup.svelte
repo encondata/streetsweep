@@ -67,7 +67,10 @@
   const len = (m: number) => { const ft = Math.round(m * 3.28084); return ft < 1000 ? `${ft.toLocaleString()} ft` : miles(m); };
   const ask = (kind: "complete" | "excluded", all: boolean) => { noting = kind; whole = all; };
   /** More of the street than this piece, still to do: worth offering "all of it". */
-  let wholeLeft = $derived(street && street.pieces > 1 && street.left_m > hit.length_m + 1 ? street.left_m : 0);
+  // (This piece's own share doesn't count: it has its own buttons. A crossover of a few
+  // metres left on an otherwise done road still does.)
+  let thisLeft = $derived(seg && !seg.mark && !seg.first_driven_at ? hit.length_m : 0);
+  let wholeLeft = $derived(street && street.pieces > 1 && street.left_m - thisLeft >= 1 ? street.left_m : 0);
 
   // The note box takes the typing as soon as it opens.
   const focus = (el: HTMLInputElement) => el.focus();

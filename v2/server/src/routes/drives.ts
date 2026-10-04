@@ -219,6 +219,12 @@ export default async function driveRoutes(app: FastifyInstance) {
    * pieces with its name that run on from it, gaps of up to ~150 m bridged (a park, a jog
    * at a junction), so another town's street of the same name stays separate. For an
    * unnamed piece, the OpenStreetMap way it's part of.
+   *
+   * Plus the bits that only exist because of it: short pieces with both ends on the
+   * street, such as the crossovers between a divided road's two sides and slip lanes that
+   * leave and rejoin it (unnamed, a ramp, or its own name: up to 200 m), and where another
+   * street crosses the median, its few metres between the two sides (up to 30 m, so a
+   * real block of a side street never counts).
    */
   const STREET_RUN = (seg: string) => `
     WITH me AS (
@@ -229,8 +235,17 @@ export default async function driveRoutes(app: FastifyInstance) {
        WHERE me.nm IS NOT NULL AND s.retired_at IS NULL AND s.geom && ST_Expand(me.geom, 0.1) AND lower(w.name) = me.nm
       UNION ALL
       SELECT s.id, s.geom FROM me, street_segments s WHERE me.nm IS NULL AND s.way_id = me.way_id AND s.retired_at IS NULL),
-    cl AS (SELECT id, ST_ClusterDBSCAN(geom, eps := 0.0015, minpoints := 1) OVER () AS k FROM cand)
-    SELECT id FROM cl WHERE k = (SELECT k FROM cl WHERE id = (SELECT id FROM me))`;
+    cl AS (SELECT id, ST_ClusterDBSCAN(geom, eps := 0.0015, minpoints := 1) OVER () AS k FROM cand),
+    base AS (SELECT id FROM cl WHERE k = (SELECT k FROM cl WHERE id = (SELECT id FROM me))),
+    segs AS (SELECT s.from_node, s.to_node, s.geom FROM street_segments s WHERE s.id IN (SELECT id FROM base)),
+    nodes AS (SELECT from_node AS n FROM segs UNION SELECT to_node FROM segs),
+    box AS (SELECT ST_Expand(ST_Extent(geom), 0.001) AS b FROM segs)
+    SELECT id FROM base
+    UNION
+    SELECT s.id FROM box, me, street_segments s JOIN street_ways w ON w.way_id = s.way_id
+     WHERE s.retired_at IS NULL AND s.geom && box.b AND s.length_m <= 200
+       AND s.from_node IN (SELECT n FROM nodes) AND s.to_node IN (SELECT n FROM nodes)
+       AND (w.name IS NULL OR w.highway LIKE '%\\_link' OR lower(w.name) = me.nm OR s.length_m <= 30)`;
 
   app.get<{ Params: { id: string }; Querystring: { team?: string } }>("/api/segments/:id", async (req) => {
     const me = requireUser(req);
