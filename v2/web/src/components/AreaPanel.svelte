@@ -7,10 +7,11 @@
   import { session } from "../lib/session.svelte";
   import { OutlineDraw, ringsOf } from "../lib/draw.svelte";
   import { formValues } from "../lib/forms";
+  import { miles, percent } from "../lib/format";
   import { AREA_COLOR, type MapController } from "../lib/map";
   import { AREA_COLORS, LEVEL_LABEL, type Area } from "../lib/types";
 
-  let { ctl, panelWidth = 360 }: { ctl: MapController; panelWidth?: number } = $props();
+  let { ctl, panelWidth = 360, onteam }: { ctl: MapController; panelWidth?: number; onteam?: (teamId: string) => void } = $props();
 
   type Mode = "list" | "detail" | "draw";
   let mode = $state<Mode>("list");
@@ -53,7 +54,7 @@
       const r = await api<{ areas: Area[]; can_edit: boolean }>(`/api/teams/${teamId}/areas`);
       areas = r.areas;
       canEdit = r.can_edit;
-      ctl.setTeamAreas(r.areas.map((a) => ({ type: "Feature", id: a.id, properties: { color: a.color }, geometry: a.geometry! })));
+      ctl.setTeamAreas(r.areas.map((a) => ({ type: "Feature", id: a.id, properties: { id: a.id, color: a.color }, geometry: a.geometry! })));
       // Street lists being built: check back until they're done.
       if (r.areas.some((a) => a.build_status === "queued" || a.build_status === "building")) pollTimer = setTimeout(refresh, 4000);
     } catch (e) {
@@ -62,7 +63,8 @@
       loading = false;
     }
   }
-  async function refresh() {
+  /** Coverage or areas changed elsewhere (a street marked on the map). */
+  export async function refresh() {
     await loadAreas();
     if (area && mode === "detail") await open(area.id, false);
   }
@@ -70,6 +72,7 @@
     const t = teamId;
     try { localStorage.setItem("streetsweep.areasTeam", t); } catch { /* fine */ }
     untrack(() => {
+      onteam?.(t);
       loading = true;
       back();
       loadAreas();
@@ -241,11 +244,12 @@
   }
 
   // ---- words ----
-  function miles(m: number | null) {
-    if (m == null) return "—";
-    const mi = m / 1609.34;
-    return `${mi < 10 ? mi.toFixed(1) : Math.round(mi).toLocaleString()} mi`;
-  }
+  /** The team's progress in an area it follows or drew (the list carries it). */
+  const progressOf = (id: string) => {
+    const a = areas.find((x) => x.id === id);
+    return a && a.build_status === "built" && a.total_m ? a : null;
+  };
+  const share = (a: Area) => Math.min(100, ((a.driven_m ?? 0) / a.total_m!) * 100);
   /** Small areas in acres, bigger ones in square miles (everything else here is in miles). */
   function size(km2: number) {
     const sqmi = km2 * 0.386102;
@@ -302,7 +306,11 @@
             <span class="grow">
               <strong>{a.name}</strong>
               <span class="muted small">{a.source === "drawn" ? LEVEL_LABEL[a.level] : kind(a)} · {status(a)}</span>
+              {#if progressOf(a.id)}
+                <span class="bar" title="{miles(a.driven_m)} of {miles(a.total_m)} swept"><span style:width="{share(a)}%" style:background={a.color ?? AREA_COLOR}></span></span>
+              {/if}
             </span>
+            {#if progressOf(a.id)}<span class="pct">{percent(a.driven_m ?? 0, a.total_m!)}</span>{/if}
             {#if a.build_status === "queued" || a.build_status === "building"}<span class="spin" aria-label="Working"></span>{/if}
           </button>
         {:else}
@@ -336,6 +344,19 @@
         <div><span class="muted small">Segments</span><strong>{area.segment_count?.toLocaleString() ?? "—"}</strong></div>
         <div><span class="muted small">Size</span><strong>{size(area.km2)}</strong></div>
       </div>
+
+      {#if progressOf(area.id)}
+        {@const p = progressOf(area.id)!}
+        <div class="progress">
+          <div class="progress-head">
+            <strong>{percent(p.driven_m ?? 0, p.total_m!)} swept</strong>
+            <span class="muted small">{team?.kind === "personal" ? "by you" : `by ${team?.name}`}</span>
+          </div>
+          <span class="bar big"><span style:width="{share(p)}%" style:background={area.color ?? AREA_COLOR}></span></span>
+          <span class="muted small">{miles(p.driven_m)} of {miles(p.total_m)} · {(p.driven_segments ?? 0).toLocaleString()} of {(p.total_segments ?? 0).toLocaleString()} street segments.
+            Streets marked done count; ones left out don't count against you.</span>
+        </div>
+      {/if}
 
       {#if area.build_status === "queued" || area.build_status === "building"}
         <p class="notice">{status(area)}. This takes a few seconds for a city and a few minutes for a whole state.</p>
@@ -446,6 +467,12 @@
   .facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .facts div { display: grid; gap: 1px; background: var(--surface-2); border-radius: 10px; padding: 8px 10px; }
   .notes { white-space: pre-wrap; font-size: 13.5px; }
+  .bar { display: block; height: 5px; border-radius: 99px; background: var(--line); overflow: hidden; margin-top: 4px; }
+  .bar > span { display: block; height: 100%; border-radius: 99px; min-width: 2px; }
+  .bar.big { height: 9px; margin: 0; }
+  .pct { font-size: 12.5px; font-weight: 700; color: var(--ink-soft); flex: none; }
+  .progress { display: grid; gap: 6px; }
+  .progress-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
   .row-btns { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .danger { color: var(--danger); }
   .swatches { display: flex; gap: 6px; flex-wrap: wrap; }

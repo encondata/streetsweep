@@ -25,3 +25,26 @@ export function span(fromIso: string, toIso: string | null): string {
   if (from.toDateString() === to.toDateString()) return `${day(from)}, ${time(from)} – ${time(to)}`;
   return `${date(fromIso)} – ${date(toIso!)}`;
 }
+
+/** Distances in miles: "0.4 mi", "12 mi". */
+export function miles(m: number | null | undefined): string {
+  if (m == null) return "—";
+  const mi = m / 1609.34;
+  return `${mi < 10 ? mi.toFixed(1) : Math.round(mi).toLocaleString()} mi`;
+}
+
+/** "45 min", "1 h 20 min". */
+export function duration(fromIso: string, toIso: string): string {
+  const min = Math.max(0, Math.round((new Date(toIso).getTime() - new Date(fromIso).getTime()) / 60000));
+  if (min < 60) return `${min} min`;
+  return `${Math.floor(min / 60)} h${min % 60 ? ` ${min % 60} min` : ""}`;
+}
+
+/** Whole percent, but never 100% until it really is all done, and never 0% once started. */
+export function percent(part: number, whole: number): string {
+  if (!whole) return "—";
+  const p = (part / whole) * 100;
+  if (p > 0 && p < 1) return "<1%";
+  if (p < 100 && p > 99) return "99%";
+  return `${Math.round(p)}%`;
+}

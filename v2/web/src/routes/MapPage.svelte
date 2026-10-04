@@ -1,7 +1,9 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { mount, onMount, unmount } from "svelte";
   import AreaPanel from "../components/AreaPanel.svelte";
-  import { MapController, STREETS_MIN_ZOOM, type Base } from "../lib/map";
+  import StreetPopup from "../components/StreetPopup.svelte";
+  import { MapController, STREETS_MIN_ZOOM, DRIVEN_COLOR, EXCLUDED_COLOR, type Base } from "../lib/map";
+  import { session } from "../lib/session.svelte";
   import { api } from "../lib/api";
   import { date } from "../lib/format";
 
@@ -19,6 +21,12 @@
   let info = $state<Info | null>(null);
   let zoom = $state(11);
   let base = $state<Base>(readBase());
+  // The team chosen in the area panel: streets are coloured by its coverage.
+  let coverageTeam = $state<string | null>(null);
+  function chooseTeam(id: string) {
+    coverageTeam = id;
+    ctl?.setCoverageTeam(id);
+  }
 
   function readBase(): Base {
     try {
@@ -34,10 +42,9 @@
     try { localStorage.setItem("streetsweep.base", b); } catch { /* fine */ }
   }
 
-  const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
-  const KIND: Record<string, string> = {
-    primary: "Main road", secondary: "Secondary road", tertiary: "Minor through road", unclassified: "Minor road",
-    residential: "Residential street", living_street: "Living street",
+  const teamLabel = (id: string | null) => {
+    const t = session.me!.teams.find((x) => x.id === id);
+    return !t ? "" : t.kind === "personal" ? "you" : t.name;
   };
 
   // Where the map was left, so it reopens there.
@@ -65,10 +72,15 @@
     ctl.map.on("zoomend", () => (zoom = ctl!.map.getZoom()));
     zoom = ctl.map.getZoom();
     ctl.onAreaClick = (id) => panel?.open(id);
-    ctl.onStreetClick = (s, at) => {
-      const kind = KIND[s.highway.replace(/_link$/, "")] ?? s.highway;
-      const feet = Math.round(s.length_m * 3.28084);
-      ctl!.showPopup(at, `<strong>${esc(s.name ?? "Unnamed street")}</strong><br><span class="muted">${esc(kind)}${s.highway.endsWith("_link") ? " (ramp)" : ""} · ${feet.toLocaleString()} ft</span>`);
+    // The popup is a live component: it loads the street's coverage and can mark it.
+    ctl.onStreetClick = (hit, at) => {
+      const el = document.createElement("div");
+      const team = ctl!.coverageTeam;
+      const comp = mount(StreetPopup, {
+        target: el,
+        props: { hit, teamId: team, teamLabel: teamLabel(team), onchange: () => { ctl?.refreshCoverage(); panel?.refresh(); } },
+      });
+      ctl!.showPopupEl(at, el, () => unmount(comp));
     };
 
     // First visit: open on the imported region. Keep checking while an import runs.
@@ -102,7 +114,7 @@
 <div class="mapwrap">
   <div class="map" bind:this={box}></div>
 
-  {#if ctl}<AreaPanel bind:this={panel} {ctl} panelWidth={PANEL_W} />{/if}
+  {#if ctl}<AreaPanel bind:this={panel} {ctl} panelWidth={PANEL_W} onteam={chooseTeam} />{/if}
 
   <div class="top">
     <div class="seg" role="group" aria-label="Basemap">
@@ -122,6 +134,12 @@
       <div class="chip">No streets imported yet. A site admin can start an import from Admin → Map data.</div>
     {:else if zoom < STREETS_MIN_ZOOM}
       <div class="chip">Zoom in to see streets</div>
+    {:else if info?.last_import && coverageTeam}
+      <div class="chip quiet legend">
+        <span><i style:background={DRIVEN_COLOR}></i>Driven</span>
+        <span><i style:background="#1a6fd4"></i>Not yet</span>
+        <span><i style:background={EXCLUDED_COLOR}></i>Left out</span>
+      </div>
     {:else if info?.last_import}
       <div class="chip quiet">{info.region[0].toUpperCase() + info.region.slice(1)} streets · OpenStreetMap data from {date(info.last_import.osm_timestamp ?? info.last_import.finished_at)}</div>
     {/if}
@@ -141,6 +159,9 @@
     font-size: 13px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 8px; text-align: center;
   }
   .chip.quiet { color: var(--ink-soft); font-size: 12px; padding: 6px 12px; }
+  .legend { gap: 12px; }
+  .legend span { display: flex; align-items: center; gap: 5px; }
+  .legend i { width: 14px; height: 4px; border-radius: 2px; display: block; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green-600); animation: pulse 1.2s ease-in-out infinite; flex: none; }
   @keyframes pulse { 50% { opacity: .3; } }
   :global(.maplibregl-popup-content) { font: 13.5px/1.45 var(--ui); padding: 10px 28px 10px 12px; border-radius: 10px; }

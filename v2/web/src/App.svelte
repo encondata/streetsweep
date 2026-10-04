@@ -9,6 +9,8 @@
   import Vehicle from "./routes/Vehicle.svelte";
   import Logger from "./routes/Logger.svelte";
   import MapPage from "./routes/MapPage.svelte";
+  import Drives from "./routes/Drives.svelte";
+  import Drive from "./routes/Drive.svelte";
   import { router, match } from "./lib/router.svelte";
   import { session } from "./lib/session.svelte";
   import { errorText } from "./lib/api";
@@ -25,6 +27,7 @@
   let teamParams = $derived(match("/teams/:id", router.path) ?? match("/teams/:id/:tab", router.path));
   let joinParams = $derived(match("/join/:code", router.path));
   let vehicleParams = $derived(match("/fleet/vehicles/:id", router.path));
+  let driveParams = $derived(match("/drives/:id", router.path));
   let loggerParams = $derived(match("/fleet/loggers/:id", router.path));
   let fleetParams = $derived(match("/fleet/:tab", router.path));
   let adminParams = $derived(router.path === "/admin" ? { tab: "users" } : match("/admin/:tab", router.path));
@@ -47,7 +50,9 @@
     {:else if router.path === "/map"}
       <MapPage />
     {:else if router.path === "/drives"}
-      <Soon title="Drives" stage={4} art="empty-drives.png">Every drive from phones and loggers, matched to streets and counted for your teams.</Soon>
+      <Drives />
+    {:else if driveParams}
+      {#key driveParams.id}<Drive id={driveParams.id} />{/key}
     {:else if vehicleParams}
       {#key vehicleParams.id}<Vehicle id={vehicleParams.id} />{/key}
     {:else if loggerParams}

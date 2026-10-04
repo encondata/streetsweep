@@ -1,7 +1,7 @@
 // The map: basemaps from the server's tile cache, streets as vector tiles from PostGIS.
 import {
   Map as MlMap, NavigationControl, ScaleControl, GeolocateControl, Popup, setWorkerUrl,
-  type GeoJSONSource, type MapLayerMouseEvent, type MapMouseEvent, type StyleSpecification,
+  type GeoJSONSource, type VectorTileSource, type MapLayerMouseEvent, type MapMouseEvent, type StyleSpecification,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 // MapLibre looks for its worker beside its own file, which bundling moves: so the worker
@@ -15,6 +15,10 @@ export type Base = "map" | "satellite" | "hybrid";
 export const STREETS_MIN_ZOOM = 12;
 
 const STREET_COLOR = "#1a6fd4";
+/** Coverage, when a team is chosen: swept streets turn green, left-out ones go grey. */
+export const DRIVEN_COLOR = "#16a34a";
+export const EXCLUDED_COLOR = "#9aa7b4";
+export const TRACK_COLOR = "#e2721f";
 export const AREA_COLOR = "#1e8a28";
 const empty = (): GeoJSON.FeatureCollection => ({ type: "FeatureCollection", features: [] });
 
@@ -28,10 +32,13 @@ function style(): StyleSpecification {
              attribution: "Imagery © Esri" },
       ref: { type: "raster", tiles: ["/api/tiles/ref/{z}/{x}/{y}"], tileSize: 256, maxzoom: 19 },
       streets: { type: "vector", tiles: [`${location.origin}/api/tiles/streets/{z}/{x}/{y}`],
-                 minzoom: STREETS_MIN_ZOOM, maxzoom: 16, promoteId: "id" },
+                 // Each street's segment id is the tile feature's own id (ST_AsMVT's id column).
+                 minzoom: STREETS_MIN_ZOOM, maxzoom: 16 },
       boundaries: { type: "vector", tiles: [`${location.origin}/api/tiles/areas/{z}/{x}/{y}`], maxzoom: 14 },
       "team-areas": { type: "geojson", data: empty(), promoteId: "id" },
       preview: { type: "geojson", data: empty() },
+      "drive-streets": { type: "geojson", data: empty() },
+      "drive-track": { type: "geojson", data: empty() },
     },
     layers: [
       { id: "base-osm", type: "raster", source: "osm", paint: { "raster-saturation": -0.35 } },
@@ -62,8 +69,10 @@ function style(): StyleSpecification {
         id: "streets", type: "line", source: "streets", "source-layer": "streets",
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": ["case", ["boolean", ["feature-state", "hover"], false], "#0d4a99", STREET_COLOR],
+          "line-color": ["case", ["boolean", ["feature-state", "hover"], false], "#0d4a99",
+            ["match", ["get", "state"], ["done", "complete"], DRIVEN_COLOR, "excluded", EXCLUDED_COLOR, STREET_COLOR]],
           "line-width": ["interpolate", ["linear"], ["zoom"], 12, 1.2, 16, 4, 19, 9],
+          "line-opacity": ["match", ["get", "state"], "excluded", 0.7, 1],
         },
       },
       {
@@ -73,6 +82,16 @@ function style(): StyleSpecification {
           "line-color": ["coalesce", ["get", "color"], AREA_COLOR],
           "line-width": ["case", ["boolean", ["feature-state", "selected"], false], 4, 2.2],
         },
+      },
+      // One drive, on its own page: the streets it was matched to, under the raw GPS track.
+      {
+        id: "drive-streets", type: "line", source: "drive-streets", layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": DRIVEN_COLOR, "line-opacity": 0.55,
+                 "line-width": ["interpolate", ["linear"], ["zoom"], 12, 4, 16, 11, 19, 18] },
+      },
+      {
+        id: "drive-track", type: "line", source: "drive-track", layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": TRACK_COLOR, "line-width": ["interpolate", ["linear"], ["zoom"], 12, 2, 16, 3.5, 19, 5] },
       },
       {
         id: "preview-line", type: "line", source: "preview", layout: { "line-join": "round" },
@@ -87,6 +106,8 @@ export interface StreetHit {
   name: string | null;
   highway: string;
   length_m: number;
+  /** For the coverage team: driven, marked complete, left out, or not yet. */
+  state: "done" | "complete" | "excluded" | null;
 }
 
 export class MapController {
@@ -98,6 +119,9 @@ export class MapController {
   private hovered: number | null = null;
   private selectedArea: string | null = null;
   private popup: Popup | null = null;
+  /** Whose coverage the streets are coloured by. */
+  coverageTeam: string | null = null;
+  private coverageRev = 0;
 
   constructor(container: HTMLElement, center: [number, number] = [-97.74, 30.27], zoom = 11) {
     this.map = new MlMap({
@@ -129,8 +153,9 @@ export class MapController {
       const hits = this.map.queryRenderedFeatures(e.point, { layers: ["streets", "team-areas-fill"] });
       const street = hits.find((f) => f.layer.id === "streets");
       if (street) {
-        const p = street.properties as { highway: string; name?: string; length_m: number };
-        this.onStreetClick?.({ id: street.id as number, name: p.name ?? null, highway: p.highway, length_m: p.length_m }, [e.lngLat.lng, e.lngLat.lat]);
+        const p = street.properties as { highway: string; name?: string; length_m: number; state?: StreetHit["state"] };
+        this.onStreetClick?.({ id: street.id as number, name: p.name ?? null, highway: p.highway, length_m: p.length_m, state: p.state ?? null },
+          [e.lngLat.lng, e.lngLat.lat]);
         return;
       }
       const area = hits.find((f) => f.layer.id === "team-areas-fill");
@@ -181,11 +206,51 @@ export class MapController {
     });
   }
 
+  /** The whole street network: off on a drive's page, so the drive is what you see. */
+  showStreets(on: boolean) {
+    this.whenReady(() => {
+      for (const id of ["streets", "streets-casing"]) this.map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
+    });
+  }
+
   /** Hide areas while drawing, so the drawing is what you see. */
   showAreas(on: boolean) {
     this.whenReady(() => {
       for (const id of ["team-areas-fill", "team-areas-line", "preview-line"]) this.map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
     });
+  }
+
+  /** Colour streets by a team's coverage (null: plain streets). */
+  setCoverageTeam(teamId: string | null) {
+    if (teamId === this.coverageTeam) return;
+    this.coverageTeam = teamId;
+    this.reloadStreets();
+  }
+
+  /** Coverage changed (a mark, a drive landing): fetch the street tiles again. */
+  refreshCoverage() {
+    this.coverageRev++;
+    this.reloadStreets();
+  }
+
+  private reloadStreets() {
+    const q = this.coverageTeam ? `?team=${this.coverageTeam}&v=${this.coverageRev}` : "";
+    this.whenReady(() => (this.map.getSource("streets") as VectorTileSource).setTiles([`${location.origin}/api/tiles/streets/{z}/{x}/{y}${q}`]));
+  }
+
+  /** A drive's GPS track and matched streets; framed unless told not to. */
+  setDrive(track: GeoJSON.Geometry | null, streets: GeoJSON.Geometry | null) {
+    const fc = (g: GeoJSON.Geometry | null): GeoJSON.FeatureCollection =>
+      g ? { type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: g }] } : empty();
+    this.whenReady(() => {
+      (this.map.getSource("drive-track") as GeoJSONSource).setData(fc(track));
+      (this.map.getSource("drive-streets") as GeoJSONSource).setData(fc(streets));
+    });
+    const coords = track?.type === "LineString" ? track.coordinates : [];
+    if (coords.length) {
+      const xs = coords.map((c) => c[0]), ys = coords.map((c) => c[1]);
+      this.fitBounds([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]);
+    }
   }
 
   setBase(base: Base) {
@@ -201,6 +266,14 @@ export class MapController {
   showPopup(at: [number, number], html: string) {
     this.popup?.remove();
     this.popup = new Popup({ closeButton: true, maxWidth: "260px", offset: 8 }).setLngLat(at).setHTML(html).addTo(this.map);
+  }
+
+  /** A popup with live content; `onClose` runs when it goes, however it goes. */
+  showPopupEl(at: [number, number], el: HTMLElement, onClose?: () => void) {
+    this.popup?.remove();
+    const p = new Popup({ closeButton: true, maxWidth: "280px", offset: 8 }).setLngLat(at).setDOMContent(el);
+    if (onClose) p.on("close", onClose);
+    this.popup = p.addTo(this.map);
   }
 
   fitBounds(b: [number, number, number, number], opts: { left?: number; animate?: boolean } = {}) {

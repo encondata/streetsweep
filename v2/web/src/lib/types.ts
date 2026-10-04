@@ -210,6 +210,66 @@ export interface Area {
   geometry?: GeoJSON.Polygon | GeoJSON.MultiPolygon;
   followed?: boolean;
   followed_by?: string[];
+  /** In a team's list: how much of it the team has swept (only once its streets are listed). */
+  total_m?: number | null;
+  driven_m?: number | null;
+  total_segments?: number | null;
+  driven_segments?: number | null;
 }
 
 export const AREA_COLORS = ["#1e8a28", "#1a6fd4", "#8e44ad", "#d35400", "#c0392b", "#16a085", "#b7950b", "#2c3e50"];
+
+// ---- drives ----
+
+export type Attribution = "explicit" | "inferred" | "unknown" | "edited";
+
+export interface Drive {
+  id: string;
+  source: "phone" | "logger";
+  status: "received" | "matching" | "matched" | "failed";
+  match_method: string | null;
+  match_error: string | null;
+  started_at: string;
+  ended_at: string;
+  distance_m: number;
+  point_count: number;
+  segment_count: number | null;
+  drive_type_key: string;
+  drive_type_label: string;
+  attribution: Attribution;
+  user_id: string | null;
+  user_name: string | null;
+  user_avatar_url: string | null;
+  vehicle_id: string | null;
+  vehicle_name: string | null;
+  vehicle_kind: VehicleKind | null;
+  vehicle_team_id: string | null;
+  logger_id: string | null;
+  logger_name: string | null;
+  logger_owner_id: string | null;
+  uploaded_by: string | null;
+  created_at: string;
+}
+
+export interface DriveDetail {
+  drive: Drive;
+  track: GeoJSON.LineString | null;
+  streets: GeoJSON.MultiLineString | null;
+  counts_for: { id: string; name: string; kind: "personal" | "shared" }[];
+  can_edit: boolean;
+  can_set_driver: boolean;
+}
+
+export interface Segment {
+  id: number;
+  name: string | null;
+  highway: string;
+  length_m: number;
+  first_driven_at: string | null;
+  passes: number | null;
+  first_driver: string | null;
+  mark: "complete" | "excluded" | null;
+  mark_note: string | null;
+  marked_by: string | null;
+  marked_at: string | null;
+}
