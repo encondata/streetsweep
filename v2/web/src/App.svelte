@@ -9,6 +9,7 @@
   import Vehicle from "./routes/Vehicle.svelte";
   import Logger from "./routes/Logger.svelte";
   import MapPage from "./routes/MapPage.svelte";
+  import AreasPage from "./routes/Areas.svelte";
   import Drives from "./routes/Drives.svelte";
   import Drive from "./routes/Drive.svelte";
   import Home from "./routes/Home.svelte";
@@ -70,6 +71,8 @@
       <Admin tab={adminParams.tab} />
     {:else if router.path === "/map"}
       <MapPage />
+    {:else if router.path === "/areas"}
+      <AreasPage />
     {:else if router.path === "/drives"}
       <Drives />
     {:else if driveParams}

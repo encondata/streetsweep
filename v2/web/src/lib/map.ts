@@ -14,7 +14,7 @@ export type Base = "map" | "satellite" | "hybrid";
 /** Streets come from the server from this zoom in (a tile further out would hold a city). */
 export const STREETS_MIN_ZOOM = 12;
 
-import { COMPLETE_FILL, COMPLETE_OPACITY, DEFAULT_COLORS, EXCLUDED, myColors, shadeComplete, type MapColors } from "./colors";
+import { DEFAULT_COLORS, DEFAULT_COMPLETE_FILL, EXCLUDED, completeFill, myColors, shadeComplete, type MapColors, type StreetColor } from "./colors";
 /** Left-out streets go grey whatever colours someone picked for driven and not. */
 export const EXCLUDED_COLOR = EXCLUDED;
 export const TRACK_COLOR = "#e2721f";
@@ -58,7 +58,7 @@ function style(): StyleSpecification {
       {
         id: "team-areas-fill", type: "fill", source: "team-areas",
         // Set by setShadeComplete: finished areas shaded bright green, or not.
-        paint: { "fill-color": areaFill(true), "fill-opacity": areaFillOpacity(true) },
+        paint: { "fill-color": areaFill(DEFAULT_COMPLETE_FILL), "fill-opacity": areaFillOpacity(DEFAULT_COMPLETE_FILL) },
       },
       {
         id: "streets-casing", type: "line", source: "streets", "source-layer": "streets",
@@ -120,15 +120,17 @@ function style(): StyleSpecification {
 /** Street colour by coverage state, hovered streets drawn darker. */
 /** A team area's fill: its own colour, or (shading on) bright green once it's finished. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- MapLibre's expression types
-function areaFill(shade: boolean): any {
+function areaFill(shade: StreetColor | null): any {
   const own = ["coalesce", ["get", "color"], AREA_COLOR];
-  return shade ? ["case", ["boolean", ["get", "complete"], false], COMPLETE_FILL, own] : own;
+  return shade ? ["case", ["boolean", ["get", "complete"], false], shade.color, own] : own;
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function areaFillOpacity(shade: boolean): any {
+function areaFillOpacity(shade: StreetColor | null): any {
   const selected = ["boolean", ["feature-state", "selected"], false];
   const normal = ["case", selected, 0.16, 0.06];
-  return shade ? ["case", ["boolean", ["get", "complete"], false], ["case", selected, COMPLETE_OPACITY + 0.08, COMPLETE_OPACITY], normal] : normal;
+  return shade
+    ? ["case", ["boolean", ["get", "complete"], false], ["case", selected, Math.min(1, shade.opacity + 0.08), shade.opacity], normal]
+    : normal;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- MapLibre's expression types
@@ -153,7 +155,7 @@ export interface StreetHit {
 export class MapController {
   map: MlMap;
   onStreetClick: ((s: StreetHit, at: [number, number]) => void) | null = null;
-  onAreaClick: ((id: string) => void) | null = null;
+  onAreaClick: ((id: string, at: [number, number]) => void) | null = null;
   onPlaceClick: ((id: string, at: [number, number]) => void) | null = null;
   /** While set, the next click on the map is a spot being picked (a new place). */
   private picking: ((at: [number, number]) => void) | null = null;
@@ -182,7 +184,7 @@ export class MapController {
     this.map.addControl(new ScaleControl({ unit: "imperial" }), "bottom-left");
     // Every map draws streets in the person's own colours, and shades finished areas if they like.
     this.setStreetColors(myColors());
-    this.setShadeComplete(shadeComplete());
+    this.setShadeComplete(shadeComplete() ? completeFill() : null);
 
     this.map.on("mousemove", "streets", (e: MapLayerMouseEvent) => {
       const id = e.features?.[0]?.id as number | undefined;
@@ -219,7 +221,7 @@ export class MapController {
         return;
       }
       const area = hits.find((f) => f.layer.id === "team-areas-fill");
-      if (area) this.onAreaClick?.(String(area.id));
+      if (area) this.onAreaClick?.(String(area.id), [e.lngLat.lng, e.lngLat.lat]);
     });
   }
 
@@ -357,11 +359,23 @@ export class MapController {
     this.whenReady(() => (this.map.getSource("search-pin") as GeoJSONSource).setData(empty()));
   }
 
-  /** Finished areas in faint bright green (Preferences), or in their own colour like the rest. */
-  setShadeComplete(on: boolean) {
+  /** Finished areas in your shade (Preferences), or with null in their own colour like the rest. */
+  setShadeComplete(on: StreetColor | null) {
     this.whenReady(() => {
       this.map.setPaintProperty("team-areas-fill", "fill-color", areaFill(on));
       this.map.setPaintProperty("team-areas-fill", "fill-opacity", areaFillOpacity(on));
+    });
+  }
+
+  /**
+   * Streets drawn plain, with no coverage: the Areas page, where you draw outlines against
+   * the streets but drive history isn't the point.
+   */
+  setPlainStreets() {
+    this.whenReady(() => {
+      this.map.setPaintProperty("streets", "line-color", ["case", ["boolean", ["feature-state", "hover"], false], "#3d4b59", "#8b98a6"]);
+      this.map.setPaintProperty("streets", "line-opacity", 0.75);
+      for (const id of ["drive-streets", "drive-track"]) this.map.setLayoutProperty(id, "visibility", "none");
     });
   }
 

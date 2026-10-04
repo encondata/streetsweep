@@ -134,7 +134,7 @@
   <div class="cols">
     <!-- Areas -->
     <section class="card pad stack">
-      <div class="section-head"><h2>Areas</h2><a class="small" href="/map">Map</a></div>
+      <div class="section-head"><h2>Areas</h2><a class="small" href="/areas">Manage areas</a></div>
       {#if progressAreas.length}
         <div class="areas">
           {#each progressAreas as { a, pct } (a.id)}
@@ -146,7 +146,7 @@
           {/each}
         </div>
       {:else}
-        <p class="muted">No areas yet. On the <a href="/map">map</a>, follow your city or county, or draw a neighborhood{personal ? "" : " (team admins)"}.</p>
+        <p class="muted">No areas yet. Under <a href="/areas">Areas</a>, follow your city or county, or draw a neighborhood{personal ? "" : " (team admins)"}.</p>
       {/if}
     </section>
 

@@ -31,12 +31,13 @@ export const PRESETS: Preset[] = [
 
 export const DEFAULT_COLORS: MapColors = PRESETS[0].colors;
 
-/** A finished area's fill: bright green, barely there, so the streets still read. */
-export const COMPLETE_FILL = "#39ff14";
-export const COMPLETE_OPACITY = 0.1;
+/** A finished area's fill, by default: bright green, barely there, so the streets still read. */
+export const DEFAULT_COMPLETE_FILL: StreetColor = { color: "#39ff14", opacity: 0.1 };
 
 /** Shade finished areas: on unless you turned it off. */
 export const shadeComplete = () => session.me?.user.preferences?.shade_complete !== false;
+/** …in your colour and opacity, or the default. */
+export const completeFill = (): StreetColor => session.me?.user.preferences?.complete_fill ?? DEFAULT_COMPLETE_FILL;
 export const EXCLUDED = "#9aa7b4";
 
 /** Yours, or the default until you've chosen. */

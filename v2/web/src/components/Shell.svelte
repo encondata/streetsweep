@@ -25,6 +25,7 @@
   let nav = $derived([
     { href: "/", label: "Home", icon: "home" },
     { href: "/map", label: "Map", icon: "map" },
+    { href: "/areas", label: "Areas", icon: "areas" },
     { href: "/drives", label: "Drives", icon: "drives" },
     { href: "/places", label: "Places", icon: "pin" },
     { href: "/fleet", label: "Fleet", icon: "fleet" },

@@ -258,7 +258,7 @@ export default async function accountRoutes(app: FastifyInstance) {
 
   // Your preferences, merged: send only what changes. Unknown keys are refused, so a
   // typo can't quietly store nothing useful.
-  app.patch<{ Body: { map_colors?: MapColors; onboarded?: boolean; settings?: Record<string, unknown>; shade_complete?: boolean } }>(
+  app.patch<{ Body: { map_colors?: MapColors; onboarded?: boolean; settings?: Record<string, unknown>; shade_complete?: boolean; complete_fill?: { color: string; opacity: number } } }>(
     "/api/me/preferences",
     { schema: { body: { type: "object", additionalProperties: false, properties: {
         map_colors: { type: "object", additionalProperties: false, required: ["driven", "undriven"], properties: {
@@ -266,6 +266,9 @@ export default async function accountRoutes(app: FastifyInstance) {
         onboarded: { type: "boolean" },
         // Finished areas get a faint bright-green fill on the map (on unless turned off).
         shade_complete: { type: "boolean" },
+        // …in this colour and opacity (fills are faint: opacity runs lower than streets').
+        complete_fill: { type: "object", additionalProperties: false, required: ["color", "opacity"], properties: {
+          color: { type: "string", pattern: "^#[0-9a-fA-F]{6}$" }, opacity: { type: "number", minimum: 0.02, maximum: 0.8 } } },
         // How the app behaves for you: where it opens, the map style, the team shown first.
         settings: { type: "object", additionalProperties: false, properties: {
           start_page: { type: "string", enum: ["home", "map", "drives"] },

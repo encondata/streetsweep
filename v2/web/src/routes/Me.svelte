@@ -10,7 +10,7 @@
   import { cropToBlob } from "../lib/image";
   import { formValues } from "../lib/forms";
   import { date } from "../lib/format";
-  import { COMPLETE_FILL, DEFAULT_COLORS, myColors, samePair, shadeComplete, type MapColors } from "../lib/colors";
+  import { DEFAULT_COLORS, DEFAULT_COMPLETE_FILL, completeFill, myColors, samePair, shadeComplete, type MapColors } from "../lib/colors";
   import { mySettings, type AppSettings } from "../lib/settings";
   import type { Me } from "../lib/types";
 
@@ -44,14 +44,17 @@
   let email = $state(session.me!.user.email);
   let current = $state("");
   let next = $state("");
+  let again = $state("");
+  let mismatch = $derived(again.length > 0 && again !== next);
   let fileInput = $state<HTMLInputElement>();
 
   const saveProfile = () =>
     run(async () => session.set(await api<Me>("/api/me", { method: "PATCH", body: { displayName: name, email } })), "Saved.");
   const changePassword = () =>
     run(async () => {
+      if (next !== again) throw new Error("The two new passwords don't match.");
       await api("/api/me/password", { body: { current, next } });
-      current = next = "";
+      current = next = again = "";
     }, "Password changed. Other browsers will need to sign in again.");
   async function pickPicture(file: File | undefined) {
     if (!file) return;
@@ -70,7 +73,12 @@
   const saveColors = () =>
     run(async () => session.set(await api<Me>("/api/me/preferences", { method: "PATCH", body: { map_colors: colors } })), "Saved. Maps use your colours from now on.");
 
-  // Shading finished areas: saved as soon as it's switched.
+  // Finished areas: the switch saves straight away; the colour and opacity with Save.
+  let fill = $state({ ...completeFill() });
+  let fillChanged = $derived(fill.color.toLowerCase() !== completeFill().color.toLowerCase() || fill.opacity !== completeFill().opacity);
+  const saveFill = () =>
+    run(async () => session.set(await api<Me>("/api/me/preferences", { method: "PATCH", body: { complete_fill: fill } })), "Saved.");
+
   const setShade = (on: boolean) =>
     run(async () => session.set(await api<Me>("/api/me/preferences", { method: "PATCH", body: { shade_complete: on } })),
       on ? "Finished areas are shaded green." : "Finished areas look like the rest.");
@@ -136,12 +144,15 @@
     </section>
 
     <section class="card pad stack">
-      <form class="stack" onsubmit={(e) => { e.preventDefault(); const f = formValues(e.currentTarget); current = f.current ?? current; next = f.next ?? next; changePassword(); }}>
+      <form class="stack" onsubmit={(e) => { e.preventDefault(); const f = formValues(e.currentTarget); current = f.current ?? current; next = f.next ?? next; again = f.again ?? again; changePassword(); }}>
         <h2>Password</h2>
         <label class="field">Current password <input type="password" name="current" bind:value={current} autocomplete="current-password" required /></label>
         <label class="field">New password <span class="help">At least 8 characters.</span>
           <input type="password" name="next" bind:value={next} autocomplete="new-password" minlength="8" required /></label>
-        <div><button type="submit" disabled={busy}>Change password</button></div>
+        <label class="field">New password again
+          <input type="password" name="again" bind:value={again} autocomplete="new-password" minlength="8" required aria-invalid={mismatch} /></label>
+        {#if mismatch}<p class="small err">The two new passwords don't match.</p>{/if}
+        <div><button type="submit" disabled={busy || mismatch || !again}>Change password</button></div>
       </form>
     </section>
 
@@ -164,18 +175,39 @@
       </div>
     </section>
 
-    <section class="card pad">
+    <section class="card pad stack">
       <div class="toggle-row">
-        <span class="shade-swatch" style:background={COMPLETE_FILL} aria-hidden="true"></span>
+        <span class="shade-swatch" style:background={fill.color} style:opacity={Math.max(0.15, fill.opacity * 2.5)} style:border-color={fill.color} aria-hidden="true"></span>
         <div class="grow">
           <h2>Shade finished areas</h2>
-          <p class="muted small">An area with every street driven (or marked done) gets a faint bright-green fill on the map, so finished ground stands out.</p>
+          <p class="muted small">An area with every street driven (or marked done) gets a faint fill on the map, so finished ground stands out.</p>
         </div>
         <label class="switch" aria-label="Shade finished areas">
           <input type="checkbox" checked={shadeComplete()} disabled={busy} onchange={(e) => setShade(e.currentTarget.checked)} />
           <span></span>
         </label>
       </div>
+      {#if shadeComplete()}
+        <div class="fill-row">
+          <span class="lbl">Fill</span>
+          <input type="color" bind:value={fill.color} aria-label="Finished area colour" />
+          <label class="op">
+            <span class="small muted">Opacity</span>
+            <input type="range" min="0.02" max="0.6" step="0.02" bind:value={fill.opacity} aria-label="Finished area opacity" />
+            <span class="small">{Math.round(fill.opacity * 100)}%</span>
+          </label>
+        </div>
+        <!-- What it looks like over a map tile, at the chosen strength. -->
+        <div class="fill-preview">
+          <img src="/api/tiles/osm/16/14977/26881" alt="" />
+          <span style:background={fill.color} style:opacity={fill.opacity}></span>
+        </div>
+        <div class="btns">
+          <button class="ghost" disabled={busy || (fill.color === DEFAULT_COMPLETE_FILL.color && fill.opacity === DEFAULT_COMPLETE_FILL.opacity)}
+            onclick={() => (fill = { ...DEFAULT_COMPLETE_FILL })}>Back to the default</button>
+          <button class="primary" disabled={busy || !fillChanged} onclick={saveFill}>Save</button>
+        </div>
+      {/if}
     </section>
 
   {:else}
@@ -220,5 +252,14 @@
   .toggle-row { display: flex; align-items: center; gap: 14px; }
   .toggle-row h2 { margin: 0 0 2px; }
   .toggle-row p { margin: 0; }
-  .shade-swatch { width: 34px; height: 34px; border-radius: 8px; opacity: .35; border: 2px solid #2bbf1a; flex: none; }
+  .shade-swatch { width: 34px; height: 34px; border-radius: 8px; border: 2px solid; flex: none; }
+  .fill-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .fill-row .lbl { width: 130px; font-weight: 600; font-size: 13.5px; }
+  .fill-row input[type="color"] { width: 44px; height: 32px; padding: 2px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); }
+  .op { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px; }
+  .op input { flex: 1; height: auto; padding: 0; border: 0; }
+  .fill-preview { position: relative; width: 256px; height: 120px; overflow: hidden; border-radius: 10px; border: 1px solid var(--line); }
+  .fill-preview img { position: absolute; top: -60px; left: 0; width: 256px; height: 256px; }
+  .fill-preview span { position: absolute; inset: 0; }
+  .err { color: var(--danger); margin: 0; }
 </style>

@@ -1,6 +1,5 @@
 <script lang="ts">
   import { mount, onMount, unmount } from "svelte";
-  import AreaPanel from "../components/AreaPanel.svelte";
   import StreetPopup from "../components/StreetPopup.svelte";
   import Modal from "../components/Modal.svelte";
   import Icon from "../components/Icon.svelte";
@@ -9,7 +8,10 @@
   import { LEVEL_LABEL, type AreaLevel, type Place } from "../lib/types";
   import { MapController, STREETS_MIN_ZOOM, EXCLUDED_COLOR, type Base } from "../lib/map";
   import { myColors } from "../lib/colors";
-  import { mySettings } from "../lib/settings";
+  import { defaultTeam, mySettings } from "../lib/settings";
+  import { areaFeatures, isComplete, loadTeamAreas } from "../lib/teamAreas";
+  import type { Area } from "../lib/types";
+  import { miles, percent } from "../lib/format";
   import { session } from "../lib/session.svelte";
   import { api } from "../lib/api";
   import { date } from "../lib/format";
@@ -23,17 +25,7 @@
 
   let box: HTMLDivElement;
   let ctl = $state<MapController | null>(null);
-  let panel = $state<ReturnType<typeof AreaPanel>>();
-  const PANEL_W = 360;
-  // The areas panel can be put away for a bigger map; remembered between visits.
-  let panelShown = $state(readPanel());
-  function readPanel(): boolean {
-    try { return localStorage.getItem("streetsweep.areasPanel") !== "hidden"; } catch { return true; }
-  }
-  function showPanel(on: boolean) {
-    panelShown = on;
-    try { localStorage.setItem("streetsweep.areasPanel", on ? "shown" : "hidden"); } catch { /* fine */ }
-  }
+
   // Which kinds of area the map draws (the View menu). The hidden ones are remembered, so a
   // level added later starts out shown.
   const LEVELS: AreaLevel[] = ["state", "county", "city", "neighborhood", "section", "custom"];
@@ -59,12 +51,72 @@
   let info = $state<Info | null>(null);
   let zoom = $state(11);
   let base = $state<Base>(readBase());
-  // The team chosen in the area panel: streets are coloured by its coverage.
-  let coverageTeam = $state<string | null>(null);
-  function chooseTeam(id: string) {
-    coverageTeam = id;
-    ctl?.setCoverageTeam(id);
+  // Whose coverage the streets show, and whose areas are drawn: one of your teams.
+  let teams = $derived(session.me!.teams);
+  let coverageTeam = $state(defaultTeam("streetsweep.areasTeam"));
+  let teamAreas = $state<Area[]>([]);
+  async function loadAreas() {
+    try {
+      teamAreas = (await loadTeamAreas(coverageTeam)).areas;
+      ctl?.setTeamAreas(areaFeatures(teamAreas));
+    } catch { /* the outlines just don't show */ }
   }
+  $effect(() => {
+    const t = coverageTeam;
+    if (!ctl) return;
+    try { localStorage.setItem("streetsweep.areasTeam", t); } catch { /* fine */ }
+    ctl.setCoverageTeam(t);
+    loadAreas();
+  });
+
+  // ---- search: counties, cities, your areas, addresses ----
+  let q = $state("");
+  let found = $state<Area[]>([]);
+  type Address = { label: string; lon: number; lat: number; bbox: [number, number, number, number] | null };
+  let addresses = $state<Address[] | null>(null);
+  let lookingUp = $state(false);
+  let searchError = $state<string | null>(null);
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+  $effect(() => {
+    const term = q.trim();
+    clearTimeout(searchTimer);
+    addresses = null;
+    searchError = null;
+    if (term.length < 2) { found = []; return; }
+    searchTimer = setTimeout(async () => {
+      const mine = teamAreas.filter((a) => a.name.toLowerCase().includes(term.toLowerCase()));
+      const pub = await api<{ areas: Area[] }>(`/api/areas/search?q=${encodeURIComponent(term)}`).then((r) => r.areas, () => []);
+      found = [...mine, ...pub.filter((p) => !mine.some((m) => m.id === p.id))].slice(0, 8);
+    }, 250);
+  });
+  async function findAddress() {
+    const term = q.trim();
+    if (term.length < 3 || lookingUp) return;
+    lookingUp = true;
+    try {
+      addresses = (await api<{ results: Address[] }>(`/api/geocode?q=${encodeURIComponent(term)}`)).results;
+      if (addresses.length === 1) goToAddress(addresses[0]);
+    } catch (e) {
+      searchError = errorText(e);
+    } finally {
+      lookingUp = false;
+    }
+  }
+  function goToAddress(a: Address) {
+    ctl?.showSearchResult(a.lon, a.lat, a.bbox);
+  }
+  async function goToArea(a: Area) {
+    const mine = teamAreas.some((t) => t.id === a.id);
+    ctl?.fitBounds(a.bbox, { animate: true });
+    // Not one of the team's: outline it for now (the team's are drawn already).
+    if (!mine) {
+      const full = await api<{ area: Area }>(`/api/areas/${a.id}`).then((r) => r.area, () => null);
+      ctl?.setPreview(full?.geometry ?? null);
+    } else ctl?.setPreview(null);
+    q = "";
+  }
+  const head = (l: string) => l.split(", ").slice(0, 2).join(", ");
+  const tail = (l: string) => l.split(", ").slice(2).filter((p) => p !== "United States").join(", ");
 
   function readBase(): Base {
     try {
@@ -130,6 +182,17 @@
     }
   }
 
+  /** An area clicked on the map: how far along it is, and where to manage it. */
+  function showArea(id: string, at?: [number, number]) {
+    const a = teamAreas.find((x) => x.id === id);
+    if (!a || !ctl) return;
+    const where = at ?? [(a.bbox[0] + a.bbox[2]) / 2, (a.bbox[1] + a.bbox[3]) / 2] as [number, number];
+    const done = a.build_status === "built" && a.total_m
+      ? `${percent(a.driven_m ?? 0, a.total_m)} swept · ${miles(a.driven_m)} of ${miles(a.total_m)}${isComplete(a) ? " · finished" : ""}`
+      : "Its streets are being listed";
+    ctl.showPopup(where, `<strong>${esc(a.name)}</strong><br><span class="muted">${esc(LEVEL_LABEL[a.level])}</span><br>${esc(done)}<br><a href="/areas?area=${a.id}">Manage in Areas</a>`);
+  }
+
   function showPlace(id: string, at: [number, number]) {
     const p = places.find((x) => x.id === id);
     if (!p) return;
@@ -169,7 +232,7 @@
     const unwatch = ctl.watchSize(box);
     ctl.map.on("zoomend", () => (zoom = ctl!.map.getZoom()));
     zoom = ctl.map.getZoom();
-    ctl.onAreaClick = (id) => panel?.open(id);
+    ctl.onAreaClick = showArea;
     ctl.onPlaceClick = showPlace;
     loadPlaces();
     // The popup is a live component: it loads the street's coverage and can mark it.
@@ -178,7 +241,7 @@
       const team = ctl!.coverageTeam;
       const comp = mount(StreetPopup, {
         target: el,
-        props: { hit, teamId: team, teamLabel: teamLabel(team), onchange: () => { ctl?.refreshCoverage(); panel?.refresh(); } },
+        props: { hit, teamId: team, teamLabel: teamLabel(team), onchange: () => { ctl?.refreshCoverage(); loadAreas(); } },
       });
       ctl!.showPopupEl(at, el, () => unmount(comp));
     };
@@ -216,13 +279,44 @@
 <div class="mapwrap">
   <div class="map" bind:this={box}></div>
 
-  {#if ctl}<AreaPanel bind:this={panel} {ctl} panelWidth={PANEL_W} onteam={chooseTeam}
-    shown={panelShown} onshow={() => showPanel(true)} onhide={() => showPanel(false)} />{/if}
+  <!-- Whose coverage, and finding a place: everything else about areas is on the Areas page. -->
+  <div class="tools">
+    <label class="team">
+      <span class="muted small">Coverage for</span>
+      <select bind:value={coverageTeam} aria-label="Whose coverage">
+        {#each teams as t (t.id)}<option value={t.id}>{t.kind === "personal" ? "Just me" : t.name}</option>{/each}
+      </select>
+    </label>
+    <form class="search" role="search" onsubmit={(e) => { e.preventDefault(); findAddress(); }}>
+      <Icon name="search" size={16} />
+      <input type="search" bind:value={q} placeholder="County, city, area or address" aria-label="Find a county, city, area or address" />
+    </form>
+    {#if q.trim().length >= 2}
+      <div class="results">
+        {#each found as a (a.id)}
+          <button class="hit" onclick={() => goToArea(a)}>
+            <strong>{a.name}</strong><span class="muted small">{LEVEL_LABEL[a.level]}{a.parent_name ? ` in ${a.parent_name}` : ""}</span>
+          </button>
+        {/each}
+        {#if addresses === null}
+          {#if q.trim().length >= 3}
+            <button class="hit addr" disabled={lookingUp} onclick={findAddress}>
+              <strong>{lookingUp ? "Looking up…" : `Find “${q.trim()}” as an address`}</strong><span class="muted small">or press Enter</span>
+            </button>
+          {/if}
+        {:else}
+          {#each addresses as a (a.label + a.lat)}
+            <button class="hit" onclick={() => goToAddress(a)}><strong>{head(a.label)}</strong><span class="muted small">{tail(a.label)}</span></button>
+          {:else}
+            <p class="muted small none">No address like that in the imported region.</p>
+          {/each}
+        {/if}
+        {#if searchError}<p class="small none err">{searchError}</p>{/if}
+      </div>
+    {/if}
+  </div>
 
   <div class="top">
-    <button class="tool" class:open={panelShown} aria-pressed={panelShown} onclick={() => showPanel(!panelShown)} title={panelShown ? "Hide areas" : "Show areas"}>
-      <Icon name="map" size={16} /> Areas
-    </button>
     <div class="view" bind:this={viewMenu}>
       <button class="tool" class:open={viewOpen} aria-expanded={viewOpen} aria-haspopup="true" onclick={() => (viewOpen = !viewOpen)} title="Choose which kinds of area the map shows">
         <Icon name="layers" size={16} /> View
@@ -246,7 +340,7 @@
     </div>
   </div>
 
-  <div class="bottom" class:full={!panelShown}>
+  <div class="bottom">
     {#if info?.running}
       <div class="chip busy">
         <span class="dot"></span>
@@ -306,8 +400,7 @@
   .seg { display: flex; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 3px; box-shadow: var(--shadow); }
   .seg button { height: 30px; border: 0; background: none; padding: 0 12px; font-size: 13px; border-radius: 7px; color: var(--ink-soft); }
   .seg button.on { background: var(--accent-soft); color: var(--green-700); }
-  .bottom.full { left: 50%; }
-  .bottom { position: absolute; left: calc(50% + 187px); transform: translateX(-50%); bottom: 36px; display: flex; justify-content: center; pointer-events: none; max-width: calc(100% - 32px); }
+  .bottom { position: absolute; left: 50%; transform: translateX(-50%); bottom: 36px; display: flex; justify-content: center; pointer-events: none; max-width: calc(100% - 32px); }
   .chip {
     pointer-events: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 99px; padding: 8px 14px;
     font-size: 13px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 8px; text-align: center;
@@ -323,5 +416,23 @@
   @media (max-width: 760px) {
     .mapwrap { height: calc(100dvh - 64px - env(safe-area-inset-bottom)); }
     .bottom { bottom: auto; top: 60px; left: 50%; }
+  }
+  .tools {
+    position: absolute; top: 14px; left: 14px; width: 320px; z-index: 2; display: grid; gap: 8px; padding: 10px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow);
+  }
+  .team { display: grid; gap: 2px; }
+  .team select { height: 34px; font-weight: 700; }
+  .search { position: relative; color: var(--ink-soft); }
+  .search :global(svg) { position: absolute; left: 10px; top: 11px; }
+  .search input { padding-left: 32px; height: 38px; }
+  .results { display: grid; gap: 2px; max-height: 50vh; overflow: auto; }
+  .hit { display: grid; gap: 1px; justify-items: start; text-align: left; height: auto; padding: 7px 8px; border: 0; background: none; border-radius: 8px; font-weight: 400; white-space: normal; }
+  .hit:hover:not([disabled]) { background: var(--surface-2); }
+  .hit.addr strong { color: var(--link); }
+  .none { padding: 6px 8px; margin: 0; }
+  .err { color: var(--danger); }
+  @media (max-width: 760px) {
+    .tools { right: 8px; left: 8px; width: auto; top: 8px; }
   }
 </style>
