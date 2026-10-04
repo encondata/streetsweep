@@ -1,6 +1,6 @@
 # StreetSweep v2 — plan
 
-Status: **agreed 2026-10-03**. Stages 0–3 done. Stage 4 (drives) next.
+Status: **agreed 2026-10-03**. Stages 0–4 done. Stage 5 (insights) next.
 
 v2 is a ground-up, multi-user rebuild. v1 (`tools/`) keeps running untouched beside it
 until v2 replaces it. v2 starts with an empty database — no v1 import.
@@ -206,7 +206,7 @@ audit_log       (id, at, user_id, team_id, action, entity, entity_id, data jsonb
      tiled at `/api/tiles/areas`); team-drawn areas; teams following public areas. Each
      area's street list is built by the worker. Geofabrik import, segmenting, public boundaries, drawn areas, area
    builds as jobs, cached tiles, area packages.
-4. **Drives.** Phone + logger upload, attribution, Valhalla matching, passes, team
+4. ✅ **Drives.** Phone + logger upload, attribution, Valhalla matching, passes, team
    coverage, marks, drive editing (fix driver/vehicle).
 5. **Insights.** Progress, drives list, places/photos, achievements, leaderboard
    (per team).
