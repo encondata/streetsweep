@@ -320,7 +320,7 @@
 
   async function trimWater() {
     const geometry = draw?.geometry();
-    if (!draw || !geometry) { drawNote = "Draw the outline first, running it out into the water; then trim."; return; }
+    if (!draw || !geometry) { drawNote = "Draw the outline first, running it out into the water; then trim to the shoreline."; return; }
     trimming = true;
     drawNote = null;
     error = null;
@@ -634,8 +634,8 @@
     </div>
     <div class="row-btns">
       <button class="sm" disabled={trimming || draw.pieces === 0} onclick={trimWater}
-        title="Cut mapped lakes, ponds and rivers out of the outline">{trimming ? "Trimming…" : "Trim water"}</button>
-      <span class="muted small">Draw out into a lake, then trim to the shore.</span>
+        title="Cut mapped lakes, ponds and rivers out of the outline, keeping the land as drawn">{trimming ? "Trimming…" : "Trim to shoreline"}</button>
+      <span class="muted small">Draw a big shape out into the water, then trim: the land stays as drawn.</span>
       <span class="muted small">{draw.pieces} piece{draw.pieces === 1 ? "" : "s"}</span>
     </div>
     <form class="stack" onsubmit={(e) => { e.preventDefault(); saveDraw(e.currentTarget); }}>

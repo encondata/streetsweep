@@ -9,13 +9,17 @@ import { badRequest } from "../http.js";
 const OUTLINE = `ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326)), 3))`;
 /** About 3 m: a shoreline keeps its shape without thousands of corners to drag. */
 const SIMPLIFY = 0.00003;
+/** Land left by the cut smaller than this is a crumb of the shoreline, not a place. */
+const CRUMB_M2 = 500;
 
 export default async function waterRoutes(app: FastifyInstance) {
   /**
-   * The outline with the water cut out. Draw boldly into the lake, then trim: the edge
-   * follows the shore. Slivers left over (a strip of beach, the far shore just caught)
-   * are dropped, and so are holes (a pond inside the area doesn't matter to its streets,
-   * and the drawing tools work with outer edges only).
+   * The outline with the water cut out. Draw a big shape around the place, out into the
+   * lake, then trim: the edge follows the shore and everything on land stays as drawn.
+   * Only the shoreline is simplified, so the corners drawn on land don't move; every land
+   * piece is kept (an island, the far bank) except crumbs left by the cut. Holes go (a
+   * pond inside the area doesn't matter to its streets, and the drawing tools work with
+   * outer edges only).
    */
   app.post<{ Body: { geometry: unknown } }>(
     "/api/water/trim",
@@ -24,13 +28,13 @@ export default async function waterRoutes(app: FastifyInstance) {
       requireUser(req);
       const { rows } = await query<{ geom: string | null; before: number; after: number; water: boolean; corners: number }>(
         `WITH g AS (SELECT ${OUTLINE} AS g),
-         w AS (SELECT ST_Union(p.geom) AS w FROM water_parts p, g WHERE p.geom && g.g AND ST_Intersects(p.geom, g.g)),
+         w AS (SELECT ST_SimplifyPreserveTopology(ST_Union(p.geom), ${SIMPLIFY}) AS w
+                 FROM water_parts p, g WHERE p.geom && g.g AND ST_Intersects(p.geom, g.g)),
          d AS (SELECT CASE WHEN w.w IS NULL THEN g.g
                            ELSE ST_CollectionExtract(ST_MakeValid(ST_Difference(g.g, w.w)), 3) END AS d
                  FROM g, w),
          pieces AS (SELECT ST_MakePolygon(ST_ExteriorRing(x.geom)) AS p FROM d, ST_Dump(d.d) x),
-         kept AS (SELECT ST_SimplifyPreserveTopology(p, ${SIMPLIFY}) AS p FROM pieces
-                   WHERE ST_Area(p::geography) >= greatest(1500, 0.02 * (SELECT max(ST_Area(p::geography)) FROM pieces)))
+         kept AS (SELECT p FROM pieces WHERE ST_Area(p::geography) >= ${CRUMB_M2})
          SELECT (SELECT ST_AsGeoJSON(ST_Multi(ST_Collect(p)), 7) FROM kept) AS geom,
                 (SELECT ST_Area(g::geography) FROM g)::float AS before,
                 coalesce((SELECT ST_Area(ST_Collect(p)::geography) FROM kept), 0)::float AS after,
