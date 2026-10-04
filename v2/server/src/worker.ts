@@ -5,6 +5,7 @@ import { config } from "./config.js";
 import { pool } from "./db.js";
 import { regionOf, runImport } from "./osm/import.js";
 import { areasInUse, buildArea, importBoundaries } from "./osm/areas.js";
+import { importWater } from "./osm/water.js";
 import { matchDrive, ValhallaDown } from "./drives/match.js";
 import { assembleLogger, loggersWithOpenPoints } from "./drives/assemble.js";
 import { rebuildTeam, teamsForDrive } from "./drives/coverage.js";
@@ -50,7 +51,18 @@ async function osmImport(data: ImportJob) {
 async function finishWithBoundaries(importId: number, region: string) {
   const step = (s: string) => pool.query(`UPDATE osm_imports SET step = $2 WHERE id = $1`, [importId, s]).then(() => {});
   const n = await importBoundaries(region, step);
+  // Water is a drawing aid: if it fails, the streets and boundaries still stand.
+  await addWater(region, step);
   await pool.query(`UPDATE osm_imports SET status = 'done', step = 'Done', boundaries = $2, finished_at = now() WHERE id = $1`, [importId, n]);
+}
+
+async function addWater(region: string, step?: (s: string) => Promise<void>) {
+  try {
+    const n = await importWater(region, step);
+    console.log(`water: ${n} lakes, ponds and rivers`);
+  } catch (err) {
+    console.error("water failed:", err);
+  }
 }
 
 /** New streets mean every area someone uses needs its street list redone. */
@@ -156,6 +168,13 @@ async function main() {
       const { id, region } = last.rows[0];
       console.log("boundaries: none yet, importing from the current extract");
       finishWithBoundaries(id, region).catch((err) => console.error("boundaries failed:", err));
+    } else if (last.rows[0]) {
+      // Water came later than streets and boundaries: an install from before it gets it now.
+      const w = await pool.query(`SELECT 1 FROM water_parts LIMIT 1`);
+      if (!w.rows.length) {
+        console.log("water: none yet, importing from the current extract");
+        addWater(last.rows[0].region);
+      }
     }
   }
 

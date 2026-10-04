@@ -299,6 +299,44 @@
     return () => removeEventListener("beforeunload", warn);
   });
 
+  // ---- shorelines: snapped to while drawing, and the water trimmed off ----
+  let drawNote = $state<string | null>(null);
+  let trimming = $state(false);
+  let shoreTimer: ReturnType<typeof setTimeout> | undefined;
+  let shoreAbort: AbortController | null = null;
+  async function loadShores() {
+    if (!draw) return;
+    const b = ctl.map.getBounds();
+    shoreAbort?.abort();
+    shoreAbort = new AbortController();
+    try {
+      const r = await api<{ lines: Ring[] }>(
+        `/api/water/shores?bbox=${[b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map((n) => n.toFixed(5)).join(",")}`,
+        { signal: shoreAbort.signal });
+      draw?.setShores(r.lines);
+    } catch { /* no snapping to water, that's all */ }
+  }
+  const onMoveEnd = () => { clearTimeout(shoreTimer); shoreTimer = setTimeout(loadShores, 250); };
+
+  async function trimWater() {
+    const geometry = draw?.geometry();
+    if (!draw || !geometry) { drawNote = "Draw the outline first, running it out into the water; then trim."; return; }
+    trimming = true;
+    drawNote = null;
+    error = null;
+    try {
+      const r = await api<{ geometry: GeoJSON.MultiPolygon | null; removed_m2: number; note?: string }>("/api/water/trim", { body: { geometry } });
+      if (!r.geometry) { drawNote = r.note ?? "Nothing to trim."; return; }
+      draw.replaceAll(ringsOf(r.geometry));
+      const acres = r.removed_m2 / 4046.86;
+      drawNote = `Trimmed ${acres < 10 ? acres.toFixed(1) : Math.round(acres).toLocaleString()} acres of water. Undo puts it back.`;
+    } catch (e) {
+      error = errorText(e);
+    } finally {
+      trimming = false;
+    }
+  }
+
   // ---- drawing ----
   async function startDraw(existing: Area | null, from: Draft | null = null) {
     if (!from && draft && !confirm(`You have an unsaved drawing${draft.name ? ` (${draft.name})` : ""}. Start a new one and discard it?`)) return;
@@ -324,10 +362,16 @@
       if (from) ctl.fitBounds([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], { left: panelWidth, animate: true });
     } else draw.addPiece();
     mode = "draw";
+    drawNote = null;
+    ctl.map.on("moveend", onMoveEnd);
+    loadShores();
   }
 
   function endDraw() {
     clearTimeout(draftTimer);
+    clearTimeout(shoreTimer);
+    shoreAbort?.abort();
+    ctl.map.off("moveend", onMoveEnd);
     dirty = false;
     draw?.stop();
     draw = null;
@@ -576,7 +620,9 @@
     <p class="muted small">
       {#if draw.drawing}Click each corner on the map. Click the first corner again (or double-click) to close the shape.
       {:else}Drag a corner to move it; drag the dot between two corners to add one. Click a corner to delete it. An area can have several pieces.{/if}
+      Corners snap to shorelines and neighbouring areas.
     </p>
+    {#if drawNote}<p class="notice">{drawNote}</p>{/if}
     <div class="row-btns">
       {#if draw.drawing}
         <button class="sm" onclick={() => draw!.cancelPiece()}>Stop drawing</button>
@@ -585,6 +631,11 @@
         {#if draw.selected}<button class="sm ghost danger" onclick={() => draw!.deleteSelected()}>Delete piece</button>{/if}
       {/if}
       <button class="sm ghost" disabled={!draw.canUndo} onclick={() => draw!.undo()} title="Undo the last change">Undo</button>
+    </div>
+    <div class="row-btns">
+      <button class="sm" disabled={trimming || draw.pieces === 0} onclick={trimWater}
+        title="Cut mapped lakes, ponds and rivers out of the outline">{trimming ? "Trimming…" : "Trim water"}</button>
+      <span class="muted small">Draw out into a lake, then trim to the shore.</span>
       <span class="muted small">{draw.pieces} piece{draw.pieces === 1 ? "" : "s"}</span>
     </div>
     <form class="stack" onsubmit={(e) => { e.preventDefault(); saveDraw(e.currentTarget); }}>

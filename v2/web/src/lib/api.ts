@@ -6,7 +6,7 @@ export class ApiError extends Error {
   }
 }
 
-type Options = { method?: string; body?: unknown; raw?: Blob };
+type Options = { method?: string; body?: unknown; raw?: Blob; signal?: AbortSignal };
 
 export async function api<T = any>(path: string, opts: Options = {}): Promise<T> {
   const headers: Record<string, string> = {};
@@ -21,8 +21,9 @@ export async function api<T = any>(path: string, opts: Options = {}): Promise<T>
   const method = opts.method ?? (body === undefined ? "GET" : "POST");
   let res: Response;
   try {
-    res = await fetch(path, { method, headers, body });
-  } catch {
+    res = await fetch(path, { method, headers, body, signal: opts.signal });
+  } catch (e) {
+    if (opts.signal?.aborted) throw e;
     throw new ApiError(0, "Could not reach the server.");
   }
   const data = await res.json().catch(() => ({}));

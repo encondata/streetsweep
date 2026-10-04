@@ -31,6 +31,8 @@ export class OutlineDraw {
   /** The outline as of the last finished change: what an undo goes back past. */
   private committed: Ring[] = [];
   private popup: Popup | null = null;
+  /** Shorelines in view (open lines, not rings), for corners to snap to. */
+  private shores: Ring[] = [];
   private onMapClick = (e: MapMouseEvent) => this.cornerClick(e);
 
   constructor(private map: MlMap, private neighbours: Ring[], private onChange: () => void = () => {}) {
@@ -121,6 +123,22 @@ export class OutlineDraw {
     if (reselect) this.draw.deselectFeature(id);
     this.draw.updateFeatureGeometry(id, { type: "Polygon", coordinates: [[...ring, ring[0]]] });
     if (reselect) this.draw.selectFeature(id);
+    this.changed();
+  }
+
+  setShores(lines: Ring[]) {
+    this.shores = lines;
+  }
+
+  /** Swap the whole outline for another (trimmed to the shore, say), as one undoable change. */
+  replaceAll(rings: Ring[]) {
+    this.closePopup();
+    if (this.drawing) this.cancelPiece();
+    if (this.selected) this.draw.deselectFeature(this.selected);
+    this.selected = null;
+    const ids = this.draw.getSnapshot().filter((f) => f.geometry.type === "Polygon" && f.properties.mode !== undefined).map((f) => f.id!);
+    if (ids.length) this.draw.removeFeatures(ids);
+    this.put(rings);
     this.changed();
   }
 
@@ -232,16 +250,17 @@ export class OutlineDraw {
     this.pieces = this.draw.getSnapshot().filter((f) => f.geometry.type === "Polygon" && f.properties.mode !== undefined).length;
   }
 
-  /** The nearest point on another area's outline, if one is within a few pixels. */
+  /** The nearest point on another area's outline or a shoreline, if one is within a few pixels. */
   private snap(e: { lng: number; lat: number }): [number, number] | undefined {
     const at = this.map.project([e.lng, e.lat]);
     const view = this.map.getBounds();
     let best: { d: number; p: [number, number] } | null = null;
-    for (const ring of this.neighbours) {
+    const lines = [...this.neighbours.map((r) => ({ r, closed: true })), ...this.shores.map((r) => ({ r, closed: false }))];
+    for (const { r: ring, closed } of lines) {
       let w = Infinity, s = Infinity, east = -Infinity, n = -Infinity;
       for (const [x, y] of ring) { if (x < w) w = x; if (x > east) east = x; if (y < s) s = y; if (y > n) n = y; }
       if (n < view.getSouth() || s > view.getNorth() || east < view.getWest() || w > view.getEast()) continue;
-      for (let i = 0; i < ring.length; i++) {
+      for (let i = 0; i < (closed ? ring.length : ring.length - 1); i++) {
         const a = this.map.project(ring[i]);
         const z = ring[(i + 1) % ring.length];
         const c = this.map.project(z);
