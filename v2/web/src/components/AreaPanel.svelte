@@ -40,7 +40,9 @@
   let area = $state<Area | null>(null);
   let areaCanEdit = $state(false);
   let editing = $state(false);
-  let form = $state({ name: "", notes: "", level: "neighborhood" as "neighborhood" | "custom" });
+  let form = $state({ name: "", notes: "", level: "neighborhood" as DrawnLevel });
+  type DrawnLevel = "neighborhood" | "section" | "custom";
+  const drawnLevel = (l: string): DrawnLevel => (l === "section" || l === "custom" ? l : "neighborhood");
 
   let draw = $state<OutlineDraw | null>(null);
   let redrawing = $state<Area | null>(null);
@@ -63,7 +65,7 @@
       areas = r.areas;
       canEdit = r.can_edit;
       const auto = assignAreaColors(r.areas);
-      ctl.setTeamAreas(r.areas.map((a) => ({ type: "Feature", id: a.id, properties: { id: a.id, color: auto.get(a.id), complete: isComplete(a) }, geometry: a.geometry! })));
+      ctl.setTeamAreas(r.areas.map((a) => ({ type: "Feature", id: a.id, properties: { id: a.id, level: a.level, color: auto.get(a.id), complete: isComplete(a) }, geometry: a.geometry! })));
       // Street lists being built: check back until they're done.
       if (r.areas.some((a) => a.build_status === "queued" || a.build_status === "building")) pollTimer = setTimeout(refresh, 4000);
     } catch (e) {
@@ -193,7 +195,7 @@
   };
 
   function startEdit() {
-    form = { name: area!.name, notes: area!.notes ?? "", level: area!.level === "custom" ? "custom" : "neighborhood" };
+    form = { name: area!.name, notes: area!.notes ?? "", level: drawnLevel(area!.level) };
     editing = true;
   }
   function saveEdit(el: HTMLFormElement) {
@@ -219,7 +221,7 @@
   function startDraw(existing: Area | null) {
     redrawing = existing;
     form = existing
-      ? { name: existing.name, notes: existing.notes ?? "", level: existing.level === "custom" ? "custom" : "neighborhood" }
+      ? { name: existing.name, notes: existing.notes ?? "", level: drawnLevel(existing.level) }
       : { name: "", notes: "", level: "neighborhood" };
     const neighbours = areas.filter((a) => a.id !== existing?.id && a.geometry).flatMap((a) => ringsOf(a.geometry!));
     ctl.busy = true;
@@ -440,7 +442,7 @@
           <form class="stack" onsubmit={(e) => { e.preventDefault(); saveEdit(e.currentTarget); }}>
             <label class="field">Name <input type="text" name="name" bind:value={form.name} maxlength="120" autocomplete="off" required /></label>
             <label class="field">Kind
-              <select bind:value={form.level}><option value="neighborhood">Neighborhood</option><option value="custom">Custom area</option></select></label>
+              <select bind:value={form.level}><option value="neighborhood">Neighborhood</option><option value="section">Section of a neighborhood</option><option value="custom">Custom area</option></select></label>
             <label class="field">Notes <textarea name="notes" bind:value={form.notes} maxlength="2000"></textarea></label>
             <div class="row-btns"><button type="button" class="ghost" onclick={() => (editing = false)}>Cancel</button><button type="submit" class="primary" disabled={busy}>Save</button></div>
           </form>
@@ -473,7 +475,7 @@
     <form class="stack" onsubmit={(e) => { e.preventDefault(); saveDraw(e.currentTarget); }}>
       <label class="field">Name <input type="text" name="name" bind:value={form.name} maxlength="120" autocomplete="off" placeholder="e.g. Old Town" required /></label>
       <label class="field">Kind
-        <select bind:value={form.level}><option value="neighborhood">Neighborhood</option><option value="custom">Custom area</option></select></label>
+        <select bind:value={form.level}><option value="neighborhood">Neighborhood</option><option value="section">Section of a neighborhood</option><option value="custom">Custom area</option></select></label>
       <div class="row-btns"><button type="button" class="ghost" onclick={cancelDraw}>Cancel</button><button type="submit" class="primary" disabled={busy}>Save area</button></div>
     </form>
   {/if}

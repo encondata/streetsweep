@@ -6,7 +6,7 @@
   import Icon from "../components/Icon.svelte";
   import { errorText } from "../lib/api";
   import { syncFrom } from "../lib/forms";
-  import type { Place } from "../lib/types";
+  import { LEVEL_LABEL, type AreaLevel, type Place } from "../lib/types";
   import { MapController, STREETS_MIN_ZOOM, EXCLUDED_COLOR, type Base } from "../lib/map";
   import { myColors } from "../lib/colors";
   import { mySettings } from "../lib/settings";
@@ -34,6 +34,28 @@
     panelShown = on;
     try { localStorage.setItem("streetsweep.areasPanel", on ? "shown" : "hidden"); } catch { /* fine */ }
   }
+  // Which kinds of area the map draws (the View menu). The hidden ones are remembered, so a
+  // level added later starts out shown.
+  const LEVELS: AreaLevel[] = ["state", "county", "city", "neighborhood", "section", "custom"];
+  let levels = $state<AreaLevel[]>(readLevels());
+  let viewOpen = $state(false);
+  let viewMenu = $state<HTMLDivElement>();
+  function readLevels(): AreaLevel[] {
+    try {
+      const hidden = JSON.parse(localStorage.getItem("streetsweep.hiddenAreaLevels") ?? "[]");
+      if (Array.isArray(hidden)) return LEVELS.filter((l) => !hidden.includes(l));
+    } catch { /* none saved */ }
+    return [...LEVELS];
+  }
+  function toggleLevel(l: AreaLevel) {
+    levels = levels.includes(l) ? levels.filter((x) => x !== l) : LEVELS.filter((x) => x === l || levels.includes(x));
+    ctl?.setAreaLevels(levels);
+    try { localStorage.setItem("streetsweep.hiddenAreaLevels", JSON.stringify(LEVELS.filter((x) => !levels.includes(x)))); } catch { /* fine */ }
+  }
+  function closeView(e: MouseEvent) {
+    if (viewOpen && viewMenu && !viewMenu.contains(e.target as Node)) viewOpen = false;
+  }
+
   let info = $state<Info | null>(null);
   let zoom = $state(11);
   let base = $state<Base>(readBase());
@@ -141,6 +163,7 @@
       try { localStorage.setItem("streetsweep.view", JSON.stringify({ center: [c.lng, c.lat], zoom: ctl!.map.getZoom() })); } catch { /* fine */ }
     });
     ctl.setBase(base);
+    ctl.setAreaLevels(levels);
     // For poking at from the browser console while debugging.
     (window as unknown as { streetsweep?: object }).streetsweep = { map: ctl.map, ctl };
     const unwatch = ctl.watchSize(box);
@@ -188,6 +211,8 @@
   ];
 </script>
 
+<svelte:window onclick={closeView} />
+
 <div class="mapwrap">
   <div class="map" bind:this={box}></div>
 
@@ -198,6 +223,19 @@
     <button class="tool" class:open={panelShown} aria-pressed={panelShown} onclick={() => showPanel(!panelShown)} title={panelShown ? "Hide areas" : "Show areas"}>
       <Icon name="map" size={16} /> Areas
     </button>
+    <div class="view" bind:this={viewMenu}>
+      <button class="tool" class:open={viewOpen} aria-expanded={viewOpen} aria-haspopup="true" onclick={() => (viewOpen = !viewOpen)} title="Choose which kinds of area the map shows">
+        <Icon name="layers" size={16} /> View
+      </button>
+      {#if viewOpen}
+        <div class="menu" role="group" aria-label="Areas shown">
+          <span class="small muted">Show areas</span>
+          {#each LEVELS as l (l)}
+            <label class="check"><input type="checkbox" checked={levels.includes(l)} onchange={() => toggleLevel(l)} /> {LEVEL_LABEL[l]}</label>
+          {/each}
+        </div>
+      {/if}
+    </div>
     <button class="tool" class:on={picking} aria-pressed={picking} onclick={startPick} title="Mark a place on the map">
       <Icon name="pin" size={16} /> {picking ? "Click the spot… (cancel)" : "Add place"}
     </button>
@@ -256,6 +294,11 @@
   .tool.open { background: var(--accent-soft); border-color: var(--green-600); color: var(--green-700); }
   .check { display: flex; align-items: center; gap: 8px; font-weight: 400; }
   .check input { width: auto; height: auto; }
+  .view { position: relative; }
+  .menu {
+    position: absolute; top: calc(100% + 6px); left: 0; z-index: 5; min-width: 170px; display: flex; flex-direction: column; gap: 8px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 10px 12px; font-size: 13px;
+  }
   :global(.pthumb) { display: block; width: 100%; max-height: 140px; object-fit: cover; border-radius: 8px; margin-bottom: 6px; }
   .mapwrap { position: relative; height: 100vh; height: 100dvh; }
   .map { position: absolute; inset: 0; }

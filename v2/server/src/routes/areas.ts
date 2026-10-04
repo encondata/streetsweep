@@ -14,7 +14,7 @@ const MAX_DRAWN_KM2 = 5000;
 const color = { type: ["string", "null"], pattern: "^#[0-9a-fA-F]{6}$" } as const;
 const name = { type: "string", minLength: 1, maxLength: 120 } as const;
 const notes = { type: ["string", "null"], maxLength: 2000 } as const;
-const drawnLevel = { type: "string", enum: ["neighborhood", "custom"] } as const;
+const drawnLevel = { type: "string", enum: ["neighborhood", "section", "custom"] } as const;
 const geometry = {
   type: "object", required: ["type", "coordinates"],
   properties: { type: { type: "string", enum: ["Polygon", "MultiPolygon"] }, coordinates: { type: "array" } },
@@ -89,11 +89,18 @@ async function checkOutline(geom: unknown): Promise<string> {
 
 const NEW_GEOM = `ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($GEOM), 4326)), 3))`;
 
-/** The smallest public boundary containing a point inside the drawing. */
-const PARENT_FOR = (geomSql: string) => `(
-  SELECT p.id FROM areas p
-   WHERE p.source = 'osm_boundary' AND p.deleted_at IS NULL AND ST_Contains(p.geom, ST_PointOnSurface(${geomSql}))
-   ORDER BY p.admin_level DESC NULLS LAST LIMIT 1)`;
+/**
+ * A drawing's parent: for a section, the team's own drawn neighborhood it sits in;
+ * otherwise (or if there's none) the smallest public boundary containing a point inside it.
+ */
+const PARENT_FOR = (geomSql: string, teamSql: string, levelSql: string) => `coalesce(
+  (SELECT n.id FROM areas n
+    WHERE ${levelSql} = 'section' AND n.team_id = ${teamSql} AND n.level = 'neighborhood' AND n.deleted_at IS NULL
+      AND ST_Contains(n.geom, ST_PointOnSurface(${geomSql}))
+    ORDER BY ST_Area(n.geom) LIMIT 1),
+  (SELECT p.id FROM areas p
+    WHERE p.source = 'osm_boundary' AND p.deleted_at IS NULL AND ST_Contains(p.geom, ST_PointOnSurface(${geomSql}))
+    ORDER BY p.admin_level DESC NULLS LAST LIMIT 1))`;
 
 export default async function areaRoutes(app: FastifyInstance) {
   // Public boundaries by name: "Travis", "Round Rock".
@@ -174,7 +181,7 @@ export default async function areaRoutes(app: FastifyInstance) {
       const geomSql = NEW_GEOM.replace("$GEOM", "$1");
       const { rows } = await query<{ id: string }>(
         `INSERT INTO areas (team_id, source, name, level, color, notes, geom, parent_id, created_by)
-         VALUES ($2, 'drawn', $3, $4, $5, $6, ${geomSql}, ${PARENT_FOR(geomSql)}, $7) RETURNING id`,
+         VALUES ($2, 'drawn', $3, $4, $5, $6, ${geomSql}, ${PARENT_FOR(geomSql, "$2::uuid", "$4::text")}, $7) RETURNING id`,
         [json, team.id, req.body.name.trim(), req.body.level ?? "neighborhood", req.body.color ?? null,
          req.body.notes?.trim() || null, me.id],
       );
@@ -200,7 +207,9 @@ export default async function areaRoutes(app: FastifyInstance) {
                 color = CASE WHEN $4::boolean THEN $5 ELSE color END,
                 notes = CASE WHEN $7::boolean THEN $8 ELSE notes END,
                 geom = CASE WHEN $6::text IS NULL THEN geom ELSE ${geomSql} END,
-                parent_id = CASE WHEN $6::text IS NULL THEN parent_id ELSE ${PARENT_FOR(geomSql)} END,
+                -- Re-parented when the outline or the level changes (a neighborhood made a section).
+                parent_id = CASE WHEN $6::text IS NULL AND $3::text IS NULL THEN parent_id
+                  ELSE ${PARENT_FOR(`CASE WHEN $6::text IS NULL THEN areas.geom ELSE ${geomSql} END`, "areas.team_id", "coalesce($3::text, areas.level)")} END,
                 version = version + CASE WHEN $6::text IS NULL THEN 0 ELSE 1 END,
                 updated_at = now()
           WHERE id = $1`,

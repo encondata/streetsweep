@@ -299,6 +299,14 @@ export class MapController {
     });
   }
 
+  /** Only show areas (team areas and public boundaries) of these levels: the map's View menu. */
+  setAreaLevels(levels: string[]) {
+    this.whenReady(() => {
+      const filter = ["in", ["get", "level"], ["literal", levels]] as any;
+      for (const id of ["boundaries", "team-areas-fill", "team-areas-line"]) this.map.setFilter(id, filter);
+    });
+  }
+
   /** Colour streets by a team's coverage (null: plain streets). */
   setCoverageTeam(teamId: string | null) {
     if (teamId === this.coverageTeam) return;

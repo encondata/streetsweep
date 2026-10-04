@@ -391,7 +391,7 @@ class SyncRepository(
 
     companion object {
         private const val TAG = "Sync"
-        private val LEVEL_ORDER = listOf("state", "county", "city", "neighborhood", "custom")
+        private val LEVEL_ORDER = listOf("state", "county", "city", "neighborhood", "section", "custom")
 
         /** The phone's three levels: a county or state shows as a metro. */
         fun levelOf(level: String): AreaLevel = when (level) {

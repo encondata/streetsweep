@@ -184,9 +184,9 @@ export function vehicleLine(v: Pick<Vehicle, "year" | "make" | "model" | "plate"
 
 // ---- areas ----
 
-export type AreaLevel = "state" | "county" | "city" | "neighborhood" | "custom";
+export type AreaLevel = "state" | "county" | "city" | "neighborhood" | "section" | "custom";
 export const LEVEL_LABEL: Record<AreaLevel, string> = {
-  state: "State", county: "County", city: "City", neighborhood: "Neighborhood", custom: "Custom area",
+  state: "State", county: "County", city: "City", neighborhood: "Neighborhood", section: "Section", custom: "Custom area",
 };
 
 export interface Area {
