@@ -50,6 +50,10 @@ data class TrackingSettings(
     val lastDriveType: String? = null,
     /** Bluetooth car address → vehicle id, so a drive started by that car is in that vehicle. */
     val bluetoothVehicles: Map<String, String> = emptyMap(),
+    /** Set once a sync has brought the server's street counts for every drive. */
+    val streetCountsSynced: Boolean = false,
+    /** Street and finished-area colours, as chosen in the web's Preferences. */
+    val mapPalette: MapPalette = MapPalette.DEFAULT,
 ) {
     val gpsIntervalMs: Long get() = gpsIntervalSeconds * 1000L
 
@@ -95,6 +99,8 @@ class SettingsRepository(context: Context) {
         val COVERAGE_TEAM = stringPreferencesKey("coverage_team")
         val LAST_DRIVE_TYPE = stringPreferencesKey("last_drive_type")
         val BT_VEHICLES = stringPreferencesKey("bluetooth_vehicles")
+        val STREET_COUNTS = booleanPreferencesKey("street_counts_synced")
+        val MAP_PALETTE = stringPreferencesKey("map_palette")
     }
 
     val settings: Flow<TrackingSettings> = store.data.map { p ->
@@ -122,6 +128,8 @@ class SettingsRepository(context: Context) {
             coverageTeamId = p[Keys.COVERAGE_TEAM],
             lastDriveType = p[Keys.LAST_DRIVE_TYPE],
             bluetoothVehicles = p[Keys.BT_VEHICLES]?.let(::decodeMap).orEmpty(),
+            streetCountsSynced = p[Keys.STREET_COUNTS] ?: false,
+            mapPalette = p[Keys.MAP_PALETTE]?.let(MapPalette::decode) ?: MapPalette.DEFAULT,
         )
     }
 
@@ -195,6 +203,13 @@ class SettingsRepository(context: Context) {
     }
 
     suspend fun setLastDriveType(key: String) = store.edit { it[Keys.LAST_DRIVE_TYPE] = key }
+
+    suspend fun setStreetCountsSynced() = store.edit { it[Keys.STREET_COUNTS] = true }
+
+    suspend fun setMapPalette(palette: MapPalette) = store.edit { p ->
+        val enc = palette.encode()
+        if (p[Keys.MAP_PALETTE] != enc) p[Keys.MAP_PALETTE] = enc
+    }
 
     /** Link (or with null, unlink) a Bluetooth car to one of your vehicles. */
     suspend fun setBluetoothVehicle(address: String, vehicleId: String?) = store.edit { p ->

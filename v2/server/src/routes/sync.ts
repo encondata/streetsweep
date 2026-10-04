@@ -103,10 +103,24 @@ export default async function syncRoutes(app: FastifyInstance) {
 
       // Your drives (driven or uploaded by you) whose status changed: the phone swaps its
       // provisional preview for the server's match once a drive is matched.
+      // With its streets counted the way people count them (one name, one street): all it
+      // drove, and the ones it was first to sweep for the driver's own (personal) coverage.
       const drives = await q(
         `SELECT d.id, d.status, d.match_error, d.segment_count, d.drive_type_key, d.vehicle_id, d.user_id,
-                d.started_at, d.ended_at, d.distance_m, (d.deleted_at IS NOT NULL) AS deleted
+                d.started_at, d.ended_at, d.distance_m, (d.deleted_at IS NOT NULL) AS deleted,
+                st.streets AS street_count, st.new_streets, st.new_m
            FROM drives d
+           LEFT JOIN LATERAL (
+             SELECT count(DISTINCT coalesce(lower(w.name), 'way ' || s.way_id))::int AS streets,
+                    count(DISTINCT coalesce(lower(w.name), 'way ' || s.way_id)) FILTER (WHERE c.first_drive_id = d.id)::int AS new_streets,
+                    coalesce(sum(s.length_m) FILTER (WHERE c.first_drive_id = d.id), 0)::float AS new_m
+               FROM segment_passes p
+               JOIN street_segments s ON s.id = p.segment_id
+               LEFT JOIN street_ways w ON w.way_id = s.way_id
+               LEFT JOIN team_coverage c ON c.segment_id = p.segment_id AND c.team_id = (
+                 SELECT t.id FROM teams t JOIN team_members m ON m.team_id = t.id
+                  WHERE t.kind = 'personal' AND m.user_id = d.user_id LIMIT 1)
+              WHERE p.drive_id = d.id AND d.status = 'matched') st ON true
           WHERE (d.uploaded_by = $1 OR d.user_id = $1) AND ($2::timestamptz IS NULL OR d.updated_at > $2)
             AND (d.deleted_at IS NULL OR $2::timestamptz IS NOT NULL)
           ORDER BY d.started_at DESC LIMIT 5000`, [me.id, sinceIso]);
@@ -124,10 +138,16 @@ export default async function syncRoutes(app: FastifyInstance) {
         coverage[t.id] = { reset: !!reset, segments: rows.map((r) => [Number(r.segment_id), Number(r.t)]) };
       }
 
+      // The map colours chosen in Preferences, so the phone and car screen draw streets and
+      // finished areas the same way the web does. Sent every time: changing them moves no cursor.
+      const [{ preferences: p = {} } = {}] = await q<{ preferences: Record<string, unknown> }>(
+        `SELECT preferences FROM users WHERE id = $1`, [me.id]);
+      const prefs = { map_colors: p.map_colors ?? null, shade_complete: p.shade_complete !== false, complete_fill: p.complete_fill ?? null };
+
       await client.query("COMMIT");
       return {
         cursor, full: !sinceIso,
-        user: { id: me.id, display_name: me.display_name, email: me.email },
+        user: { id: me.id, display_name: me.display_name, email: me.email, preferences: prefs },
         teams: teams.map(({ coverage_reset_at, joined_at, ...t }) => t),
         drive_types: driveTypes, vehicles, areas,
         marks, unmarked,

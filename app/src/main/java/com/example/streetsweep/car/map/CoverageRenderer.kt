@@ -1,5 +1,6 @@
 package com.example.streetsweep.car.map
 
+import com.example.streetsweep.data.prefs.MapPalette
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorMatrix
@@ -86,6 +87,17 @@ class CoverageRenderer(private val tiles: OsmTiles) {
         strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
     }
     private val coverageHalo = Paint(coveragePaint).apply { color = 0x66FFFFFF; strokeWidth = 15f }
+    private val completeFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+
+    /** Your street and finished-area colours (the web's Preferences), set by the screen. */
+    var palette: MapPalette = MapPalette.DEFAULT
+        set(p) {
+            field = p
+            undrivenPaint.color = p.undriven
+            donePaint.color = p.driven
+            coveragePaint.color = p.driven
+            p.completeFill?.let { completeFill.color = it }
+        }
     private val rawPaint = Paint(coveragePaint).apply { color = 0xFF8090A0.toInt(); strokeWidth = 4f }
     private val activePaint = Paint(coveragePaint).apply { color = 0xFFF2B84B.toInt(); strokeWidth = 11f }
     private val carFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF10314F.toInt() }
@@ -112,6 +124,7 @@ class CoverageRenderer(private val tiles: OsmTiles) {
                 path.close()
             }
             if (path.isEmpty) return@forEach
+            if (palette.completeFill != null && a.stats.total > 0 && a.stats.remaining == 0) canvas.drawPath(path, completeFill)
             canvas.drawPath(path, if (a.area.id == f.focusedArea?.area?.id) areaFocusedPaint else areaPaint)
         }
         f.streets.forEach { s ->

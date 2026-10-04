@@ -217,43 +217,17 @@ interface CoverageDao {
     @Query("UPDATE street_completions SET sent = 1 WHERE wayId = :wayId AND updatedAt = :updatedAt")
     suspend fun markCompletionSent(wayId: Long, updatedAt: Long)
 
-    /** Coverage totals for the streets that belong to an area. */
-    @Query(
-        """
-        SELECT COUNT(*) AS total,
-               SUM(COALESCE(aw.insideMeters, w.lengthMeters)) AS meters,
-               SUM(MIN(w.lengthMeters, (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END))
-                   * COALESCE(aw.insideMeters, w.lengthMeters) / MAX(w.lengthMeters, 0.01)) AS drivenMeters,
-               SUM(CASE WHEN (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END) >= w.minDoneFraction * w.lengthMeters THEN 1 ELSE 0 END) AS done,
-               SUM(CASE WHEN (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END) > 0.02 * w.lengthMeters AND (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END) < w.minDoneFraction * w.lengthMeters THEN 1 ELSE 0 END) AS partial,
-               (SELECT COUNT(*) FROM area_ways aw2 JOIN street_exclusions x2 ON x2.wayId = aw2.wayId AND x2.active = 1 WHERE aw2.areaId = :areaId) AS excluded
-        FROM area_ways aw
-        JOIN osm_ways w ON w.id = aw.wayId
-        LEFT JOIN (SELECT wayId, drivenMeters AS m FROM way_coverage) d ON d.wayId = w.id
-        LEFT JOIN street_completions c ON c.wayId = w.id AND c.marked = 1
-        WHERE aw.areaId = :areaId AND NOT EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id AND x.active = 1)
-        """,
-    )
+    /** Coverage totals for the streets that belong to an area, counted as people count streets. */
+    @Query(AREA_STATS_SQL)
     fun observeStatsFor(areaId: Long): Flow<AreaStatsRow>
 
     /** The same, read once, for filling the kept figures in the background. */
-    @Query(
-        """
-        SELECT COUNT(*) AS total,
-               SUM(COALESCE(aw.insideMeters, w.lengthMeters)) AS meters,
-               SUM(MIN(w.lengthMeters, (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END))
-                   * COALESCE(aw.insideMeters, w.lengthMeters) / MAX(w.lengthMeters, 0.01)) AS drivenMeters,
-               SUM(CASE WHEN (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END) >= w.minDoneFraction * w.lengthMeters THEN 1 ELSE 0 END) AS done,
-               SUM(CASE WHEN (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END) > 0.02 * w.lengthMeters AND (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END) < w.minDoneFraction * w.lengthMeters THEN 1 ELSE 0 END) AS partial,
-               (SELECT COUNT(*) FROM area_ways aw2 JOIN street_exclusions x2 ON x2.wayId = aw2.wayId AND x2.active = 1 WHERE aw2.areaId = :areaId) AS excluded
-        FROM area_ways aw
-        JOIN osm_ways w ON w.id = aw.wayId
-        LEFT JOIN (SELECT wayId, drivenMeters AS m FROM way_coverage) d ON d.wayId = w.id
-        LEFT JOIN street_completions c ON c.wayId = w.id AND c.marked = 1
-        WHERE aw.areaId = :areaId AND NOT EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id AND x.active = 1)
-        """,
-    )
+    @Query(AREA_STATS_SQL)
     suspend fun statsForNow(areaId: Long): AreaStatsRow
+
+    /** Each piece's street (see [STREET_KEY]), for counting streets rather than pieces. */
+    @Query("SELECT DISTINCT $STREET_KEY FROM osm_ways w WHERE w.id IN (:ids)")
+    suspend fun streetKeys(ids: List<Long>): List<String>
 
     // ---- kept figures (area_stats) ----
     @Query("SELECT * FROM area_stats WHERE areaId = :areaId")
@@ -334,3 +308,39 @@ interface CoverageDao {
     )
     fun observeWeeklyAreaProgress(areaId: Long): Flow<List<WeeklyMetersRow>>
 }
+
+/**
+ * A street as people know it: every piece sharing a name is one street; an unnamed one
+ * counts by its OpenStreetMap way. The same rule the server counts streets by.
+ */
+const val STREET_KEY = "COALESCE(LOWER(w.name), 'way ' || COALESCE(w.wayId, w.id))"
+
+/**
+ * An area's figures. Pieces are worked out one by one (driven length, done, begun), then
+ * gathered into streets: a street is done once every piece of it is, begun if any is.
+ */
+const val AREA_STATS_SQL = """
+    SELECT COUNT(*) AS total, SUM(m) AS meters, SUM(dm) AS drivenMeters,
+           SUM(CASE WHEN nd = n THEN 1 ELSE 0 END) AS done,
+           SUM(CASE WHEN nd < n AND (nd > 0 OR np > 0) THEN 1 ELSE 0 END) AS partial,
+           (SELECT COUNT(DISTINCT $STREET_KEY) FROM area_ways aw2 JOIN osm_ways w ON w.id = aw2.wayId
+              JOIN street_exclusions x2 ON x2.wayId = aw2.wayId AND x2.active = 1 WHERE aw2.areaId = :areaId) AS excluded
+    FROM (
+        SELECT COUNT(*) AS n,
+               SUM(inside) AS m,
+               SUM(MIN(len, dr) * inside / MAX(len, 0.01)) AS dm,
+               SUM(CASE WHEN dr >= frac * len THEN 1 ELSE 0 END) AS nd,
+               SUM(CASE WHEN dr > 0.02 * len AND dr < frac * len THEN 1 ELSE 0 END) AS np
+        FROM (
+            SELECT $STREET_KEY AS street, w.lengthMeters AS len, w.minDoneFraction AS frac,
+                   COALESCE(aw.insideMeters, w.lengthMeters) AS inside,
+                   CASE WHEN c.wayId IS NULL THEN COALESCE(d.drivenMeters, 0) ELSE w.lengthMeters END AS dr
+            FROM area_ways aw
+            JOIN osm_ways w ON w.id = aw.wayId
+            LEFT JOIN way_coverage d ON d.wayId = w.id
+            LEFT JOIN street_completions c ON c.wayId = w.id AND c.marked = 1
+            WHERE aw.areaId = :areaId AND NOT EXISTS(SELECT 1 FROM street_exclusions x WHERE x.wayId = w.id AND x.active = 1)
+        ) piece
+        GROUP BY street
+    ) st
+"""

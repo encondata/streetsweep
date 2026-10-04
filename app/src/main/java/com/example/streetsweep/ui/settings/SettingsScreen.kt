@@ -330,7 +330,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
             ListItem(
                 modifier = Modifier.clickable { geoJsonLauncher.launch(BackupFiles.geoJson()) },
                 headlineContent = { Text("Export coverage as GeoJSON") },
-                supportingContent = { Text("Area outlines and every driven street segment") },
+                supportingContent = { Text("Area outlines and every street you've driven") },
             )
 
             SectionHeader("StreetSweep server")

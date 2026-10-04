@@ -97,6 +97,10 @@ interface ServerDao {
     @Query("SELECT COUNT(*) FROM provisional WHERE sessionId = :sessionId")
     suspend fun provisionalCount(sessionId: Long): Int
 
+    /** The same, in streets (every piece sharing a name is one), as people count them. */
+    @Query("SELECT COUNT(DISTINCT $STREET_KEY) FROM provisional p JOIN osm_ways w ON w.id = p.segmentId WHERE p.sessionId = :sessionId")
+    suspend fun provisionalStreetCount(sessionId: Long): Int
+
     // ---- v1 marks waiting for their segments ----
     @Query("SELECT * FROM legacy_marks")
     suspend fun legacyMarks(): List<LegacyMark>

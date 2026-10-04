@@ -217,7 +217,7 @@ class HomeViewModel(private val container: AppContainer, private val context: Co
     fun prepareExcludeFromDraft() {
         val polygon = draft.value
         if (polygon.size < 3) return
-        viewModelScope.launch { pendingExcludeCount.value = container.coverageRepository.wayIdsInPolygon(polygon).size }
+        viewModelScope.launch { pendingExcludeCount.value = container.coverageRepository.let { it.streetCount(it.wayIdsInPolygon(polygon)) } }
     }
 
     fun cancelExclude() { pendingExcludeCount.value = null }
@@ -227,7 +227,7 @@ class HomeViewModel(private val container: AppContainer, private val context: Co
         if (polygon.size < 3) return
         viewModelScope.launch {
             val n = container.coverageRepository.excludeInPolygon(polygon, reason)
-            _message.value = if (n == 0) "No streets inside that shape" else "Excluded $n streets"
+            _message.value = if (n == 0) "No streets inside that shape" else "Excluded $n street${if (n == 1) "" else "s"}"
             cancelDrawing()
         }
     }
@@ -415,7 +415,10 @@ class HomeViewModel(private val container: AppContainer, private val context: Co
         val focused = arr[1] as AreaWithStats?
         @Suppress("UNCHECKED_CAST")
         MapLayers(
-            areas = areaList.map { AreaOutline(it.name, it.pieces, it.bounds, it.stats.percent, it.area.level, focused = it.area.id == focused?.area?.id) },
+            areas = areaList.map {
+                AreaOutline(it.name, it.pieces, it.bounds, it.stats.percent, it.area.level, focused = it.area.id == focused?.area?.id,
+                    complete = it.stats.total > 0 && it.stats.remaining == 0)
+            },
             streets = arr[2] as List<com.example.streetsweep.data.StreetStatus>,
             drivenEdges = arr[3] as List<DrivenTrack>,
             colourByRecency = (arr[11] as TrackingSettings).colourByRecency,
@@ -426,6 +429,7 @@ class HomeViewModel(private val container: AppContainer, private val context: Co
             draftSelected = arr[8] as Int?,
             selectedWayId = (arr[9] as StreetStatus?)?.wayId,
             target = (arr[10] as NearestStreet?)?.let { n -> TargetHighlight(n.street.shape, n.point, position.value) },
+            palette = (arr[11] as TrackingSettings).mapPalette,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MapLayers())
 

@@ -1,5 +1,6 @@
 package com.example.streetsweep.ui.map
 
+import com.example.streetsweep.data.prefs.MapPalette
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
@@ -42,7 +43,12 @@ import java.io.File
 
 /** An area rectangle with its label, drawn at every zoom. */
 /** An area to outline: every piece of it, for an area in parts. */
-data class AreaOutline(val name: String, val pieces: List<List<LatLngPoint>>, val bounds: Bounds, val percent: Int, val level: Int, val focused: Boolean = false)
+data class AreaOutline(
+    val name: String, val pieces: List<List<LatLngPoint>>, val bounds: Bounds, val percent: Int, val level: Int,
+    val focused: Boolean = false,
+    /** Every street in it done: shaded, if you shade finished areas. */
+    val complete: Boolean = false,
+)
 
 /** Everything the map draws on top of the OpenStreetMap tiles. */
 data class MapLayers(
@@ -66,6 +72,8 @@ data class MapLayers(
     val selectedWayId: Long? = null,
     /** Nearest undriven street, highlighted with a line pointing at it. */
     val target: TargetHighlight? = null,
+    /** Your street and finished-area colours (the web's Preferences). */
+    val palette: MapPalette = MapPalette.DEFAULT,
 )
 
 /** The guidance target: the street to head for, where to join it, and where you are now. */
@@ -221,6 +229,19 @@ class LayersOverlay : Overlay() {
     private val active = stroke(0xFFF2B84B.toInt(), 12f)
     private val areaStroke = stroke(0xFF10314F.toInt(), 3f).apply { pathEffect = DashPathEffect(floatArrayOf(14f, 10f), 0f) }
     private val areaFocused = stroke(0xFF1E8A28.toInt(), 5f)
+    private val completeFill = Paint().apply { style = Paint.Style.FILL }
+    private var palette: MapPalette? = null
+
+    /** Streets in your colours: driven (and the freshest age band) and not yet driven. */
+    private fun applyPalette(p: MapPalette) {
+        if (p == palette) return
+        palette = p
+        undriven.color = p.undriven
+        done.color = p.driven
+        edge.color = p.driven
+        agePaints[0].color = p.driven
+        p.completeFill?.let { completeFill.color = it }
+    }
     private val areaLabel = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1C1B1F.toInt(); textSize = 30f; isFakeBoldText = true }
     private val areaLabelBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xE6FFFFFF.toInt() }
     private val areaFill = Paint().apply { color = 0x141E8A28 }
@@ -316,6 +337,7 @@ class LayersOverlay : Overlay() {
         if (shadow) return
         val proj = mapView.projection
         val l = layers
+        applyPalette(l.palette)
         val visible = mapView.boundingBox
         fun line(points: List<LatLngPoint>, paint: Paint) {
             if (points.size < 2) return
@@ -342,6 +364,7 @@ class LayersOverlay : Overlay() {
             if (!visible.let { v -> a.bounds.intersects(Bounds(v.latSouth, v.lonWest, v.latNorth, v.lonEast)) }) return@forEach
             a.pieces.filter { it.size >= 3 }.forEach { piece ->
                 val poly = polygonPath(piece)
+                if (a.complete && l.palette.completeFill != null) canvas.drawPath(poly, completeFill)
                 if (a.focused) canvas.drawPath(poly, areaFill)
                 canvas.drawPath(poly, if (a.focused) areaFocused else areaStroke)
             }

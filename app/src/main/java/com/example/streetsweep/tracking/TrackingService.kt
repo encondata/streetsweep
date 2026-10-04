@@ -254,9 +254,9 @@ class TrackingService : LifecycleService() {
         val session = container.trackRepository.getSession(sessionId) ?: return
         if (session.pointCount == 0) return
         val title = "Drive recorded · ${Geo.formatDistance(session.distanceMeters)}"
-        val covered = container.database.serverDao().provisionalCount(sessionId)
+        val covered = container.database.serverDao().provisionalStreetCount(sessionId)
         val added = if (covered > 0) {
-            "About $covered street segments covered; the server confirms once it's uploaded."
+            "About $covered street${if (covered == 1) "" else "s"} covered; the server confirms once it's uploaded."
         } else {
             "No streets matched on the phone; the server has the final word once it's uploaded."
         }

@@ -266,5 +266,5 @@ data class SessionTotalsRow(
     val meters: Double?,
     val durationMs: Long?,
     val newMeters: Double?,
-    val newSegments: Int?,
+    val newStreets: Int?,
 )

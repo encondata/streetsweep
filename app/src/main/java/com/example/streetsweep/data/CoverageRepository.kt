@@ -461,11 +461,15 @@ class CoverageRepository(private val db: AppDatabase) {
             .map { it.id }
     }
 
+    /** How many streets (not pieces of street) these are. */
+    suspend fun streetCount(ids: List<Long>): Int =
+        ids.chunked(WAY_LOOKUP_CHUNK).flatMapTo(HashSet()) { dao.streetKeys(it) }.size
+
     /** Excludes everything inside a drawn shape. Returns how many streets were affected. */
     suspend fun excludeInPolygon(polygon: List<LatLngPoint>, reason: ExclusionReason, note: String? = null): Int {
         val ids = wayIdsInPolygon(polygon)
         exclude(ids, reason, note)
-        return ids.size
+        return streetCount(ids)
     }
 
     private suspend fun localGraph(from: LatLngPoint): List<StreetStatus> {

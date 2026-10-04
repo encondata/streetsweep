@@ -104,7 +104,7 @@ fun SessionsScreen(
                             style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            "${Geo.formatDistance(t.newMeters ?: 0.0)} of streets covered for the first time · ${t.newSegments ?: 0} segments",
+                            "${Geo.formatDistance(t.newMeters ?: 0.0)} of streets covered for the first time · ${t.newStreets ?: 0} street${if (t.newStreets == 1) "" else "s"}",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -162,7 +162,7 @@ private fun serverLine(s: TrackSession): String = when {
 private fun summaryLine(s: TrackSession): String {
     val snapped = " · " + serverLine(s)
     // v1 credited new streets on the phone; v2 drives are counted by the server.
-    val fresh = if (s.newSegments > 0 && s.driveTypeKey == null) " · +${Geo.formatDistance(s.newMeters)} new" else ""
+    val fresh = if (s.newStreets > 0 && s.driveTypeKey == null) " · +${Geo.formatDistance(s.newMeters)} new" else ""
     // Time paused is not time driving, so it does not appear here.
     val held = if (s.pausedMs > 60_000) " · ${Format.duration(s.pausedMs)} paused" else ""
     return "${Geo.formatDistance(s.distanceMeters)} · ${s.pointCount} points · " +
@@ -215,9 +215,9 @@ fun SessionDetailScreen(
             session?.let { s ->
                 Column(Modifier.padding(16.dp)) {
                     Text(summaryLine(s), style = MaterialTheme.typography.bodyMedium)
-                    if (s.newSegments > 0) {
+                    if (s.newStreets > 0) {
                         Text(
-                            "This drive covered ${Geo.formatDistance(s.newMeters)} of streets for the first time (${s.newSegments} segments)",
+                            "This drive covered ${Geo.formatDistance(s.newMeters)} of streets for the first time (${s.newStreets} street${if (s.newStreets == 1) "" else "s"})",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.primary,
                         )

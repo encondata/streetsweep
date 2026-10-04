@@ -64,11 +64,15 @@ interface TrackDao {
     @Query("UPDATE sessions SET newSegments = newSegments + :segments, newMeters = newMeters + :meters WHERE id = :id")
     suspend fun addCoverageStats(id: Long, segments: Int, meters: Double)
 
+    /** The server's word on what a matched drive swept first: streets and their length. */
+    @Query("UPDATE sessions SET newSegments = :streets, newMeters = :meters WHERE id = :id")
+    suspend fun setNewStreets(id: Long, streets: Int, meters: Double)
+
     @Query(
         """
         SELECT COUNT(*) AS drives, SUM(distanceMeters) AS meters,
                SUM(MAX(COALESCE(endedAt, startedAt) - startedAt - pausedMs, 0)) AS durationMs,
-               SUM(newMeters) AS newMeters, SUM(newSegments) AS newSegments
+               SUM(newMeters) AS newMeters, SUM(newSegments) AS newStreets
         FROM sessions
         """,
     )

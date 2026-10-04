@@ -17,7 +17,7 @@ A 401 means the token was revoked or the account changed: sign in again.
 
 | Field | Comes | The phone |
 |---|---|---|
-| `user`, `teams` (id, name, kind, role) | whole | replaces its copy |
+| `user` (with `preferences`: `map_colors` {driven, undriven: {color, opacity}} or null for the default, `shade_complete`, `complete_fill` {color, opacity} or null), `teams` (id, name, kind, role) | whole | replaces its copy; draw streets and finished areas in those colours |
 | `drive_types` (key, label, `team_counts` {team: bool}) | whole | replaces |
 | `vehicles` you may drive (incl. `permanent`, `checkout`) | whole | replaces |
 | `areas` your teams track: metadata (id, name, level, color, `version` of the outline, `build_status`, `built_version`, `segment_count`, `bbox`, `team_ids`) | whole | replaces. `geometry` only on a full sync; otherwise, when `version` differs from yours, `GET /api/areas/:id` for the outline |
@@ -25,7 +25,7 @@ A 401 means the token was revoked or the account changed: sign in again.
 | `unmarked` (team_id, segment_id) | since | deletes |
 | `place_ids` you can see | whole | drops any place not listed |
 | `places` | changed since | upserts |
-| `drives` you drove or uploaded (status, segment_count, `deleted`) | changed since | updates; once `matched`, drops the drive's provisional preview |
+| `drives` you drove or uploaded (status, segment_count, `deleted`; once matched `street_count`, and `new_streets`/`new_m` it was first to sweep for you) | changed since | updates; once `matched`, drops the drive's provisional preview. Show streets, never segments |
 | `coverage` {team: {reset, segments: [[segment id, first driven (unix s)]]}} | since, or whole when `reset` | adds; on `reset`, replaces that team's set first |
 
 The cursor is a few seconds behind the server clock, so rows may arrive twice. Apply

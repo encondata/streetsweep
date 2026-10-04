@@ -1,5 +1,6 @@
 package com.example.streetsweep.car
 
+import kotlinx.coroutines.flow.distinctUntilChanged
 import android.annotation.SuppressLint
 import android.graphics.Rect
 import android.os.Handler
@@ -167,6 +168,13 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
         }
         lifecycleScope.launch {
             container.coverageRepository.observeAreasWithStats().collect { areas = it; requestRender() }
+        }
+        lifecycleScope.launch {
+            // Street and finished-area colours from the web's Preferences, as on the phone.
+            container.settings.settings.map { it.mapPalette }.distinctUntilChanged().collect { p ->
+                synchronized(lock) { renderer.palette = p }
+                requestRender()
+            }
         }
         // A newly matched drive can complete the street we are being sent to.
         lifecycleScope.launch {

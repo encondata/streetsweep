@@ -146,7 +146,7 @@ class StatsViewModel(private val container: AppContainer) : ViewModel() {
             totals = SessionTotalsRow(
                 drives = t.optInt("drives"), meters = t.optDouble("drive_m", 0.0),
                 // The server doesn't time drives; the phone's own total stands in.
-                durationMs = null, newMeters = t.optDouble("street_m", 0.0), newSegments = t.optInt("streets"),
+                durationMs = null, newMeters = t.optDouble("street_m", 0.0), newStreets = t.optInt("streets"),
             ),
             weekly = (0 until (weeks?.length() ?: 0)).map { i ->
                 val w = weeks!!.getJSONObject(i)

@@ -17,8 +17,11 @@ data class TrackSession(
     val distanceMeters: Double = 0.0,
     /** How many raw points (in timestamp order) have already been map-matched. */
     val snappedRawCount: Int = 0,
-    /** Road segments this drive was the first to cover, and their length. */
-    val newSegments: Int = 0,
+    /**
+     * Streets this drive was the first to sweep, and their length: the server's figures,
+     * filled in once it has matched the drive. (Stored in the column v1 kept segments in.)
+     */
+    @ColumnInfo(name = "newSegments") val newStreets: Int = 0,
     val newMeters: Double = 0.0,
     /**
      * Time spent paused, so a stop at the shops does not count as driving. Accrued when

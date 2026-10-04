@@ -96,6 +96,9 @@ class TrackRepository(private val db: AppDatabase) {
     suspend fun addCoverageStats(sessionId: Long, segments: Int, meters: Double) =
         dao.addCoverageStats(sessionId, segments, meters)
 
+    suspend fun setNewStreets(sessionId: Long, streets: Int, meters: Double) =
+        dao.setNewStreets(sessionId, streets, meters)
+
     suspend fun getSession(id: Long): TrackSession? = dao.getSession(id)
     suspend fun getOpenSession(): TrackSession? = dao.getOpenSession()
     suspend fun getPoints(sessionId: Long): List<TrackPoint> = dao.getPoints(sessionId)

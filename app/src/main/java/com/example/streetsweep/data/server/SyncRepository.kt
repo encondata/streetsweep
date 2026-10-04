@@ -1,5 +1,6 @@
 package com.example.streetsweep.data.server
 
+import com.example.streetsweep.data.prefs.MapPalette
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.util.Log
@@ -259,7 +260,9 @@ class SyncRepository(
     /** Returns (areas tracked, whether it was a full sync). */
     private suspend fun pull(): Pair<Int, Boolean> {
         val s = settings.current()
-        val json = server.sync(s.syncCursor)
+        // Once, after the update that counts streets: sync everything again, so drives
+        // already matched pick up the server's street counts.
+        val json = server.sync(if (s.streetCountsSynced) s.syncCursor else null)
         val full = json.optBoolean("full")
 
         val teams = json.getJSONArray("teams").objects().mapIndexed { i, t ->
@@ -306,6 +309,9 @@ class SyncRepository(
         convertLegacyMarks()
         reproject()
         settings.setSyncCursor(json.getString("cursor"), System.currentTimeMillis())
+        // Only once a server that counts streets has answered (it sends preferences too).
+        if (!s.streetCountsSynced && json.optJSONObject("user")?.has("preferences") == true) settings.setStreetCountsSynced()
+        json.optJSONObject("user")?.optJSONObject("preferences")?.let { settings.setMapPalette(MapPalette.fromServer(it)) }
         return areas to full
     }
 
@@ -386,6 +392,10 @@ class SyncRepository(
             if (status != session.serverStatus) track.setServerStatus(session.id, status)
             // The server's match is in: the phone's guess for this drive goes.
             if (status == "matched" || status == "failed") dao.clearProvisional(session.id)
+            // What it swept first, in streets, as the server counts them.
+            if (status == "matched" && d.has("new_streets") && !d.isNull("new_streets")) {
+                track.setNewStreets(session.id, d.optInt("new_streets"), d.optDouble("new_m", 0.0))
+            }
         }
     }
 
