@@ -299,6 +299,11 @@ export class MapController {
   private styleIn() {
     return Boolean((this.map as unknown as { style?: { _loaded?: boolean } }).style?._loaded);
   }
+  /** Resolves once the map's style is in (drawing tools need it before they can start). */
+  ready(): Promise<void> {
+    return new Promise((ok) => this.whenReady(ok));
+  }
+
   private whenReady(fn: () => void) {
     if (this.styleIn()) fn();
     else this.map.once("style.load", fn);

@@ -1,12 +1,12 @@
 <script lang="ts">
   // The panel beside the map: a team's areas, finding public ones to follow, an area's
   // details, and drawing. The map stays put; this tells it what to show.
-  import { onDestroy, untrack } from "svelte";
+  import { onDestroy, onMount, tick, untrack } from "svelte";
   import Icon from "./Icon.svelte";
   import { api, errorText } from "../lib/api";
   import { session } from "../lib/session.svelte";
   import { defaultTeam } from "../lib/settings";
-  import { OutlineDraw, ringsOf } from "../lib/draw.svelte";
+  import { OutlineDraw, ringsOf, type Ring } from "../lib/draw.svelte";
   import { formValues } from "../lib/forms";
   import { miles, percent } from "../lib/format";
   import type { MapController } from "../lib/map";
@@ -224,23 +224,111 @@
     });
   }
 
+  // ---- drafts ----
+  // The outline being drawn is kept in this browser as it changes, so a crash, a flat
+  // battery or a closed tab loses nothing: the Areas page offers it back next time.
+  type Draft = { team: string; areaId: string | null; name: string; level: DrawnLevel; rings: Ring[]; at: number };
+  const DRAFT_KEY = "streetsweep.areaDraft";
+  let draft = $state<Draft | null>(readDraft());
+  /** Something drawn or changed since this drawing began (worth keeping, worth asking before dropping). */
+  let dirty = $state(false);
+  let draftTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function readDraft(): Draft | null {
+    try {
+      const d = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? "null");
+      return d && Array.isArray(d.rings) && typeof d.team === "string" ? d : null;
+    } catch { return null; }
+  }
+  function writeDraft(d: Draft | null) {
+    draft = d;
+    try {
+      if (d) localStorage.setItem(DRAFT_KEY, JSON.stringify(d));
+      else localStorage.removeItem(DRAFT_KEY);
+    } catch { /* private window: no keeping, but drawing still works */ }
+  }
+  /** Keep the drawing a moment after it last changed (drags and typing settle first). */
+  function keepDraft() {
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(saveDraftNow, 500);
+  }
+  function saveDraftNow() {
+    clearTimeout(draftTimer);
+    if (!draw || !dirty) return;
+    const rings = draw.rings();
+    writeDraft(rings.length || form.name.trim()
+      ? { team: teamId, areaId: redrawing?.id ?? null, name: form.name, level: form.level, rings, at: Date.now() }
+      : null);
+  }
+  // The name and kind are part of it too.
+  $effect(() => {
+    void form.name; void form.level;
+    if (untrack(() => mode === "draw" && dirty)) keepDraft();
+  });
+
+  async function resumeDraft() {
+    const d = draft;
+    if (!d) return;
+    if (d.team !== teamId && teams.some((t) => t.id === d.team)) {
+      teamId = d.team;
+      await tick();
+      await loadAreas();
+    }
+    const existing = d.areaId ? areas.find((a) => a.id === d.areaId) ?? null : null;
+    startDraw(existing, d);
+  }
+  function discardDraft() {
+    if (!confirm("Discard the unsaved drawing? This can't be undone.")) return;
+    writeDraft(null);
+  }
+  const draftAge = (at: number) => {
+    const mins = Math.round((Date.now() - at) / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins} min ago`;
+    return new Date(at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  };
+
+  // Leaving with unsaved changes: the browser asks (the draft is kept either way).
+  onMount(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (mode !== "draw" || !dirty) return;
+      saveDraftNow();
+      e.preventDefault();
+    };
+    addEventListener("beforeunload", warn);
+    return () => removeEventListener("beforeunload", warn);
+  });
+
   // ---- drawing ----
-  function startDraw(existing: Area | null) {
+  async function startDraw(existing: Area | null, from: Draft | null = null) {
+    if (!from && draft && !confirm(`You have an unsaved drawing${draft.name ? ` (${draft.name})` : ""}. Start a new one and discard it?`)) return;
     redrawing = existing;
-    form = existing
-      ? { name: existing.name, notes: existing.notes ?? "", level: drawnLevel(existing.level) }
-      : { name: "", notes: "", level: "neighborhood" };
+    form = from
+      ? { name: from.name, notes: existing?.notes ?? "", level: from.level }
+      : existing
+        ? { name: existing.name, notes: existing.notes ?? "", level: drawnLevel(existing.level) }
+        : { name: "", notes: "", level: "neighborhood" };
     const neighbours = areas.filter((a) => a.id !== existing?.id && a.geometry).flatMap((a) => ringsOf(a.geometry!));
+    // Opened the page and went straight to drawing: the map has to be ready first.
+    await ctl.ready();
     ctl.busy = true;
     ctl.showAreas(false);
     ctl.setPreview(null);
-    draw = new OutlineDraw(ctl.map, neighbours);
-    if (existing?.geometry) draw.load(ringsOf(existing.geometry));
-    else draw.addPiece();
+    dirty = !!from;
+    if (!from) writeDraft(null);
+    draw = new OutlineDraw(ctl.map, neighbours, () => { dirty = true; keepDraft(); });
+    const rings = from ? from.rings : existing?.geometry ? ringsOf(existing.geometry) : [];
+    if (rings.length) {
+      draw.load(rings);
+      const xs = rings.flat().map((p) => p[0]), ys = rings.flat().map((p) => p[1]);
+      if (from) ctl.fitBounds([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], { left: panelWidth, animate: true });
+    } else draw.addPiece();
     mode = "draw";
   }
 
   function endDraw() {
+    clearTimeout(draftTimer);
+    dirty = false;
     draw?.stop();
     draw = null;
     ctl.busy = false;
@@ -248,6 +336,8 @@
   }
 
   function cancelDraw() {
+    if (dirty && !confirm("Discard this drawing? Your changes won't be kept.")) return;
+    writeDraft(null);
     const was = redrawing;
     endDraw();
     redrawing = null;
@@ -277,6 +367,7 @@
       } else {
         id = (await api<{ id: string }>(`/api/teams/${teamId}/areas`, { body: { name: form.name.trim(), level: form.level, geometry } })).id;
       }
+      writeDraft(null);
       endDraw();
       redrawing = null;
       await loadAreas();
@@ -331,6 +422,19 @@
     </form>
 
     {#if error}<p class="notice error">{error}</p>{/if}
+
+    {#if draft}
+      <div class="draft">
+        <div class="grow">
+          <strong>Unsaved drawing{draft.name.trim() ? `: ${draft.name.trim()}` : ""}</strong>
+          <span class="muted small">{draft.areaId ? "Redrawing an area" : "A new area"} · {draft.rings.length} piece{draft.rings.length === 1 ? "" : "s"} · kept {draftAge(draft.at)}</span>
+        </div>
+        <div class="row-btns">
+          <button class="sm primary" onclick={resumeDraft}>Resume</button>
+          <button class="sm ghost" onclick={discardDraft}>Discard</button>
+        </div>
+      </div>
+    {/if}
 
     {#if q.trim().length >= 2}
       <div class="list">
@@ -471,7 +575,7 @@
     {#if error}<p class="notice error">{error}</p>{/if}
     <p class="muted small">
       {#if draw.drawing}Click each corner on the map. Click the first corner again (or double-click) to close the shape.
-      {:else}Drag a corner to move it; drag the dot between two corners to add one. An area can have several pieces.{/if}
+      {:else}Drag a corner to move it; drag the dot between two corners to add one. Click a corner to delete it. An area can have several pieces.{/if}
     </p>
     <div class="row-btns">
       {#if draw.drawing}
@@ -480,6 +584,7 @@
         <button class="sm" onclick={() => draw!.addPiece()}><Icon name="plus" size={15} /> Add a piece</button>
         {#if draw.selected}<button class="sm ghost danger" onclick={() => draw!.deleteSelected()}>Delete piece</button>{/if}
       {/if}
+      <button class="sm ghost" disabled={!draw.canUndo} onclick={() => draw!.undo()} title="Undo the last change">Undo</button>
       <span class="muted small">{draw.pieces} piece{draw.pieces === 1 ? "" : "s"}</span>
     </div>
     <form class="stack" onsubmit={(e) => { e.preventDefault(); saveDraw(e.currentTarget); }}>
@@ -487,6 +592,7 @@
       <label class="field">Kind
         <select bind:value={form.level}><option value="neighborhood">Neighborhood</option><option value="section">Section of a neighborhood</option><option value="custom">Custom area</option></select></label>
       <div class="row-btns"><button type="button" class="ghost" onclick={cancelDraw}>Cancel</button><button type="submit" class="primary" disabled={busy}>Save area</button></div>
+      <p class="muted small kept">{dirty ? "Kept on this computer as you draw, until you save or cancel." : " "}</p>
     </form>
   {/if}
 </aside>
@@ -538,6 +644,14 @@
   .progress-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
   .row-btns { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .danger { color: var(--danger); }
+  .draft {
+    display: grid; gap: 8px; padding: 10px 12px; border-radius: 10px;
+    background: #fff7e6; border: 1px solid #f5c76b;
+  }
+  .draft .grow { display: grid; gap: 1px; }
+  .kept { margin: 0; }
+  :global(.corner-menu) { display: grid; gap: 6px; padding-top: 2px; }
+  :global(.corner-menu button) { justify-content: flex-start; }
   @media (max-width: 760px) {
     .panel { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto !important; max-height: 48%; }
   }
