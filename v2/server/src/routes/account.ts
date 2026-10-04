@@ -266,9 +266,9 @@ export default async function accountRoutes(app: FastifyInstance) {
         onboarded: { type: "boolean" },
         // Finished areas get a faint bright-green fill on the map (on unless turned off).
         shade_complete: { type: "boolean" },
-        // …in this colour and opacity (fills are faint: opacity runs lower than streets').
+        // …in this colour and opacity, faint by default but up to solid if that's what you want.
         complete_fill: { type: "object", additionalProperties: false, required: ["color", "opacity"], properties: {
-          color: { type: "string", pattern: "^#[0-9a-fA-F]{6}$" }, opacity: { type: "number", minimum: 0.02, maximum: 0.8 } } },
+          color: { type: "string", pattern: "^#[0-9a-fA-F]{6}$" }, opacity: { type: "number", minimum: 0.02, maximum: 1 } } },
         // How the app behaves for you: where it opens, the map style, the team shown first.
         settings: { type: "object", additionalProperties: false, properties: {
           start_page: { type: "string", enum: ["home", "map", "drives"] },

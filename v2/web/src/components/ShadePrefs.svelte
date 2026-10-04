@@ -56,7 +56,7 @@
     <input type="color" bind:value={value.color} aria-label="Finished area colour" />
     <label class="op">
       <span class="small muted">Opacity</span>
-      <input type="range" min="0.02" max="0.6" step="0.02" bind:value={value.opacity} aria-label="Finished area opacity" />
+      <input type="range" min="0.02" max="1" step="0.02" bind:value={value.opacity} aria-label="Finished area opacity" />
       <span class="small">{Math.round(value.opacity * 100)}%</span>
     </label>
   </div>
