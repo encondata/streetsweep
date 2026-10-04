@@ -335,6 +335,48 @@ export default async function driveRoutes(app: FastifyInstance) {
     },
   );
 
+  // Several streets at once (shift-click on the map): the same rules as a whole street.
+  app.post<{ Params: { id: string }; Body: { segment_ids: number[]; kind: "complete" | "excluded" | "clear"; note?: string | null } }>(
+    "/api/teams/:id/marks/bulk",
+    { schema: { body: { type: "object", required: ["segment_ids", "kind"], properties: {
+        segment_ids: { type: "array", minItems: 1, maxItems: 5000, items: { type: "integer" } },
+        kind: { type: "string", enum: ["complete", "excluded", "clear"] }, note: { type: ["string", "null"], maxLength: 500 } } } } },
+    async (req) => {
+      const me = requireUser(req);
+      const team = await loadTeam(req.params.id);
+      if (!canDrive(await roleIn(team.id, me.id)) && !me.is_site_admin) throw forbidden("Viewers can't mark streets.");
+      const b = req.body;
+      const changed = await tx(async (c) => {
+        if (b.kind === "clear") {
+          const { rows } = await c.query<{ segment_id: string; length_m: number }>(
+            `DELETE FROM segment_marks mk USING street_segments s
+              WHERE mk.team_id = $2 AND mk.segment_id = ANY($1::bigint[]) AND s.id = mk.segment_id
+              RETURNING mk.segment_id, s.length_m`,
+            [b.segment_ids, team.id]);
+          if (rows.length) {
+            await c.query(`INSERT INTO deletions (kind, team_id, key) SELECT 'mark', $1, unnest($2::text[])`,
+              [team.id, rows.map((r) => String(r.segment_id))]);
+          }
+          return rows;
+        }
+        const { rows } = await c.query<{ segment_id: string; length_m: number }>(
+          `INSERT INTO segment_marks (team_id, segment_id, kind, user_id, note)
+           SELECT $2, s.id, $3, $4, $5 FROM street_segments s
+            WHERE s.id = ANY($1::bigint[])
+              AND NOT EXISTS (SELECT 1 FROM segment_marks mk WHERE mk.team_id = $2 AND mk.segment_id = s.id)
+              AND ($3 <> 'complete' OR NOT EXISTS (SELECT 1 FROM team_coverage tc WHERE tc.team_id = $2 AND tc.segment_id = s.id))
+           ON CONFLICT DO NOTHING
+           RETURNING segment_id, (SELECT length_m FROM street_segments WHERE id = segment_id)`,
+          [b.segment_ids, team.id, b.kind, me.id, b.note?.trim() || null]);
+        return rows;
+      });
+      await audit(pool, { userId: me.id, teamId: team.id, action: b.kind === "clear" ? "street.unmark" : `street.${b.kind}`,
+        entity: "segment", data: { bulk: true, asked: b.segment_ids.length, changed: changed.length } });
+      if (changed.length) await sendJob("achievements", { teamId: team.id }, { singletonKey: team.id });
+      return { pieces: changed.length, meters: Math.round(changed.reduce((t, r) => t + Number(r.length_m), 0)) };
+    },
+  );
+
   app.delete<{ Params: { id: string; segmentId: string } }>("/api/teams/:id/marks/:segmentId", async (req) => {
     const me = requireUser(req);
     const team = await loadTeam(req.params.id);

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { mount, onMount, unmount } from "svelte";
+  import { mount, onMount, unmount, untrack } from "svelte";
   import StreetPopup from "../components/StreetPopup.svelte";
   import MissingPanel from "../components/MissingPanel.svelte";
   import Modal from "../components/Modal.svelte";
@@ -7,7 +7,7 @@
   import { errorText } from "../lib/api";
   import { syncFrom } from "../lib/forms";
   import { LEVEL_LABEL, type AreaLevel, type Place } from "../lib/types";
-  import { MapController, STREETS_MIN_ZOOM, EXCLUDED_COLOR, type Base } from "../lib/map";
+  import { MapController, STREETS_MIN_ZOOM, EXCLUDED_COLOR, type Base, type StreetHit } from "../lib/map";
   import { myColors } from "../lib/colors";
   import { defaultTeam, mySettings } from "../lib/settings";
   import { areaFeatures, isComplete, loadTeamAreas } from "../lib/teamAreas";
@@ -230,6 +230,53 @@
     ctl.showPopupEl(where, el);
   }
 
+  // ---- several streets at once: shift-click to pick them, then mark them together ----
+  let picked = $state(new Map<number, StreetHit>());
+  let pickBusy = $state(false);
+  let pickNote = $state<string | null>(null);
+  let pickedNames = $derived(new Set([...picked.values()].map((h) => h.name?.toLowerCase() ?? `#${h.id}`)).size);
+  let pickedM = $derived([...picked.values()].reduce((t, h) => t + h.length_m, 0));
+  function togglePick(hit: StreetHit) {
+    const next = new Map(picked);
+    if (next.has(hit.id)) next.delete(hit.id);
+    else next.set(hit.id, hit);
+    picked = next;
+    pickNote = null;
+    ctl?.closePopup();
+    ctl?.setSelectedStreets(next.keys());
+  }
+  function clearPicked() {
+    picked = new Map();
+    ctl?.setSelectedStreets([]);
+  }
+  async function markPicked(kind: "complete" | "excluded" | "clear") {
+    if (!picked.size) return;
+    pickBusy = true;
+    pickNote = null;
+    try {
+      const r = await api<{ pieces: number; meters: number }>(`/api/teams/${coverageTeam}/marks/bulk`, { body: { segment_ids: [...picked.keys()], kind } });
+      const what = kind === "complete" ? "Marked done" : kind === "excluded" ? "Left out" : "Unmarked";
+      pickNote = r.pieces ? `${what}: ${miles(r.meters)}.` : kind === "complete" ? "Nothing to mark: those are driven or marked already." : "Nothing changed.";
+      setTimeout(() => (pickNote = null), 5000);
+      clearPicked();
+      ctl?.refreshCoverage();
+      loadAreas();
+      loadCells();
+      missingPanel?.refresh();
+    } catch (e) {
+      pickNote = errorText(e);
+    } finally {
+      pickBusy = false;
+    }
+  }
+  // Another team's coverage: a fresh start. Esc lets go of the lot.
+  $effect(() => { void coverageTeam; untrack(() => { if (picked.size) clearPicked(); }); });
+  onMount(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape" && picked.size) clearPicked(); };
+    addEventListener("keydown", esc);
+    return () => removeEventListener("keydown", esc);
+  });
+
   // "Highlight what's left" in one area, for the team whose coverage is showing.
   let missingFor = $state<{ id: string; name: string; team: string } | null>(null);
   let missingPanel = $state<ReturnType<typeof MissingPanel>>();
@@ -281,6 +328,7 @@
     ctl.onPlaceClick = showPlace;
     loadPlaces();
     // The popup is a live component: it loads the street's coverage and can mark it.
+    ctl.onStreetShiftClick = (hit) => togglePick(hit);
     ctl.onStreetClick = (hit, at) => {
       const el = document.createElement("div");
       const team = ctl!.coverageTeam;
@@ -402,7 +450,18 @@
   {/if}
 
   <div class="bottom">
-    {#if info?.running}
+    {#if picked.size}
+      <div class="chip picking" role="toolbar" aria-label="Selected streets">
+        <span class="sel-dot" aria-hidden="true"></span>
+        <span><strong>{pickedNames} street{pickedNames === 1 ? "" : "s"}</strong> · {miles(pickedM)}</span>
+        <button class="sm primary" disabled={pickBusy} onclick={() => markPicked("complete")}>Mark done</button>
+        <button class="sm" disabled={pickBusy} onclick={() => markPicked("excluded")}>Leave out</button>
+        <button class="sm ghost" disabled={pickBusy} onclick={() => markPicked("clear")} title="Take marks off these streets">Unmark</button>
+        <button class="sm ghost icon" disabled={pickBusy} onclick={clearPicked} aria-label="Clear the selection" title="Clear the selection (Esc)">✕</button>
+      </div>
+    {:else if pickNote}
+      <div class="chip">{pickNote}</div>
+    {:else if info?.running}
       <div class="chip busy">
         <span class="dot"></span>
         <span><strong>Importing {info.region} streets</strong> · {info.running.step}</span>
@@ -467,6 +526,8 @@
     font-size: 13px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 8px; text-align: center;
   }
   .chip.quiet { color: var(--ink-soft); font-size: 12px; padding: 6px 12px; }
+  .chip.picking { padding: 6px 6px 6px 14px; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .sel-dot { width: 12px; height: 12px; border-radius: 50%; background: #ff7a00; flex: none; animation: pulse 1.1s ease-in-out infinite; }
   .legend { gap: 12px; }
   .legend span { display: flex; align-items: center; gap: 5px; }
   .legend i { width: 14px; height: 4px; border-radius: 2px; display: block; }

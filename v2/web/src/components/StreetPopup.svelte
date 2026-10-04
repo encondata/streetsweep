@@ -137,6 +137,7 @@
       {/if}
     {/if}
     {#if done}<div class="ok">{done}</div>{/if}
+    <div class="tip muted">Shift-click streets to pick several at once.</div>
   {/if}
 </div>
 
@@ -150,6 +151,7 @@
   .note { font-size: 12.5px; font-style: italic; color: var(--ink-soft); }
   .err { color: var(--danger); font-size: 12.5px; }
   .ok { color: #15803d; font-size: 12.5px; }
+  .tip { font-size: 11.5px; margin-top: 4px; }
   .whole { display: grid; gap: 2px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); font-size: 12.5px; }
   .whole .btns { margin-top: 2px; }
   .btns { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; flex-wrap: wrap; }

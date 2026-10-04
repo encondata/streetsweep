@@ -80,7 +80,17 @@ function style(): StyleSpecification {
           // Set from the person's preferences (setStreetColors); these are the defaults.
           "line-color": streetColor(DEFAULT_COLORS),
           "line-width": ["interpolate", ["linear"], ["zoom"], 12, 1.2, 16, 4, 19, 9],
-          "line-opacity": streetOpacity(DEFAULT_COLORS),
+          "line-opacity": underSelection(streetOpacity(DEFAULT_COLORS)),
+        },
+      },
+      // Streets picked with shift-click: bright orange, pulsing (see setSelectedStreets).
+      {
+        id: "streets-selected", type: "line", source: "streets", "source-layer": "streets",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#ff7a00",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 12, 4, 16, 9, 19, 16],
+          "line-opacity": 0,
         },
       },
       {
@@ -145,6 +155,10 @@ function style(): StyleSpecification {
   };
 }
 
+/** A street picked with shift-click hides under its orange, so the pulse reads clean. */
+const underSelection = (opacity: unknown) =>
+  ["case", ["boolean", ["feature-state", "selected"], false], 0, opacity] as unknown as number;
+
 /** Street colour by coverage state, hovered streets drawn darker. */
 /** A team area's fill: its own colour, or (shading on) bright green once it's finished. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- MapLibre's expression types
@@ -183,6 +197,9 @@ export interface StreetHit {
 export class MapController {
   map: MlMap;
   onStreetClick: ((s: StreetHit, at: [number, number]) => void) | null = null;
+  onStreetShiftClick: ((s: StreetHit) => void) | null = null;
+  private selectedStreets = new Set<number>();
+  private pulseFrame = 0;
   onAreaClick: ((id: string, at: [number, number]) => void) | null = null;
   onPlaceClick: ((id: string, at: [number, number]) => void) | null = null;
   /** While set, the next click on the map is a spot being picked (a new place). */
@@ -205,6 +222,8 @@ export class MapController {
       attributionControl: { compact: true },
       dragRotate: false,
       pitchWithRotate: false,
+      // Shift-click picks streets (several at once); the shift-drag box zoom would eat it.
+      boxZoom: false,
     });
     this.map.touchZoomRotate.disableRotation();
     this.map.addControl(new NavigationControl({ showCompass: false }), "bottom-right");
@@ -257,10 +276,14 @@ export class MapController {
       const street = hits.find((f) => f.layer.id === "streets");
       if (street) {
         const p = street.properties as { highway: string; name?: string; length_m: number; state?: StreetHit["state"] };
-        this.onStreetClick?.({ id: street.id as number, name: p.name ?? null, highway: p.highway, length_m: p.length_m, state: p.state ?? null },
-          [e.lngLat.lng, e.lngLat.lat]);
+        const hit: StreetHit = { id: street.id as number, name: p.name ?? null, highway: p.highway, length_m: p.length_m, state: p.state ?? null };
+        // Shift held: add it to (or take it out of) a selection of several, no popup.
+        if (e.originalEvent.shiftKey && this.onStreetShiftClick) this.onStreetShiftClick(hit);
+        else this.onStreetClick?.(hit, [e.lngLat.lng, e.lngLat.lat]);
         return;
       }
+      // Shift is for picking streets: a shift-click that misses one does nothing else.
+      if (e.originalEvent.shiftKey && this.onStreetShiftClick) return;
       const area = hits.find((f) => f.layer.id === "team-areas-fill");
       if (area) this.onAreaClick?.(String(area.id), [e.lngLat.lng, e.lngLat.lat]);
     });
@@ -411,6 +434,44 @@ export class MapController {
     this.map.flyTo({ center: at, zoom: Math.max(this.map.getZoom(), zoom), duration: 700 });
   }
 
+  /**
+   * The streets picked with shift-click: drawn bright orange, pulsing, for as long as
+   * there are any. Marked through the tiles' own features, so they stay lit as the map
+   * moves and tiles reload.
+   */
+  setSelectedStreets(ids: Iterable<number>) {
+    const next = new Set(ids);
+    this.whenReady(() => {
+      for (const id of this.selectedStreets) if (!next.has(id)) this.map.setFeatureState({ source: "streets", sourceLayer: "streets", id }, { selected: false });
+      for (const id of next) if (!this.selectedStreets.has(id)) this.map.setFeatureState({ source: "streets", sourceLayer: "streets", id }, { selected: true });
+      this.selectedStreets = next;
+      if (next.size && !this.pulseFrame) this.pulse();
+      if (!next.size) {
+        cancelAnimationFrame(this.pulseFrame);
+        this.pulseFrame = 0;
+        this.map.setPaintProperty("streets-selected", "line-opacity", 0);
+      }
+    });
+  }
+
+  private pulse() {
+    let last = 0;
+    const tick = (t: number) => {
+      this.pulseFrame = requestAnimationFrame(tick);
+      if (t - last < 50) return; // twenty frames a second is smooth enough for a glow
+      last = t;
+      // A beat about once a second: brighter and a touch wider, never faint enough for the
+      // street's own colour to muddy the orange.
+      const beat = 0.5 + 0.5 * Math.sin((t / 1100) * 2 * Math.PI);
+      this.map.setPaintProperty("streets-selected", "line-opacity",
+        ["case", ["boolean", ["feature-state", "selected"], false], 0.55 + 0.45 * beat, 0]);
+      const w = 1 + 0.35 * beat;
+      this.map.setPaintProperty("streets-selected", "line-width",
+        ["interpolate", ["linear"], ["zoom"], 12, 4 * w, 16, 9 * w, 19, 16 * w]);
+    };
+    this.pulseFrame = requestAnimationFrame(tick);
+  }
+
   /** Driven ground for the zoomed-out dots: [lon, lat, metres, segments] per cell. */
   setCoverageCells(cells: [number, number, number, number][]) {
     this.whenReady(() => (this.map.getSource("coverage-cells") as GeoJSONSource).setData({
@@ -460,7 +521,7 @@ export class MapController {
   setStreetColors(c: MapColors) {
     this.whenReady(() => {
       this.map.setPaintProperty("streets", "line-color", streetColor(c));
-      this.map.setPaintProperty("streets", "line-opacity", streetOpacity(c));
+      this.map.setPaintProperty("streets", "line-opacity", underSelection(streetOpacity(c)));
       this.map.setPaintProperty("drive-streets", "line-color", c.driven.color);
       this.map.setPaintProperty("coverage-cells", "circle-color", c.driven.color);
     });
@@ -509,6 +570,7 @@ export class MapController {
   }
 
   destroy() {
+    cancelAnimationFrame(this.pulseFrame);
     this.popup?.remove();
     this.map.remove();
   }
