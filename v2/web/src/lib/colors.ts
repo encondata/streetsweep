@@ -34,6 +34,22 @@ export const DEFAULT_COLORS: MapColors = PRESETS[0].colors;
 /** A finished area's fill, by default: bright green, barely there, so the streets still read. */
 export const DEFAULT_COMPLETE_FILL: StreetColor = { color: "#39ff14", opacity: 0.1 };
 
+/** Fills for finished areas, each tried over the map and satellite imagery. */
+export interface FillPreset { key: string; name: string; note: string; fill: StreetColor }
+export const FILL_PRESETS: FillPreset[] = [
+  { key: "neon", name: "Bright green", note: "The default: barely there", fill: DEFAULT_COMPLETE_FILL },
+  { key: "green", name: "Leaf green", note: "Stronger, for the plain map", fill: { color: "#16a34a", opacity: 0.18 } },
+  { key: "mint", name: "Mint", note: "Soft, reads on satellite", fill: { color: "#5eead4", opacity: 0.2 } },
+  { key: "gold", name: "Gold", note: "Warm, stands off greenery", fill: { color: "#facc15", opacity: 0.18 } },
+  { key: "sky", name: "Sky blue", note: "Calm and clear", fill: { color: "#38bdf8", opacity: 0.18 } },
+  { key: "violet", name: "Violet", note: "Unlike any street colour", fill: { color: "#8b5cf6", opacity: 0.16 } },
+  { key: "magenta", name: "Magenta", note: "Loud on satellite", fill: { color: "#ff2bd6", opacity: 0.14 } },
+  { key: "white", name: "White wash", note: "Fades finished ground back", fill: { color: "#ffffff", opacity: 0.35 } },
+  { key: "grey", name: "Grey", note: "Done and out of the way", fill: { color: "#6b7280", opacity: 0.22 } },
+  { key: "orange", name: "Orange", note: "Hard to miss", fill: { color: "#fb923c", opacity: 0.18 } },
+];
+export const sameFill = (a: StreetColor, b: StreetColor) => a.color.toLowerCase() === b.color.toLowerCase() && a.opacity === b.opacity;
+
 /** Shade finished areas: on unless you turned it off. */
 export const shadeComplete = () => session.me?.user.preferences?.shade_complete !== false;
 /** …in your colour and opacity, or the default. */

@@ -2,6 +2,7 @@
   // Your page: who you are up top, then Account (picture, name, email, password, sign
   // out), Preferences (how maps look for you) and Settings (how the app behaves).
   import Avatar from "../components/Avatar.svelte";
+  import ShadePrefs from "../components/ShadePrefs.svelte";
   import ColorPrefs from "../components/ColorPrefs.svelte";
   import Icon from "../components/Icon.svelte";
   import { api, errorText } from "../lib/api";
@@ -10,7 +11,7 @@
   import { cropToBlob } from "../lib/image";
   import { formValues } from "../lib/forms";
   import { date } from "../lib/format";
-  import { DEFAULT_COLORS, DEFAULT_COMPLETE_FILL, completeFill, myColors, samePair, shadeComplete, type MapColors } from "../lib/colors";
+  import { DEFAULT_COLORS, DEFAULT_COMPLETE_FILL, completeFill, myColors, sameFill, samePair, shadeComplete, type MapColors } from "../lib/colors";
   import { mySettings, type AppSettings } from "../lib/settings";
   import type { Me } from "../lib/types";
 
@@ -75,13 +76,13 @@
 
   // Finished areas: the switch saves straight away; the colour and opacity with Save.
   let fill = $state({ ...completeFill() });
-  let fillChanged = $derived(fill.color.toLowerCase() !== completeFill().color.toLowerCase() || fill.opacity !== completeFill().opacity);
+  let fillChanged = $derived(!sameFill(fill, completeFill()));
   const saveFill = () =>
     run(async () => session.set(await api<Me>("/api/me/preferences", { method: "PATCH", body: { complete_fill: fill } })), "Saved.");
 
   const setShade = (on: boolean) =>
     run(async () => session.set(await api<Me>("/api/me/preferences", { method: "PATCH", body: { shade_complete: on } })),
-      on ? "Finished areas are shaded green." : "Finished areas look like the rest.");
+      on ? "Finished areas are shaded." : "Finished areas look like the rest.");
 
   // ---- settings ----
   let settings = $state<Required<AppSettings>>({
@@ -188,23 +189,9 @@
         </label>
       </div>
       {#if shadeComplete()}
-        <div class="fill-row">
-          <span class="lbl">Fill</span>
-          <input type="color" bind:value={fill.color} aria-label="Finished area colour" />
-          <label class="op">
-            <span class="small muted">Opacity</span>
-            <input type="range" min="0.02" max="0.6" step="0.02" bind:value={fill.opacity} aria-label="Finished area opacity" />
-            <span class="small">{Math.round(fill.opacity * 100)}%</span>
-          </label>
-        </div>
-        <!-- What it looks like over a map tile, at the chosen strength. -->
-        <div class="fill-preview">
-          <img src="/api/tiles/osm/16/14977/26881" alt="" />
-          <span style:background={fill.color} style:opacity={fill.opacity}></span>
-        </div>
+        <ShadePrefs bind:value={fill} />
         <div class="btns">
-          <button class="ghost" disabled={busy || (fill.color === DEFAULT_COMPLETE_FILL.color && fill.opacity === DEFAULT_COMPLETE_FILL.opacity)}
-            onclick={() => (fill = { ...DEFAULT_COMPLETE_FILL })}>Back to the default</button>
+          <button class="ghost" disabled={busy || sameFill(fill, DEFAULT_COMPLETE_FILL)} onclick={() => (fill = { ...DEFAULT_COMPLETE_FILL })}>Back to the default</button>
           <button class="primary" disabled={busy || !fillChanged} onclick={saveFill}>Save</button>
         </div>
       {/if}
@@ -253,13 +240,5 @@
   .toggle-row h2 { margin: 0 0 2px; }
   .toggle-row p { margin: 0; }
   .shade-swatch { width: 34px; height: 34px; border-radius: 8px; border: 2px solid; flex: none; }
-  .fill-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-  .fill-row .lbl { width: 130px; font-weight: 600; font-size: 13.5px; }
-  .fill-row input[type="color"] { width: 44px; height: 32px; padding: 2px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); }
-  .op { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px; }
-  .op input { flex: 1; height: auto; padding: 0; border: 0; }
-  .fill-preview { position: relative; width: 256px; height: 120px; overflow: hidden; border-radius: 10px; border: 1px solid var(--line); }
-  .fill-preview img { position: absolute; top: -60px; left: 0; width: 256px; height: 256px; }
-  .fill-preview span { position: absolute; inset: 0; }
   .err { color: var(--danger); margin: 0; }
 </style>
