@@ -258,12 +258,14 @@ export default async function accountRoutes(app: FastifyInstance) {
 
   // Your preferences, merged: send only what changes. Unknown keys are refused, so a
   // typo can't quietly store nothing useful.
-  app.patch<{ Body: { map_colors?: MapColors; onboarded?: boolean; settings?: Record<string, unknown> } }>(
+  app.patch<{ Body: { map_colors?: MapColors; onboarded?: boolean; settings?: Record<string, unknown>; shade_complete?: boolean } }>(
     "/api/me/preferences",
     { schema: { body: { type: "object", additionalProperties: false, properties: {
         map_colors: { type: "object", additionalProperties: false, required: ["driven", "undriven"], properties: {
           driven: COLOR_SPEC, undriven: COLOR_SPEC } },
         onboarded: { type: "boolean" },
+        // Finished areas get a faint bright-green fill on the map (on unless turned off).
+        shade_complete: { type: "boolean" },
         // How the app behaves for you: where it opens, the map style, the team shown first.
         settings: { type: "object", additionalProperties: false, properties: {
           start_page: { type: "string", enum: ["home", "map", "drives"] },

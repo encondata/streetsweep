@@ -14,7 +14,7 @@ export type Base = "map" | "satellite" | "hybrid";
 /** Streets come from the server from this zoom in (a tile further out would hold a city). */
 export const STREETS_MIN_ZOOM = 12;
 
-import { DEFAULT_COLORS, EXCLUDED, myColors, type MapColors } from "./colors";
+import { COMPLETE_FILL, COMPLETE_OPACITY, DEFAULT_COLORS, EXCLUDED, myColors, shadeComplete, type MapColors } from "./colors";
 /** Left-out streets go grey whatever colours someone picked for driven and not. */
 export const EXCLUDED_COLOR = EXCLUDED;
 export const TRACK_COLOR = "#e2721f";
@@ -57,10 +57,8 @@ function style(): StyleSpecification {
       },
       {
         id: "team-areas-fill", type: "fill", source: "team-areas",
-        paint: {
-          "fill-color": ["coalesce", ["get", "color"], AREA_COLOR],
-          "fill-opacity": ["case", ["boolean", ["feature-state", "selected"], false], 0.16, 0.06],
-        },
+        // Set by setShadeComplete: finished areas shaded bright green, or not.
+        paint: { "fill-color": areaFill(true), "fill-opacity": areaFillOpacity(true) },
       },
       {
         id: "streets-casing", type: "line", source: "streets", "source-layer": "streets",
@@ -120,6 +118,19 @@ function style(): StyleSpecification {
 }
 
 /** Street colour by coverage state, hovered streets drawn darker. */
+/** A team area's fill: its own colour, or (shading on) bright green once it's finished. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- MapLibre's expression types
+function areaFill(shade: boolean): any {
+  const own = ["coalesce", ["get", "color"], AREA_COLOR];
+  return shade ? ["case", ["boolean", ["get", "complete"], false], COMPLETE_FILL, own] : own;
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function areaFillOpacity(shade: boolean): any {
+  const selected = ["boolean", ["feature-state", "selected"], false];
+  const normal = ["case", selected, 0.16, 0.06];
+  return shade ? ["case", ["boolean", ["get", "complete"], false], ["case", selected, COMPLETE_OPACITY + 0.08, COMPLETE_OPACITY], normal] : normal;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- MapLibre's expression types
 function streetColor(c: MapColors): any {
   return ["case", ["boolean", ["feature-state", "hover"], false], "#0d1b28",
@@ -169,8 +180,9 @@ export class MapController {
     this.map.addControl(new NavigationControl({ showCompass: false }), "bottom-right");
     this.map.addControl(new GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: false }), "bottom-right");
     this.map.addControl(new ScaleControl({ unit: "imperial" }), "bottom-left");
-    // Every map draws streets in the person's own colours.
+    // Every map draws streets in the person's own colours, and shades finished areas if they like.
     this.setStreetColors(myColors());
+    this.setShadeComplete(shadeComplete());
 
     this.map.on("mousemove", "streets", (e: MapLayerMouseEvent) => {
       const id = e.features?.[0]?.id as number | undefined;
@@ -335,6 +347,14 @@ export class MapController {
 
   clearSearchResult() {
     this.whenReady(() => (this.map.getSource("search-pin") as GeoJSONSource).setData(empty()));
+  }
+
+  /** Finished areas in faint bright green (Preferences), or in their own colour like the rest. */
+  setShadeComplete(on: boolean) {
+    this.whenReady(() => {
+      this.map.setPaintProperty("team-areas-fill", "fill-color", areaFill(on));
+      this.map.setPaintProperty("team-areas-fill", "fill-opacity", areaFillOpacity(on));
+    });
   }
 
   /** The person's street colours (Preferences). */

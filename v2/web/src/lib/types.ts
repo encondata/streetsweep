@@ -8,7 +8,7 @@ export interface User {
   is_site_admin: boolean;
   created_at: string;
   /** Free-form settings: map_colors, onboarded. */
-  preferences?: { map_colors?: import("./colors").MapColors; onboarded?: boolean; settings?: import("./settings").AppSettings };
+  preferences?: { map_colors?: import("./colors").MapColors; onboarded?: boolean; settings?: import("./settings").AppSettings; shade_complete?: boolean };
 }
 
 export interface TeamSummary {

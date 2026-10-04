@@ -50,6 +50,8 @@
   // Colours are automatic: no area shares one with an area it touches.
   let colors = $derived(assignAreaColors(areas));
   const colorOf = (a: Area) => colors.get(a.id) ?? AREA_COLORS[0];
+  /** Every street driven or marked done (the ones left out don't count against it). */
+  const isComplete = (a: Area) => a.build_status === "built" && !!a.total_m && (a.driven_m ?? 0) >= a.total_m * 0.9999;
   const followedHere = (a: Area) => areas.some((x) => x.id === a.id);
 
   // ---- the team's areas ----
@@ -61,7 +63,7 @@
       areas = r.areas;
       canEdit = r.can_edit;
       const auto = assignAreaColors(r.areas);
-      ctl.setTeamAreas(r.areas.map((a) => ({ type: "Feature", id: a.id, properties: { id: a.id, color: auto.get(a.id) }, geometry: a.geometry! })));
+      ctl.setTeamAreas(r.areas.map((a) => ({ type: "Feature", id: a.id, properties: { id: a.id, color: auto.get(a.id), complete: isComplete(a) }, geometry: a.geometry! })));
       // Street lists being built: check back until they're done.
       if (r.areas.some((a) => a.build_status === "queued" || a.build_status === "building")) pollTimer = setTimeout(refresh, 4000);
     } catch (e) {

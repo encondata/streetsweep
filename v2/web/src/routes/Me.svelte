@@ -10,7 +10,7 @@
   import { cropToBlob } from "../lib/image";
   import { formValues } from "../lib/forms";
   import { date } from "../lib/format";
-  import { DEFAULT_COLORS, myColors, samePair, type MapColors } from "../lib/colors";
+  import { COMPLETE_FILL, DEFAULT_COLORS, myColors, samePair, shadeComplete, type MapColors } from "../lib/colors";
   import { mySettings, type AppSettings } from "../lib/settings";
   import type { Me } from "../lib/types";
 
@@ -69,6 +69,11 @@
   let colors = $state<MapColors>(clone(myColors()));
   const saveColors = () =>
     run(async () => session.set(await api<Me>("/api/me/preferences", { method: "PATCH", body: { map_colors: colors } })), "Saved. Maps use your colours from now on.");
+
+  // Shading finished areas: saved as soon as it's switched.
+  const setShade = (on: boolean) =>
+    run(async () => session.set(await api<Me>("/api/me/preferences", { method: "PATCH", body: { shade_complete: on } })),
+      on ? "Finished areas are shaded green." : "Finished areas look like the rest.");
 
   // ---- settings ----
   let settings = $state<Required<AppSettings>>({
@@ -159,6 +164,20 @@
       </div>
     </section>
 
+    <section class="card pad">
+      <div class="toggle-row">
+        <span class="shade-swatch" style:background={COMPLETE_FILL} aria-hidden="true"></span>
+        <div class="grow">
+          <h2>Shade finished areas</h2>
+          <p class="muted small">An area with every street driven (or marked done) gets a faint bright-green fill on the map, so finished ground stands out.</p>
+        </div>
+        <label class="switch" aria-label="Shade finished areas">
+          <input type="checkbox" checked={shadeComplete()} disabled={busy} onchange={(e) => setShade(e.currentTarget.checked)} />
+          <span></span>
+        </label>
+      </div>
+    </section>
+
   {:else}
     <section class="card pad stack">
       <h2>When you open StreetSweep</h2>
@@ -198,4 +217,8 @@
   .tabs { margin: 0 -22px; padding: 0 22px; }
   .inline { display: flex; gap: 8px; flex-wrap: wrap; }
   .btns { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  .toggle-row { display: flex; align-items: center; gap: 14px; }
+  .toggle-row h2 { margin: 0 0 2px; }
+  .toggle-row p { margin: 0; }
+  .shade-swatch { width: 34px; height: 34px; border-radius: 8px; opacity: .35; border: 2px solid #2bbf1a; flex: none; }
 </style>

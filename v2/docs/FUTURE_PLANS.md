@@ -65,3 +65,33 @@ Relations are usually split by state, and often by direction. So "I-10 in Texas"
 - **Construction and closures:** exact 100% can be impossible for a while. Allow a tolerance (e.g. 98%, or ignore gaps under X ft).
 - **Matching at highway speed:** frontage roads run right next to the mainlanes. GPS matching must not credit the interstate for driving the frontage road, or the reverse.
 - **Business routes and spurs** (Business 20, loops): leave them out of the main badge, or give them their own.
+
+---
+
+## Neighborhood search with outlines
+
+**Idea:** Search for a neighborhood by name (like Google Maps) and get its outline, then use that outline as an area.
+
+### What OSM has
+- **Point only (most common):** `place=neighbourhood` / `place=suburb` is usually a single named point with no outline.
+- **Boundary (sometimes):** `boundary=administrative` + `admin_level=10`, or `place=neighbourhood` drawn as an area. More common in Dallas proper, rare in Plano and Frisco.
+- **Subdivision shape (hit or miss):** some subdivisions are drawn as `landuse=residential` areas with a `name`.
+- Nominatim returns the outline when one exists (`polygon_geojson=1`). When it doesn't, you only get the point.
+
+Google's outlines come from licensed and in-house data, so OSM alone won't match Google's coverage.
+
+### Other open sources
+- **County appraisal district (CAD) parcel data:** Collin, Denton and Dallas CAD list each parcel's subdivision name. Merging all parcels with the same subdivision name gives a real neighborhood outline. Probably the best free option for DFW suburbs. Check each county's terms of use.
+- **City open-data portals:** Dallas and some other cities publish neighborhood or neighborhood-association boundaries.
+- **Who's On First:** open gazetteer (originally from Mapzen) with neighborhood polygons for many US cities. Coverage is uneven and some polygons are approximate.
+
+### Proposed approach (fall through in order)
+1. Use the OSM polygon if one exists.
+2. Otherwise use a subdivision shape built from county parcel data, prepared ahead of time and stored on the server.
+3. Otherwise drop a pin at the OSM point and let the user draw or adjust the area with the existing area tools.
+
+### Open questions
+- Combining parcels: small gaps (streets, common areas) between parcels need to be filled so the outline is one clean shape.
+- Subdivisions are often split into phases ("Phase 1", "Phase 2"). Group them into one neighborhood, or offer each phase separately?
+- How often to refresh the CAD data (yearly is probably enough).
+- Search ranking when OSM and CAD both return a match with similar names.
