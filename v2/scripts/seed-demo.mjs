@@ -1,10 +1,17 @@
 // A demo account on a local stack, to click around the web app with: a car, Hyde Park
 // drawn as an area, and a few real drives through it. Safe to run again (it tops up).
 //   docker compose cp scripts/smoke-lib.mjs api:/app/smoke/ && docker compose cp scripts/seed-demo.mjs api:/app/smoke/
-//   docker compose exec -T -w /app api node smoke/seed-demo.mjs
-// Local test account only. Sign in at http://localhost:8430 with these:
+//   docker compose exec -T -e DEMO_SEED=1 -w /app api node smoke/seed-demo.mjs
+// Local test account only. Sign in at http://localhost:8430 with these. The password is
+// public (this repo is), so never run this on a server anyone else can reach: it refuses
+// unless DEMO_SEED=1 is set, e.g. `docker compose exec -e DEMO_SEED=1 -w /app api node smoke/seed-demo.mjs`.
 import crypto from "node:crypto";
 import { BASE, latestCode, sql } from "./smoke-lib.mjs";
+
+if (process.env.DEMO_SEED !== "1") {
+  console.error("Refusing: set DEMO_SEED=1 to seed the demo account (local stacks only).");
+  process.exit(1);
+}
 
 export const DEMO_EMAIL = "demo@streetsweep.test";
 export const DEMO_PASSWORD = "sweep-demo-7f3k2q";
