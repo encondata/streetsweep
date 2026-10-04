@@ -14,8 +14,10 @@
   import { assignAreaColors } from "../lib/areaColors";
   import { areaFeatures } from "../lib/teamAreas";
 
-  let { ctl, panelWidth = 360, onteam, shown = true, onshow, onhide }: {
+  let { ctl, panelWidth = 360, onteam, shown = true, onshow, onhide, onmissing }: {
     ctl: MapController; panelWidth?: number; onteam?: (teamId: string) => void;
+    /** "Highlight what's left" in this area, for this team. */
+    onmissing?: (area: Area, teamId: string) => void;
     /** Hidden, the panel keeps working (team, areas on the map); it's just out of the way. */
     shown?: boolean; onshow?: () => void; onhide?: () => void;
   } = $props();
@@ -412,6 +414,9 @@
           <span class="bar big"><span style:width="{share(p)}%" style:background={colorOf(area)}></span></span>
           <span class="muted small">{miles(p.driven_m)} of {miles(p.total_m)} · {(p.driven_streets ?? 0).toLocaleString()} of {(p.total_streets ?? 0).toLocaleString()} streets done{p.started_streets ? `, ${p.started_streets.toLocaleString()} begun` : ""}.
             Streets marked done count; ones left out don't count against you.</span>
+          {#if onmissing && (p.driven_m ?? 0) < (p.total_m ?? 0)}
+            <div><button class="sm" onclick={() => area && onmissing(area, teamId)}>Highlight what's left</button></div>
+          {/if}
         </div>
       {/if}
 

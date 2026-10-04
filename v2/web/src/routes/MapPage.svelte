@@ -1,6 +1,7 @@
 <script lang="ts">
   import { mount, onMount, unmount } from "svelte";
   import StreetPopup from "../components/StreetPopup.svelte";
+  import MissingPanel from "../components/MissingPanel.svelte";
   import Modal from "../components/Modal.svelte";
   import Icon from "../components/Icon.svelte";
   import { errorText } from "../lib/api";
@@ -216,8 +217,23 @@
     const done = a.build_status === "built" && a.total_m
       ? `${percent(a.driven_m ?? 0, a.total_m)} swept · ${miles(a.driven_m)} of ${miles(a.total_m)}${isComplete(a) ? " · finished" : ""}`
       : "Its streets are being listed";
-    ctl.showPopup(where, `<strong>${esc(a.name)}</strong><br><span class="muted">${esc(LEVEL_LABEL[a.level])}</span><br>${esc(done)}<br><a href="/areas?area=${a.id}">Manage in Areas</a>`);
+    const el = document.createElement("div");
+    el.innerHTML = `<strong>${esc(a.name)}</strong><br><span class="muted">${esc(LEVEL_LABEL[a.level])}</span><br>${esc(done)}<br>`
+      + (a.build_status === "built" && !isComplete(a) ? `<button class="sm popup-btn">Highlight what's left</button><br>` : "")
+      + `<a href="/areas?area=${a.id}">Manage in Areas</a>`;
+    el.querySelector("button")?.addEventListener("click", () => {
+      ctl?.closePopup();
+      missingFor = { id: a.id, name: a.name, team: coverageTeam };
+    });
+    ctl.showPopupEl(where, el);
   }
+
+  // "Highlight what's left" in one area, for the team whose coverage is showing.
+  let missingFor = $state<{ id: string; name: string; team: string } | null>(null);
+  $effect(() => {
+    // Another team's coverage means another answer: start again from the popup.
+    if (missingFor && missingFor.team !== coverageTeam) missingFor = null;
+  });
 
   function showPlace(id: string, at: [number, number]) {
     const p = places.find((x) => x.id === id);
@@ -376,6 +392,12 @@
     </div>
   </div>
 
+  {#if ctl && missingFor}
+    {#key missingFor.id + missingFor.team}
+      <MissingPanel ctl={ctl} areaId={missingFor.id} areaName={missingFor.name} teamId={missingFor.team} onclose={() => (missingFor = null)} />
+    {/key}
+  {/if}
+
   <div class="bottom">
     {#if info?.running}
       <div class="chip busy">
@@ -449,6 +471,7 @@
   @keyframes pulse { 50% { opacity: .3; } }
   :global(.maplibregl-popup-content) { font: 13.5px/1.45 var(--ui); padding: 10px 28px 10px 12px; border-radius: 10px; }
   :global(.maplibregl-popup-content .muted) { color: var(--ink-soft); }
+  :global(.maplibregl-popup-content .popup-btn) { margin: 6px 0 4px; height: 30px; font-size: 13px; }
   @media (max-width: 760px) {
     .mapwrap { height: calc(100dvh - 64px - env(safe-area-inset-bottom)); }
     .bottom { bottom: auto; top: 60px; left: 50%; }

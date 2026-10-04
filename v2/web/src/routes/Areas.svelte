@@ -4,6 +4,7 @@
   // Map page's job), so drawing a boundary isn't cluttered by what's been driven.
   import { onMount } from "svelte";
   import AreaPanel from "../components/AreaPanel.svelte";
+  import MissingPanel from "../components/MissingPanel.svelte";
   import { MapController, type Base } from "../lib/map";
   import Icon from "../components/Icon.svelte";
   import { router } from "../lib/router.svelte";
@@ -14,6 +15,7 @@
   let ctl = $state<MapController | null>(null);
   let panel = $state<ReturnType<typeof AreaPanel>>();
   let base = $state<Base>(readBase());
+  let missingFor = $state<{ id: string; name: string; team: string } | null>(null);
 
   // The list tucks away to give the map room; remembered per device. Drawing always shows it.
   let shown = $state(readShown());
@@ -80,7 +82,14 @@
 
 <div class="wrap">
   <div class="map" bind:this={box}></div>
-  {#if ctl}<AreaPanel bind:this={panel} {ctl} panelWidth={PANEL_W} {shown} onshow={() => setShown(true)} onhide={() => setShown(false)} />{/if}
+  {#if ctl}<AreaPanel bind:this={panel} {ctl} panelWidth={PANEL_W} {shown} onshow={() => setShown(true)} onhide={() => setShown(false)}
+    onmissing={(a, team) => (missingFor = { id: a.id, name: a.name, team })} />{/if}
+  {#if ctl && missingFor}
+    {#key missingFor.id + missingFor.team}
+      <MissingPanel ctl={ctl} areaId={missingFor.id} areaName={missingFor.name} teamId={missingFor.team}
+        left={shown ? PANEL_W : 0} onclose={() => (missingFor = null)} />
+    {/key}
+  {/if}
   <div class="top">
     {#if !shown}
       <button class="tool" onclick={() => setShown(true)} title="Show the areas list"><Icon name="areas" size={16} /> Areas</button>

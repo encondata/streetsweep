@@ -42,6 +42,8 @@ function style(): StyleSpecification {
       "drive-track": { type: "geojson", data: empty() },
       places: { type: "geojson", data: empty(), promoteId: "id" },
       "search-pin": { type: "geojson", data: empty() },
+      // An area's streets still to sweep, when asked for ("Highlight what's left").
+      "missing": { type: "geojson", data: empty() },
       // Zoomed out, where the team has swept: cells of covered streets, clustered.
       "coverage-cells": {
         type: "geojson", data: empty(), cluster: true, clusterRadius: 45, clusterMaxZoom: STREETS_MIN_ZOOM - 1,
@@ -120,6 +122,16 @@ function style(): StyleSpecification {
             0, 5, 5000, 9, 50000, 15, 500000, 24],
         },
       },
+      // What's left in an area: dark-cased bright yellow, unlike any street colour, with a
+      // dot on each street so a stub of a few feet still shows at area zoom.
+      { id: "missing-casing", type: "line", source: "missing", filter: ["==", ["geometry-type"], "LineString"],
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: { "line-color": "#111827", "line-width": ["interpolate", ["linear"], ["zoom"], 10, 6, 16, 12] } },
+      { id: "missing-line", type: "line", source: "missing", filter: ["==", ["geometry-type"], "LineString"],
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: { "line-color": "#ffd60a", "line-width": ["interpolate", ["linear"], ["zoom"], 10, 3, 16, 7] } },
+      { id: "missing-dot", type: "circle", source: "missing", filter: ["==", ["geometry-type"], "Point"],
+        paint: { "circle-radius": 7, "circle-color": "#ffd60a", "circle-stroke-color": "#111827", "circle-stroke-width": 2.5 } },
       // An address found with the search box.
       {
         id: "search-pin", type: "circle", source: "search-pin",
@@ -371,6 +383,29 @@ export class MapController {
     }
   }
 
+  /**
+   * Highlight what's left in an area (null clears it): each street's pieces as lines, and
+   * a dot on each. Zooms to them, so a lone stub at the edge is brought into view.
+   */
+  setMissing(streets: { geometry: GeoJSON.Geometry; at: [number, number] }[] | null, opts: { left?: number } = {}) {
+    this.whenReady(() => {
+      const features: GeoJSON.Feature[] = (streets ?? []).flatMap((st) => [
+        { type: "Feature", properties: {}, geometry: st.geometry },
+        { type: "Feature", properties: {}, geometry: { type: "Point", coordinates: st.at } },
+      ]);
+      (this.map.getSource("missing") as GeoJSONSource).setData({ type: "FeatureCollection", features });
+      if (!streets?.length) return;
+      const xs = streets.map((st) => st.at[0]), ys = streets.map((st) => st.at[1]);
+      const pad = 0.0015;
+      this.fitBounds([Math.min(...xs) - pad, Math.min(...ys) - pad, Math.max(...xs) + pad, Math.max(...ys) + pad], { left: opts.left, animate: true });
+    });
+  }
+
+  /** Go to one of what's left. */
+  flyTo(at: [number, number], zoom = 17) {
+    this.map.flyTo({ center: at, zoom: Math.max(this.map.getZoom(), zoom), duration: 700 });
+  }
+
   /** Driven ground for the zoomed-out dots: [lon, lat, metres, segments] per cell. */
   setCoverageCells(cells: [number, number, number, number][]) {
     this.whenReady(() => (this.map.getSource("coverage-cells") as GeoJSONSource).setData({
@@ -439,6 +474,11 @@ export class MapController {
   showPopup(at: [number, number], html: string) {
     this.popup?.remove();
     this.popup = new Popup({ closeButton: true, maxWidth: "260px", offset: 8 }).setLngLat(at).setHTML(html).addTo(this.map);
+  }
+
+  closePopup() {
+    this.popup?.remove();
+    this.popup = null;
   }
 
   /** A popup with live content; `onClose` runs when it goes, however it goes. */

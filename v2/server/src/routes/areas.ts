@@ -277,6 +277,54 @@ export default async function areaRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
+  // What a team still has to sweep in an area: its streets not driven, not marked done and
+  // not left out, each clipped to the outline (a street poking a few feet inside counts
+  // for only those feet, and is often what keeps an area at 98%). Grouped into streets
+  // as people know them, longest first, with a point on each so even a stub can be found.
+  app.get<{ Params: { id: string }; Querystring: { team?: string } }>("/api/areas/:id/missing", async (req) => {
+    const me = requireUser(req);
+    await loadVisible(req.params.id, me);
+    const teamId = req.query.team ?? "";
+    if (!/^[0-9a-f-]{36}$/i.test(teamId)) throw badRequest("Say whose coverage: ?team=<team id>.");
+    await requireTeamMember(teamId, me);
+    const LIMIT = 4000;
+    const { rows } = await query<{ name: string | null; highway: string; m: number; n: number; geom: string; at: [number, number]; total: number }>(
+      `WITH miss AS (
+         SELECT s.inside_m, s.street_key, seg.way_id, seg.geom
+           FROM areas a JOIN area_segments s ON s.area_id = a.id
+           JOIN street_segments seg ON seg.id = s.segment_id
+           LEFT JOIN team_coverage c ON c.team_id = $2 AND c.segment_id = s.segment_id
+           LEFT JOIN segment_marks mk ON mk.team_id = $2 AND mk.segment_id = s.segment_id
+          WHERE a.id = $1 AND a.build_status = 'built' AND c.segment_id IS NULL AND mk.kind IS NULL
+          ORDER BY s.inside_m DESC LIMIT ${LIMIT}),
+       parts AS (SELECT ST_Subdivide(geom, 256) AS g FROM areas WHERE id = $1),
+       clipped AS (
+         SELECT m.street_key, m.way_id, m.inside_m,
+                CASE WHEN EXISTS (SELECT 1 FROM parts p WHERE ST_CoveredBy(m.geom, p.g)) THEN m.geom
+                     ELSE (SELECT ST_CollectionExtract(ST_Union(ST_Intersection(m.geom, p.g)), 2)
+                             FROM parts p WHERE p.g && m.geom AND ST_Intersects(m.geom, p.g)) END AS g
+           FROM miss m),
+       streets AS (
+         SELECT max(w.name) AS name, mode() WITHIN GROUP (ORDER BY w.highway) AS highway,
+                sum(c.inside_m)::float AS m, count(*)::int AS n, ST_Collect(c.g) AS g
+           FROM clipped c LEFT JOIN street_ways w ON w.way_id = c.way_id
+          WHERE c.g IS NOT NULL AND NOT ST_IsEmpty(c.g)
+          GROUP BY c.street_key)
+       SELECT name, highway, m, n, ST_AsGeoJSON(g, 6) AS geom,
+              ARRAY[round(ST_X(ST_PointOnSurface(g))::numeric, 6), round(ST_Y(ST_PointOnSurface(g))::numeric, 6)]::float[] AS at,
+              (SELECT count(*) FROM miss)::int AS total
+         FROM streets ORDER BY m DESC`,
+      [req.params.id, teamId],
+    );
+    return {
+      // Hit the cap: the longest pieces are shown, the rest left for once these are done.
+      truncated: rows[0]?.total === LIMIT,
+      streets: rows.map((r) => ({
+        name: r.name, highway: r.highway, meters: Math.round(r.m), pieces: r.n, at: r.at, geometry: JSON.parse(r.geom),
+      })),
+    };
+  });
+
   // Public boundary lines for the map: the state always, counties from zoom 6, cities from 9.
   app.get<{ Params: { z: string; x: string; y: string } }>("/api/tiles/areas/:z/:x/:y", async (req, reply) => {
     requireUser(req);
