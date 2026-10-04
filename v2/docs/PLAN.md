@@ -1,6 +1,6 @@
 # StreetSweep v2 — plan
 
-Status: **agreed 2026-10-03**. Stages 0–5 done. Stage 6 (apps) next, with its own go-ahead.
+Status: **agreed 2026-10-03**. Stages 0–5 done. Stage 6 (apps) built and tested on the emulator; next, a real phone once v2 is live.
 
 v2 is a ground-up, multi-user rebuild. v1 (`tools/`) keeps running untouched beside it
 until v2 replaces it. v2 starts with an empty database — no v1 import.
@@ -211,6 +211,9 @@ audit_log       (id, at, user_id, team_id, action, entity, entity_id, data jsonb
 5. ✅ **Insights.** Progress, drives list, places/photos, achievements, leaderboard
    (per team).
 6. **Apps.** Sync API hardened, then the Android app moved onto v2 (separate go-ahead).
+   Done: sync API, packages, app data layer (Room v17), provisional preview, drive type and
+   vehicle, places sharing, Settings. Open: a drive-type control on the car screen, and the
+   first install on a real phone (after v2 is deployed at streetsweep.net).
 7. **Logger firmware.** Reference ESP32 sketch for Wi-Fi upload, and BLE after that.
 
 ## Decisions (2026-10-03)
