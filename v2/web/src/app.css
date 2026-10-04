@@ -60,8 +60,8 @@ button.primary, .btn.primary {
   box-shadow: 0 3px 10px rgba(30, 138, 40, .28);
 }
 button.primary:hover:not([disabled]), .btn.primary:hover { filter: brightness(1.06); background: linear-gradient(135deg, #2fb83a 0%, #1e8a28 100%); }
-button.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--line)); }
-button.danger:hover:not([disabled]) { background: var(--danger-soft); }
+button.danger, .btn.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--line)); }
+button.danger:hover:not([disabled]), .btn.danger:hover { background: var(--danger-soft); }
 button.ghost { background: none; border-color: transparent; }
 button.ghost:hover:not([disabled]) { background: var(--surface-2); }
 button.sm, .btn.sm { height: 30px; padding: 0 10px; font-size: 13px; }

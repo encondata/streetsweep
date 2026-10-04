@@ -33,6 +33,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Policy
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Restore
@@ -394,6 +397,20 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
                     supportingContent = { Text(TrackingSettings.DEFAULT_SERVER_URL) },
                 )
             }
+            // Both are web pages on the server, so they stay current without an app update.
+            val uri = LocalUriHandler.current
+            val site = settings.serverUrl.trimEnd('/')
+            ListItem(
+                modifier = Modifier.clickable { uri.openUri("$site/policys") },
+                leadingContent = { Icon(Icons.Default.Policy, contentDescription = null) },
+                headlineContent = { Text("Privacy policy") },
+            )
+            ListItem(
+                modifier = Modifier.clickable { uri.openUri("$site/delete-me") },
+                leadingContent = { Icon(Icons.Default.DeleteForever, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                headlineContent = { Text("Delete account", color = MaterialTheme.colorScheme.error) },
+                supportingContent = { Text("Deletes your account and all its data on the server. Opens in your browser.") },
+            )
             Spacer(Modifier.height(8.dp))
 
             SectionHeader("Permissions")

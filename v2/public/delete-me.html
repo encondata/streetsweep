@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Delete your account · StreetSweep</title>
+<meta name="description" content="Delete your StreetSweep account and its data, or ask us to.">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#ffffff">
+<style>
+  /* Light only, same tokens as the login and policy pages. */
+  :root {
+    --green-600: #1e8a28;
+    --ink: #0d1b28;
+    --ink-soft: #5a6a78;
+    --line: #dde4ec;
+    --line-strong: #cfd9e4;
+    --panel: #f7f9fb;
+    --link: #1a6fd4;
+    --danger: #b3261e;
+    --danger-soft: #fbeaea;
+    --ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --r: 12px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: var(--ui); color: var(--ink); background: #fff; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  header { border-bottom: 1px solid var(--line); background: var(--panel); }
+  header .bar { max-width: 640px; margin: 0 auto; padding: 16px; display: flex; align-items: center; justify-content: space-between; }
+  header img { height: 28px; width: auto; display: block; }
+  header a { color: var(--link); text-decoration: none; font-size: 15px; }
+  main { max-width: 640px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 8px; }
+  h2 { font-size: 18px; margin: 0 0 8px; }
+  p { margin: 0 0 12px; }
+  .lead { color: var(--ink-soft); margin-bottom: 24px; }
+  a { color: var(--link); }
+  .card { border: 1px solid var(--line); border-radius: var(--r); padding: 20px; margin-bottom: 16px; background: #fff; }
+  .card.soft { background: var(--panel); }
+  ul { padding-left: 20px; margin: 6px 0 12px; }
+  li { margin: 3px 0; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .cols h3 { font-size: 14px; margin: 0; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .04em; }
+  label.field { display: block; font-weight: 600; font-size: 14px; margin: 14px 0 0; }
+  label.field .help { font-weight: 400; color: var(--ink-soft); }
+  input[type=email], input[type=password], input[type=text], textarea {
+    display: block; width: 100%; margin-top: 6px; font: inherit; font-size: 16px; color: var(--ink);
+    border: 1px solid var(--line-strong); border-radius: 10px; padding: 11px 12px; background: #fff;
+  }
+  textarea { min-height: 80px; resize: vertical; }
+  input:focus, textarea:focus { outline: 2px solid var(--link); outline-offset: -1px; border-color: transparent; }
+  input.code { font: 700 22px ui-monospace, Menlo, monospace; letter-spacing: .3em; text-align: center; }
+  .check { display: flex; gap: 10px; align-items: flex-start; margin: 16px 0 0; font-size: 15px; cursor: pointer; }
+  .check input { width: 18px; height: 18px; margin-top: 3px; accent-color: var(--danger); }
+  button {
+    font: inherit; font-weight: 600; font-size: 15px; border-radius: 10px; padding: 11px 18px; cursor: pointer;
+    border: 1px solid var(--line-strong); background: #fff; color: var(--ink); margin-top: 18px;
+  }
+  button.primary { background: var(--green-600); border-color: var(--green-600); color: #fff; }
+  button.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+  button:disabled { opacity: .55; cursor: default; }
+  .msg { border-radius: 10px; padding: 10px 12px; font-size: 14px; margin: 14px 0 0; background: var(--danger-soft); color: var(--danger); }
+  .msg.ok { background: #e5f4e4; color: #14701f; }
+  .muted { color: var(--ink-soft); }
+  .small { font-size: 14px; }
+  .who { font-weight: 600; }
+  [hidden] { display: none !important; }
+  footer { border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 14px; }
+  footer .bar { max-width: 640px; margin: 0 auto; padding: 16px; display: flex; gap: 16px; }
+  @media (max-width: 560px) { .cols { grid-template-columns: 1fr; } h1 { font-size: 26px; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <a href="/"><img src="/wordmark.png" srcset="/wordmark.png 1x, /wordmark@2x.png 2x" alt="StreetSweep"></a>
+    <a href="/policys">Privacy Policy</a>
+  </div>
+</header>
+
+<main>
+  <h1>Delete your account</h1>
+  <p class="lead">You can delete your StreetSweep account and its data at any time.</p>
+
+  <div class="card soft">
+    <div class="cols">
+      <div>
+        <h3>Deleted</h3>
+        <ul>
+          <li>Your account, email address and profile picture</li>
+          <li>All your drives and location history</li>
+          <li>Your places and their photos</li>
+          <li>Your personal vehicles, phones and loggers</li>
+          <li>Your team memberships and achievements</li>
+        </ul>
+      </div>
+      <div>
+        <h3>What happens to teams</h3>
+        <ul>
+          <li>Streets only you drove come off your teams' maps</li>
+          <li>Teams you own alone pass to their longest-serving admin or member</li>
+          <li>Teams with nobody else in them are closed</li>
+          <li>Streets you marked done for a team stay marked, without your name</li>
+        </ul>
+      </div>
+    </div>
+    <p class="small muted" style="margin:0">Deletion is permanent and can't be undone. See the <a href="/policys#delete">privacy policy</a> for details.</p>
+  </div>
+
+  <p id="loading" class="muted">Checking whether you're signed in…</p>
+
+  <!-- Signed in: delete now. -->
+  <form id="self" class="card" hidden>
+    <h2>Delete it now</h2>
+    <p>Signed in as <span class="who" id="self-who"></span>. <a href="#" id="signout">Not you?</a></p>
+    <label class="field">Your password <span class="help">to confirm it's you</span>
+      <input type="password" name="password" autocomplete="current-password" required></label>
+    <label class="check"><input type="checkbox" name="sure" required> I understand my account and all its data will be deleted permanently.</label>
+    <button type="submit" class="danger">Delete my account</button>
+    <p class="msg" hidden></p>
+  </form>
+
+  <!-- Signed out: sign in, or ask by email. -->
+  <div id="out" hidden>
+    <div class="card">
+      <h2>Delete it now</h2>
+      <p>Sign in and you can delete your account straight away.</p>
+      <a href="/login?next=/delete-me"><button type="button" class="primary" style="margin-top:4px">Sign in</button></a>
+    </div>
+
+    <form id="ask" class="card">
+      <h2>Can't sign in? Ask us to delete it</h2>
+      <p>Enter the email address on your account. We'll send you a code to confirm it's yours, and then an administrator deletes the account, always within 30 days. We'll email you when it's done.</p>
+      <label class="field">Email address <input type="email" name="email" autocomplete="email" required></label>
+      <button type="submit" class="primary">Send me a code</button>
+      <p class="msg" hidden></p>
+    </form>
+
+    <form id="confirm" class="card" hidden>
+      <h2>Confirm your request</h2>
+      <p>If <span class="who" id="confirm-email"></span> has a StreetSweep account, we've sent it a 6-digit code. It expires in 15 minutes.</p>
+      <label class="field">Code <input class="code" type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required></label>
+      <label class="field">Anything we should know? <span class="help">Optional</span>
+        <textarea name="reason" maxlength="1000"></textarea></label>
+      <button type="submit" class="danger">Request deletion</button>
+      <p class="small" style="margin:14px 0 0"><a href="#" id="resend">Send a new code</a> · <a href="#" id="restart">Use a different email</a></p>
+      <p class="msg" hidden></p>
+    </form>
+  </div>
+
+  <div id="done-self" class="card" hidden>
+    <h2>Your account has been deleted</h2>
+    <p>Your StreetSweep account and its data are gone, and you've been signed out. We've sent a confirmation to your email address.</p>
+    <p class="muted small" style="margin:0">If you have the app, you can uninstall it now.</p>
+  </div>
+
+  <div id="done-ask" class="card" hidden>
+    <h2>Request received</h2>
+    <p>An administrator will delete your account and its data, always within 30 days. We'll email you when it's done.</p>
+    <p class="muted small" style="margin:0">Questions? Email <a href="mailto:privacy@streetsweep.net">privacy@streetsweep.net</a>.</p>
+  </div>
+</main>
+
+<footer>
+  <div class="bar"><span>© 2026 StreetSweep</span><a href="/policys">Privacy Policy</a></div>
+</footer>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var show = function (id) {
+    ["loading", "self", "out", "done-self", "done-ask"].forEach(function (k) { $(k).hidden = k !== id; });
+  };
+
+  async function call(url, body) {
+    var r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}) });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok) throw new Error(data.error || data.message || "Something went wrong. Try again.");
+    return data;
+  }
+  function fail(form, err) {
+    var m = form.querySelector(".msg");
+    m.className = "msg"; m.textContent = err.message; m.hidden = false;
+  }
+  function note(form, text) {
+    var m = form.querySelector(".msg");
+    m.className = "msg ok"; m.textContent = text; m.hidden = false;
+  }
+  function busy(form, on) {
+    form.querySelectorAll("button").forEach(function (b) { b.disabled = on; });
+    if (on) form.querySelector(".msg").hidden = true;
+  }
+
+  fetch("/api/me").then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }).then(function (me) {
+    if (me && me.user) {
+      $("self-who").textContent = me.user.display_name + " (" + me.user.email + ")";
+      show("self");
+    } else {
+      show("out");
+    }
+  });
+
+  $("signout").addEventListener("click", async function (e) {
+    e.preventDefault();
+    await fetch("/api/auth/logout", { method: "POST" }).catch(function () {});
+    show("out");
+  });
+
+  $("self").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    var f = e.currentTarget, v = new FormData(f);
+    if (!confirm("Delete your StreetSweep account and all its data? This can't be undone.")) return;
+    busy(f, true);
+    try {
+      await call("/api/me/delete", { password: v.get("password") });
+      show("done-self");
+    } catch (err) { fail(f, err); }
+    busy(f, false);
+  });
+
+  var askedFor = "";
+  // Safari autofill doesn't fire input events, so values come from FormData, not listeners.
+  async function sendCode() {
+    await call("/api/deletion-requests", { email: askedFor });
+  }
+  $("ask").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    var f = e.currentTarget;
+    askedFor = String(new FormData(f).get("email") || "").trim();
+    busy(f, true);
+    try {
+      await sendCode();
+      $("confirm-email").textContent = askedFor;
+      f.hidden = true; $("confirm").hidden = false;
+      $("confirm").querySelector("input[name=code]").focus();
+    } catch (err) { fail(f, err); }
+    busy(f, false);
+  });
+  $("confirm").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    var f = e.currentTarget, v = new FormData(f);
+    busy(f, true);
+    try {
+      await call("/api/deletion-requests/confirm", { email: askedFor, code: String(v.get("code") || ""), reason: String(v.get("reason") || "") });
+      show("done-ask");
+    } catch (err) { fail(f, err); }
+    busy(f, false);
+  });
+  $("resend").addEventListener("click", async function (e) {
+    e.preventDefault();
+    var f = $("confirm");
+    try { await sendCode(); note(f, "We've sent a new code."); } catch (err) { fail(f, err); }
+  });
+  $("restart").addEventListener("click", function (e) {
+    e.preventDefault();
+    $("confirm").hidden = true; $("ask").hidden = false;
+  });
+})();
+</script>
+</body>
+</html>

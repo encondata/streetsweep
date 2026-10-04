@@ -1,10 +1,10 @@
-// One-time email codes: confirming a new account and resetting a password.
+// One-time email codes: confirming a new account, resetting a password, asking for deletion.
 import crypto from "node:crypto";
 import type pg from "pg";
 import { pool } from "./db.js";
 import { HttpError, badRequest } from "./http.js";
 
-export type Purpose = "verify" | "reset";
+export type Purpose = "verify" | "reset" | "delete";
 export const CODE_MINUTES = 15;
 const MAX_ATTEMPTS = 5;
 const RESEND_SECONDS = 60;

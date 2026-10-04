@@ -19,7 +19,7 @@ export const router = new Router();
 addEventListener("popstate", () => router.sync());
 
 // Same-origin links become client-side navigation, except pages the server owns.
-const SERVER_PAGES = /^\/(login|signup|api\/)/;
+const SERVER_PAGES = /^\/(login|signup|delete-me|policys|policies|privacy|api\/)/;
 document.addEventListener("click", (e) => {
   const a = (e.target as Element | null)?.closest?.("a");
   if (!a || a.target || a.hasAttribute("download") || e.defaultPrevented) return;

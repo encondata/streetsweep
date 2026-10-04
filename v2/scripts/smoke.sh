@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "$0")/.."
 docker compose exec -T api mkdir -p /app/smoke
 for f in scripts/smoke-*.mjs; do docker compose cp "$f" "api:/app/smoke/$(basename "$f")" >/dev/null 2>&1; done
-for s in ${@:-stage1 stage2 stage3 stage4 stage5 stage6}; do
+for s in ${@:-stage1 stage2 stage3 stage4 stage5 stage6 deletion}; do
   echo "== $s"
   docker compose exec -T -w /app api node "smoke/smoke-$s.mjs"
 done

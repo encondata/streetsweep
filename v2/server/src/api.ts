@@ -27,6 +27,7 @@ import placeRoutes from "./routes/places.js";
 import syncRoutes from "./routes/sync.js";
 import packageRoutes from "./routes/packages.js";
 import geocodeRoutes from "./routes/geocode.js";
+import deletionRoutes from "./routes/deletion.js";
 import { stopJobs } from "./jobs.js";
 
 const app = Fastify({ logger: { level: "info" }, trustProxy: true });
@@ -86,6 +87,7 @@ app.register(placeRoutes);
 app.register(syncRoutes);
 app.register(packageRoutes);
 app.register(geocodeRoutes);
+app.register(deletionRoutes);
 
 app.get("/api/health", async (_req, reply) => {
   try {
@@ -112,6 +114,8 @@ app.get("/signup", (_req, reply) => reply.sendFile("login.html", config.publicDi
 for (const p of ["/policys", "/policies", "/privacy"]) {
   app.get(p, (_req, reply) => reply.sendFile("policys.html", config.publicDir));
 }
+// Deleting your account, signed in or not (the Play listing's deletion link).
+app.get("/delete-me", (_req, reply) => reply.sendFile("delete-me.html", config.publicDir));
 
 const webIndex = path.join(config.webDir, "index.html");
 if (fs.existsSync(webIndex)) {

@@ -23,12 +23,18 @@
     added: number | null; changed: number | null; retired: number | null; error: string | null;
     started_at: string; finished_at: string | null; requested_by_name: string | null;
   };
+  type DeletionRequest = {
+    id: string; email: string; display_name: string; user_id: string | null; reason: string | null;
+    status: "pending" | "done" | "declined" | "withdrawn"; requested_at: string; decided_at: string | null;
+    note: string | null; decided_by_name: string | null;
+  };
   type MapData = { source_url: string; region: string; runs: ImportRun[]; totals: { segments: number; meters: number; ways: number } };
 
   let users = $state<AdminUser[]>([]);
   let teams = $state<AdminTeam[]>([]);
   let types = $state<DriveType[]>([]);
   let mapData = $state<MapData | null>(null);
+  let requests = $state<DeletionRequest[]>([]);
   let queued = $state(false);
   let q = $state("");
   let error = $state<string | null>(null);
@@ -44,6 +50,7 @@
   const TABS = [
     { key: "users", label: "Users" }, { key: "teams", label: "Teams" },
     { key: "drive-types", label: "Drive types" }, { key: "map-data", label: "Map data" },
+    { key: "deletions", label: "Deletion requests" },
   ];
 
   async function run<T>(fn: () => Promise<T>): Promise<T | undefined> {
@@ -60,6 +67,7 @@
 
   const loadUsers = () => run(async () => (users = (await api<{ users: AdminUser[] }>("/api/admin/users?q=" + encodeURIComponent(q.trim()))).users));
   const loadTeams = () => run(async () => (teams = (await api<{ teams: AdminTeam[] }>("/api/admin/teams")).teams));
+  const loadRequests = () => run(async () => (requests = (await api<{ requests: DeletionRequest[] }>("/api/admin/deletion-requests")).requests));
   const loadTypes = () => run(async () => (types = (await api<{ drive_types: DriveType[] }>("/api/drive-types")).drive_types));
 
   // While an import runs (or one was just asked for), keep the page current.
@@ -96,7 +104,7 @@
   // Reload when the tab changes, and only then (the search box has its own timer).
   $effect(() => {
     const t = tab;
-    untrack(() => (t === "users" ? loadUsers() : t === "teams" ? loadTeams() : t === "map-data" ? loadMapData() : loadTypes()));
+    untrack(() => (t === "users" ? loadUsers() : t === "teams" ? loadTeams() : t === "map-data" ? loadMapData() : t === "deletions" ? loadRequests() : loadTypes()));
   });
 
   let timer: ReturnType<typeof setTimeout>;
@@ -118,6 +126,33 @@
       resetFor = { name: u.display_name, email: u.email, password: r.password };
       resetOpen = true;
     }
+  }
+
+  const GONE = "Their drives, places, photos, personal vehicles, phones and loggers go with it, and teams they own alone pass to another member. This can't be undone.";
+
+  async function deleteUser(u: AdminUser) {
+    if (!confirm(`Delete ${u.display_name} (${u.email}) and all their data? ${GONE}`)) return;
+    await run(async () => {
+      await api(`/api/admin/users/${u.id}`, { method: "DELETE" });
+      await loadUsers();
+    });
+  }
+
+  async function completeRequest(r: DeletionRequest) {
+    if (!confirm(`Delete ${r.display_name} (${r.email}) and all their data? ${GONE} They'll get an email saying it's done.`)) return;
+    await run(async () => {
+      await api(`/api/admin/deletion-requests/${r.id}/complete`, { body: {} });
+      await loadRequests();
+    });
+  }
+
+  async function declineRequest(r: DeletionRequest) {
+    const note = prompt(`Why not delete ${r.display_name}'s account? This goes in the email to them (optional).`);
+    if (note === null) return;
+    await run(async () => {
+      await api(`/api/admin/deletion-requests/${r.id}/decline`, { body: { note } });
+      await loadRequests();
+    });
   }
 
   const saveType = (t: DriveType, body: { label?: string; sort?: number; archived?: boolean }) =>
@@ -176,7 +211,10 @@
                 <span class="switch"><input type="checkbox" checked={!u.disabled_at} disabled={busy || u.id === me.id}
                   aria-label="Account active" onchange={(e) => updateUser(u, { disabled: !e.currentTarget.checked })} /><span></span></span>
               </td>
-              <td><button class="sm" disabled={busy} onclick={() => resetPassword(u)}>Reset password</button></td>
+              <td class="actions">
+                <button class="sm" disabled={busy} onclick={() => resetPassword(u)}>Reset password</button>
+                <button class="sm danger" disabled={busy || u.id === me.id} onclick={() => deleteUser(u)}>Delete</button>
+              </td>
             </tr>
           {:else}
             <tr><td colspan="7" class="muted">{busy ? "Loading…" : "No one matches."}</td></tr>
@@ -239,6 +277,41 @@
       <button type="submit" class="primary" disabled={busy}><Icon name="plus" size={16} /> Add</button>
     </form>
   {/if}
+{#if tab === "deletions"}
+    <p class="muted">
+      People who asked at <a href="/delete-me">/delete-me</a> without signing in, after confirming their email address with a code.
+      The privacy policy promises deletion within 30 days.
+    </p>
+    <div class="card scroll">
+      <table class="data">
+        <thead><tr><th>Person</th><th>Asked</th><th>Reason</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          {#each requests as r (r.id)}
+            <tr class:off={r.status !== "pending"}>
+              <td><strong>{r.display_name}</strong><div class="muted small">{r.email}</div></td>
+              <td class="muted">{date(r.requested_at)}<div class="small">{ago(r.requested_at)}</div></td>
+              <td class="small reason">{r.reason ?? ""}</td>
+              <td>
+                {#if r.status === "pending"}<span class="badge warn">Waiting</span>
+                {:else if r.status === "done"}<span class="badge green">Deleted</span>
+                {:else}<span class="badge">{r.status === "declined" ? "Declined" : "Withdrawn"}</span>{/if}
+                {#if r.decided_at}<div class="muted small">{date(r.decided_at)}{r.decided_by_name ? ` · ${r.decided_by_name}` : ""}</div>{/if}
+                {#if r.note}<div class="muted small">{r.note}</div>{/if}
+              </td>
+              <td class="actions">
+                {#if r.status === "pending"}
+                  <button class="sm danger" disabled={busy} onclick={() => completeRequest(r)}>Delete account</button>
+                  <button class="sm" disabled={busy} onclick={() => declineRequest(r)}>Decline</button>
+                {/if}
+              </td>
+            </tr>
+          {:else}
+            <tr><td colspan="5" class="muted">{busy ? "Loading…" : "No requests."}</td></tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+{/if}
 {#if tab === "map-data"}
     {#if mapData}
       <div class="card pad stack">
@@ -310,6 +383,9 @@
   .badge.err { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
   code { font-size: 12px; word-break: break-all; }
   .scroll { overflow-x: auto; }
+  .actions { white-space: nowrap; }
+  .actions button + button { margin-left: 6px; }
+  .reason { max-width: 320px; white-space: pre-wrap; }
   .who { display: flex; align-items: center; gap: 10px; }
   tr.off td { opacity: .55; }
   .search { position: relative; display: block; color: var(--ink-soft); max-width: 420px; }

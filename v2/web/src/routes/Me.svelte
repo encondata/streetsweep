@@ -163,6 +163,12 @@
       <div><button class="danger" onclick={signOut}>Sign out</button></div>
     </section>
 
+    <section class="card pad stack">
+      <h2>Delete account</h2>
+      <p class="muted small">Deletes your account and all its data for good: drives, places, photos and personal vehicles. Teams you own alone pass to another member. <a href="/policys#delete">What's kept</a></p>
+      <div><a class="btn danger" href="/delete-me">Delete my account…</a></div>
+    </section>
+
   {:else if tab === "preferences"}
     <section class="card pad stack">
       <div>
