@@ -170,7 +170,9 @@
           </div>
         </div>
         <div class="row">
-          <span class="ico"><Icon name="fleet" /></span>
+          <!-- The vehicle as an avatar, like the driver: its photo, else its initials. -->
+          {#if drive.vehicle_id}<Avatar id={drive.vehicle_id} name={drive.vehicle_name ?? ""} url={drive.vehicle_photo_url ?? null} />
+          {:else}<span class="ico"><Icon name="fleet" /></span>{/if}
           <div class="grow">
             {#if drive.vehicle_id}<a href="/fleet/vehicles/{drive.vehicle_id}"><strong>{drive.vehicle_name}</strong></a>{:else}<strong>No vehicle</strong>{/if}
             <div class="muted small">Vehicle</div>

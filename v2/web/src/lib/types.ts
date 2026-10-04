@@ -256,6 +256,7 @@ export interface Drive {
   vehicle_id: string | null;
   vehicle_name: string | null;
   vehicle_kind: VehicleKind | null;
+  vehicle_photo_url?: string | null;
   vehicle_team_id: string | null;
   logger_id: string | null;
   logger_name: string | null;

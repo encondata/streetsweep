@@ -23,6 +23,7 @@ const DRIVE = `
             LEFT JOIN street_ways w ON w.way_id = s.way_id WHERE p.drive_id = d.id) AS street_count, dt.label AS drive_type_label, d.attribution,
          d.user_id, u.display_name AS user_name, ${avatarUrl("u")} AS user_avatar_url,
          d.vehicle_id, v.name AS vehicle_name, v.kind AS vehicle_kind, v.managed_by_team_id AS vehicle_team_id,
+         CASE WHEN v.photo_path IS NOT NULL THEN '/api/vehicles/' || v.id || '/photo?v=' || v.photo_path END AS vehicle_photo_url,
          d.logger_id, l.name AS logger_name, l.owner_user_id AS logger_owner_id, d.uploaded_by, d.created_at
     FROM drives d
     JOIN drive_types dt ON dt.key = d.drive_type_key
