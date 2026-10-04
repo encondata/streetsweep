@@ -6,7 +6,9 @@ x-app-env: &app-env
   DATABASE_URL: postgres://streetsweep:${POSTGRES_PASSWORD:-streetsweep}@db:5432/streetsweep
   TIMEZONE: ${TIMEZONE:-America/Chicago}
   # Only the worker talks to these. The api never calls out.
-  VALHALLA_URL: ${VALHALLA_URL:-https://valhalla.hackspacelabs.com}
+  # Drive matching. The private Valhalla below; https://valhalla.streetsweep.net is the
+  # same thing behind the reverse proxy for anything outside this compose project.
+  VALHALLA_URL: ${VALHALLA_URL:-http://valhalla:8002}
   OVERPASS_URL: ${OVERPASS_URL:-}
   # Empty = Texas (https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf).
   OSM_EXTRACT_URL: ${OSM_EXTRACT_URL:-}
@@ -94,19 +96,28 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # Optional private Valhalla: `docker compose --profile valhalla up -d`, then set
-  # VALHALLA_URL=http://valhalla:8002. First start builds routing tiles (an hour or more).
+  # Private Valhalla for matching drives to streets. It builds its routing tiles from the
+  # .osm.pbf in its folder: on first start, copy (or hard-link) the worker's download,
+  #   ln $DATA_DIR/files/osm/texas.osm.pbf $DATA_DIR/valhalla/texas.osm.pbf
+  # or set VALHALLA_PBF_URL to have it download one. The first build takes an hour or so;
+  # drives wait in the queue until it answers. Port 8002 for the reverse proxy
+  # (valhalla.streetsweep.net).
   valhalla:
-    profiles: ["valhalla"]
     image: ghcr.io/valhalla/valhalla-scripted:latest
     container_name: streetsweep2-valhalla
+    # A ceiling, so a hungry build stops this container rather than the whole Docker VM
+    # (which took every container down with it once). Raise VALHALLA_MEMORY if it's killed.
+    mem_limit: ${VALHALLA_MEMORY:-4g}
+    ports:
+      - "${VALHALLA_BIND_ADDRESS:-127.0.0.1}:${VALHALLA_PORT:-8002}:8002"
     environment:
-      tile_urls: ${VALHALLA_PBF_URL:-https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf}
+      tile_urls: ${VALHALLA_PBF_URL:-}
       use_tiles_ignore_pbf: "True"
       build_elevation: "False"
       build_admins: "False"
       build_time_zones: "False"
-      server_threads: ${VALHALLA_THREADS:-4}
+      # Two threads keeps the first build (and its memory) within a laptop's Docker VM.
+      server_threads: ${VALHALLA_THREADS:-2}
     volumes:
       - ${DATA_DIR:-${HOME}/streetsweep-v2-data}/valhalla:/custom_files
     restart: unless-stopped

@@ -29,6 +29,21 @@ const AREA_FIELDS = `
   ARRAY[ST_XMin(a.geom), ST_YMin(a.geom), ST_XMax(a.geom), ST_YMax(a.geom)] AS bbox`;
 const AREA_GEOM = `ST_AsGeoJSON(ST_SimplifyPreserveTopology(a.geom, 0.0001), 6)::json AS geometry`;
 
+/**
+ * How much of an area a team has swept: length driven or marked complete, out of the
+ * length not marked excluded. Computed live from the area's street list.
+ */
+const PROGRESS = (area: string, team: string) => `
+  SELECT coalesce(sum(s.inside_m) FILTER (WHERE mk.kind IS DISTINCT FROM 'excluded'), 0)::float AS total_m,
+         coalesce(sum(s.inside_m) FILTER (WHERE mk.kind IS DISTINCT FROM 'excluded'
+                                            AND (c.segment_id IS NOT NULL OR mk.kind = 'complete')), 0)::float AS driven_m,
+         count(*) FILTER (WHERE mk.kind IS DISTINCT FROM 'excluded')::int AS total_segments,
+         count(*) FILTER (WHERE mk.kind IS DISTINCT FROM 'excluded' AND (c.segment_id IS NOT NULL OR mk.kind = 'complete'))::int AS driven_segments
+    FROM area_segments s
+    LEFT JOIN team_coverage c ON c.team_id = ${team} AND c.segment_id = s.segment_id
+    LEFT JOIN segment_marks mk ON mk.team_id = ${team} AND mk.segment_id = s.segment_id
+   WHERE s.area_id = ${area}.id AND ${area}.build_status = 'built'`;
+
 async function queueBuild(areaId: string) {
   await query(`UPDATE areas SET build_status = 'queued', build_error = NULL WHERE id = $1 AND build_status <> 'building'`, [areaId]);
   await sendJob("area-build", { areaId }, { singletonKey: areaId });
@@ -105,8 +120,9 @@ export default async function areaRoutes(app: FastifyInstance) {
     const team = await loadTeam(req.params.id);
     const role = await requireTeamMember(team.id, me);
     const { rows } = await query(
-      `SELECT ${AREA_FIELDS}, ${AREA_GEOM}, (a.team_id IS NULL) AS followed
+      `SELECT ${AREA_FIELDS}, ${AREA_GEOM}, (a.team_id IS NULL) AS followed, p.*
          FROM areas a
+         LEFT JOIN LATERAL (${PROGRESS("a", "$1")}) p ON true
         WHERE a.deleted_at IS NULL
           AND (a.team_id = $1 OR a.id IN (SELECT area_id FROM team_areas WHERE team_id = $1))
         ORDER BY a.source = 'drawn' DESC, lower(a.name)`,

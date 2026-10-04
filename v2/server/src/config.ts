@@ -8,7 +8,7 @@ export const config = {
   databaseUrl: env.DATABASE_URL ?? "postgres://streetsweep:streetsweep@localhost:5432/streetsweep",
   timezone: env.TIMEZONE ?? "America/Chicago",
   dataDir: env.DATA_DIR ?? "/data",
-  valhallaUrl: env.VALHALLA_URL ?? "",
+  valhallaUrl: env.VALHALLA_URL ?? "http://valhalla:8002",
   overpassUrl: env.OVERPASS_URL ?? "",
   // The region the server imports streets and boundaries for (a Geofabrik extract).
   osmExtractUrl: env.OSM_EXTRACT_URL || "https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf",

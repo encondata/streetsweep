@@ -9,6 +9,7 @@ import { badRequest, conflict, forbidden, notFound } from "../http.js";
 import { isAdminRole, loadTeam, ownerCount, requireTeamAdmin, roleIn, type Role } from "../teams.js";
 import { avatarUrl } from "./account.js";
 import { endAssignmentsInTeam } from "../fleet.js";
+import { sendJob } from "../jobs.js";
 
 const teamName = { type: "string", minLength: 1, maxLength: 80 } as const;
 const message = { type: "string", maxLength: 500 } as const;
@@ -337,6 +338,8 @@ export default async function teamRoutes(app: FastifyInstance) {
       );
       await audit(pool, { userId: me.id, teamId: team.id, action: "team.drive_type_toggled", entity: "drive_type",
         entityId: req.params.key, data: { counts: req.body.counts } });
+      // Past drives of that type now count (or stop counting): recount the team.
+      await sendJob("coverage-rebuild", { teamId: team.id }, { singletonKey: team.id });
       return detail(team.id, me);
     },
   );

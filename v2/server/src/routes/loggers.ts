@@ -256,8 +256,7 @@ export default async function loggerRoutes(app: FastifyInstance) {
       default_drive_type: d.default_drive_type_key,
       vehicle: d.installed ? { id: d.installed.vehicle_id, name: d.installed.vehicle_name } : null,
       check_in_seconds: 3600,
-      // Drive uploads arrive in stage 4; until then the logger keeps its points.
-      upload: null,
+      upload: { url: "/api/logger/batches", max_points: 20000, format: "json-v1" },
     };
   });
 }

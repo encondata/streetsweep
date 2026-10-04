@@ -89,6 +89,13 @@ export async function finish(extraSql = []) {
   const db = new pg.Client({ connectionString: process.env.DATABASE_URL });
   await db.connect();
   const like = `%-${run}@test.local`;
+  // Drives first: they outlive their uploader (user ids go NULL), so they'd be left behind.
+  await db.query(
+    `DELETE FROM drives WHERE uploaded_by IN (SELECT id FROM users WHERE email LIKE $1)
+        OR user_id IN (SELECT id FROM users WHERE email LIKE $1)
+        OR logger_id IN (SELECT l.id FROM loggers l JOIN users u ON u.id = l.owner_user_id WHERE u.email LIKE $1)`,
+    [like],
+  ).catch(() => {});
   await db.query(`DELETE FROM teams WHERE created_by IN (SELECT id FROM users WHERE email LIKE $1)`, [like]);
   await db.query(`DELETE FROM audit_log WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)`, [like]);
   await db.query(`DELETE FROM users WHERE email LIKE $1`, [like]);

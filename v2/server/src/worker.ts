@@ -5,11 +5,17 @@ import { config } from "./config.js";
 import { pool } from "./db.js";
 import { regionOf, runImport } from "./osm/import.js";
 import { areasInUse, buildArea, importBoundaries } from "./osm/areas.js";
+import { matchDrive, ValhallaDown } from "./drives/match.js";
+import { assembleLogger, loggersWithOpenPoints } from "./drives/assemble.js";
+import { rebuildTeam } from "./drives/coverage.js";
 
 const boss = new PgBoss({ connectionString: config.databaseUrl });
 boss.on("error", (err) => console.error("pg-boss:", err));
 
-export const QUEUES = { ping: "ping", osmImport: "osm-import", areaBuild: "area-build" } as const;
+export const QUEUES = {
+  ping: "ping", osmImport: "osm-import", areaBuild: "area-build",
+  driveMatch: "drive-match", loggerAssemble: "logger-assemble", loggerSweep: "logger-sweep", coverageRebuild: "coverage-rebuild",
+} as const;
 type ImportJob = { force?: boolean; requestedBy?: string | null };
 
 async function osmImport(data: ImportJob) {
@@ -74,6 +80,45 @@ async function main() {
     await buildArea(job.data.areaId);
     console.log(`area-build ${job.data.areaId}: ${Date.now() - t0} ms`);
   });
+  // Matching drives. While Valhalla is down (or still building its tiles) drives wait and
+  // retry with backoff; anything else is a real failure and is recorded on the drive.
+  await boss.createQueue(QUEUES.driveMatch, { expireInSeconds: 1800, retryLimit: 60, retryDelay: 60, retryBackoff: true, retryDelayMax: 1800 });
+  await boss.work<{ driveId: string }>(QUEUES.driveMatch, { localConcurrency: 2 }, async ([job]) => {
+    const { driveId } = job.data;
+    try {
+      const r = await matchDrive(driveId);
+      console.log(`drive-match ${driveId}: ${r.segments} segments (${r.method})`);
+    } catch (err) {
+      if (err instanceof ValhallaDown) {
+        await pool.query(`UPDATE drives SET status = 'received', match_error = $2 WHERE id = $1`, [driveId, `Waiting: ${err.message}`]);
+        throw err;
+      }
+      console.error(`drive-match ${driveId} failed:`, err);
+      await pool.query(`UPDATE drives SET status = 'failed', match_error = $2 WHERE id = $1`, [driveId, String((err as Error).message).slice(0, 500)]);
+    }
+  });
+
+  // Loggers: cut their points into drives after each batch, and sweep for quiet ones.
+  await boss.createQueue(QUEUES.loggerAssemble, { expireInSeconds: 600, retryLimit: 3, retryDelay: 30 });
+  await boss.work<{ loggerId: string }>(QUEUES.loggerAssemble, async ([job]) => {
+    const made = await assembleLogger(job.data.loggerId);
+    for (const driveId of made) await boss.send(QUEUES.driveMatch, { driveId });
+    if (made.length) console.log(`logger-assemble ${job.data.loggerId}: ${made.length} drive(s)`);
+  });
+  await boss.createQueue(QUEUES.loggerSweep, { policy: "singleton", expireInSeconds: 300 });
+  await boss.work(QUEUES.loggerSweep, async () => {
+    for (const loggerId of await loggersWithOpenPoints()) await boss.send(QUEUES.loggerAssemble, { loggerId }, { singletonKey: loggerId });
+  });
+  await boss.schedule(QUEUES.loggerSweep, "*/5 * * * *", {});
+
+  // Recounting a team (drive edited or deleted, a drive-type toggle changed).
+  await boss.createQueue(QUEUES.coverageRebuild, { expireInSeconds: 1800, retryLimit: 2 });
+  await boss.work<{ teamId: string }>(QUEUES.coverageRebuild, async ([job]) => {
+    const t0 = Date.now();
+    await rebuildTeam(job.data.teamId);
+    console.log(`coverage-rebuild ${job.data.teamId}: ${Date.now() - t0} ms`);
+  });
+
   // Geofabrik refreshes daily; monthly is plenty for streets (3rd of the month, 04:00).
   await boss.schedule(QUEUES.osmImport, "0 4 3 * *", {}, { tz: config.timezone });
 
