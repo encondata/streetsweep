@@ -149,9 +149,20 @@ fun SessionsScreen(
     }
 }
 
+/** Where a drive is with the server, which matches it and counts it for your teams. */
+private fun serverLine(s: TrackSession): String = when {
+    s.isOpen -> "recording"
+    s.uploadedAt == null -> "waiting to upload"
+    s.serverStatus == "matched" -> "matched"
+    s.serverStatus == "failed" -> "server couldn't match it"
+    s.serverStatus == "too_short" -> "too short to count"
+    else -> "matching on the server"
+}
+
 private fun summaryLine(s: TrackSession): String {
-    val snapped = if (s.snappedRawCount >= s.pointCount && s.pointCount >= 2) " · matched" else ""
-    val fresh = if (s.newSegments > 0) " · +${Geo.formatDistance(s.newMeters)} new" else ""
+    val snapped = " · " + serverLine(s)
+    // v1 credited new streets on the phone; v2 drives are counted by the server.
+    val fresh = if (s.newSegments > 0 && s.driveTypeKey == null) " · +${Geo.formatDistance(s.newMeters)} new" else ""
     // Time paused is not time driving, so it does not appear here.
     val held = if (s.pausedMs > 60_000) " · ${Format.duration(s.pausedMs)} paused" else ""
     return "${Geo.formatDistance(s.distanceMeters)} · ${s.pointCount} points · " +
@@ -212,14 +223,18 @@ fun SessionDetailScreen(
                         )
                     }
                     Text(
-                        if (snapped.size >= 2) "Road-matched track: ${snapped.size} points" else "Not yet matched to roads",
+                        when (serverLine(s)) {
+                            "matched" -> "Matched by the server: it counts for your teams that count this kind of drive."
+                            "waiting to upload" -> "Waiting to upload. The streets shown green are the phone's own guess until the server matches it."
+                            else -> "Server: ${serverLine(s)}."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Button(onClick = viewModel::snapNow, enabled = !snapping && raw.size >= 2) {
-                            Text(if (s.snappedRawCount < s.pointCount) "Match to roads" else "Re-check matching")
+                            Text(if (s.uploadedAt == null) "Upload now" else "Check again")
                         }
                         if (snapping) {
                             Spacer(Modifier.width(12.dp))

@@ -19,9 +19,9 @@ object MapTiles {
     @Volatile var token: String? = null
         private set
 
-    fun update(portalUrl: String?, portalToken: String?) {
-        val base = com.example.streetsweep.data.sync.PortalClient.normalise(portalUrl)
-        val t = portalToken?.takeIf { it.isNotBlank() }
+    fun update(serverUrl: String?, serverToken: String?) {
+        val base = com.example.streetsweep.data.server.ServerClient.normalise(serverUrl)
+        val t = serverToken?.takeIf { it.isNotBlank() }
         serverBase = if (base != null && t != null) base else null
         token = if (base != null) t else null
         // osmdroid sends these with every tile request it makes.
@@ -31,17 +31,17 @@ object MapTiles {
 
     /** The standard map's tile at z/x/y, from the server when there is one. */
     fun osmUrl(z: Int, x: Int, y: Int): String =
-        serverBase?.let { "$it/tiles/osm/$z/$x/$y.png" } ?: "https://tile.openstreetmap.org/$z/$x/$y.png"
+        serverBase?.let { "$it/api/tiles/osm/$z/$x/$y" } ?: "https://tile.openstreetmap.org/$z/$x/$y.png"
 
     /** The tile source for the phone's map. A different name keeps the two caches apart. */
     fun source(): ITileSource {
         val base = serverBase ?: return TileSourceFactory.MAPNIK
         return object : OnlineTileSourceBase(
-            "StreetSweepServer", 0, 19, 256, ".png", arrayOf("$base/tiles/osm/"),
+            "StreetSweepServer2", 0, 19, 256, ".png", arrayOf("$base/api/tiles/osm/"),
             "© OpenStreetMap contributors",
         ) {
             override fun getTileURLString(index: Long): String =
-                "$baseUrl${MapTileIndex.getZoom(index)}/${MapTileIndex.getX(index)}/${MapTileIndex.getY(index)}.png"
+                "$baseUrl${MapTileIndex.getZoom(index)}/${MapTileIndex.getX(index)}/${MapTileIndex.getY(index)}"
         }
     }
 }

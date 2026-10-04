@@ -246,8 +246,8 @@ fun SignInScreen(
                         modifier = Modifier.fillMaxWidth(),
                     )
 
-                    // A phone stays signed in until it signs out; accounts and passwords are
-                    // made and reset by an administrator on the web.
+                    // A phone stays signed in until it signs out. Accounts are made, and
+                    // passwords reset, on the web (sign-up there is open).
                     Spacer(Modifier.height(16.dp))
                     Button(
                         onClick = { focus.clearFocus(); onSignIn(email, password) },
@@ -290,7 +290,7 @@ fun SignInScreen(
 
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        "Need an account, or a new password? Ask your administrator.",
+                        "No account yet, or forgot your password? Create one or reset it on the web, at ${serverLabel.removePrefix("https://").removePrefix("http://")}.",
                         color = InkSoft,
                         fontSize = 12.5.sp,
                         textAlign = TextAlign.Center,

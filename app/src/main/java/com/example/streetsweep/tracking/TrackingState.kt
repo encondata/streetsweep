@@ -33,6 +33,8 @@ sealed interface TrackingStatus {
          * rather than showing the last position as if it were current.
          */
         val gpsQuietSince: Long? = null,
+        /** What kind of drive, in which vehicle, as words: "Personal · Ann's car". */
+        val driveLabel: String? = null,
     ) : TrackingStatus {
         val isPaused: Boolean get() = pausedAt != null
     }

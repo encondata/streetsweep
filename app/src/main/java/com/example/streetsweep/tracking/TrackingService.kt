@@ -27,9 +27,7 @@ import com.example.streetsweep.tracking.auto.CarConnectionState
 import com.example.streetsweep.tracking.auto.VehicleState
 import com.example.streetsweep.widget.CoverageWidget
 import com.example.streetsweep.data.CoverageRepository
-import com.example.streetsweep.data.osm.MatchRetryWorker
-import com.example.streetsweep.data.osm.RoadMatcher
-import com.example.streetsweep.data.sync.PortalPushWorker
+import com.example.streetsweep.data.server.SyncWorker
 import com.google.android.gms.location.Granularity
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -101,11 +99,13 @@ class TrackingService : LifecycleService() {
         Notifications.cancelStartPrompt(this)
         starting = true
         lifecycleScope.launch {
-            val s = container.trackRepository.startSession(trigger)
+            val (type, vehicle) = com.example.streetsweep.data.server.DriveDefaults.pick(container.database, container.settings, trigger)
+            val s = container.trackRepository.startSession(trigger, driveTypeKey = type, vehicleId = vehicle)
             session = s
             lastStored = null
             areaPromptShown = false
-            TrackingStateHolder.set(TrackingStatus.Recording(sessionId = s.id, trigger = trigger, startedAt = s.startedAt))
+            val label = com.example.streetsweep.data.server.DriveDefaults.label(container.database, type, vehicle)
+            TrackingStateHolder.set(TrackingStatus.Recording(sessionId = s.id, trigger = trigger, startedAt = s.startedAt, driveLabel = label))
             starting = false
             startLocationUpdates()
             startCarConnectionObserver()
@@ -236,14 +236,10 @@ class TrackingService : LifecycleService() {
         session = null
         if (s != null) {
             container.trackRepository.endSession(s.id)
-            val settings = container.settings.current()
             val app = applicationContext
             container.applicationScope.launch {
-                if (settings.snapToRoadsEnabled) {
-                    val result = container.roadMatcher.matchSession(s.id)
-                    // Usually a lost signal; try again once there is a network.
-                    if (result is RoadMatcher.Result.Failed) MatchRetryWorker.enqueueNow(app)
-                }
+                // The last stretch into the preview; the server matches it properly once it's up.
+                runCatching { container.provisional.update(s.id) }
                 summariseDrive(app, s.id)
             }
             Log.i(TAG, "Session ${s.id} ended")
@@ -258,10 +254,11 @@ class TrackingService : LifecycleService() {
         val session = container.trackRepository.getSession(sessionId) ?: return
         if (session.pointCount == 0) return
         val title = "Drive recorded · ${Geo.formatDistance(session.distanceMeters)}"
-        val added = if (session.newSegments > 0) {
-            "Added ${Geo.formatDistance(session.newMeters)} of streets you had not driven before."
+        val covered = container.database.serverDao().provisionalCount(sessionId)
+        val added = if (covered > 0) {
+            "About $covered street segments covered; the server confirms once it's uploaded."
         } else {
-            "No new streets this time."
+            "No streets matched on the phone; the server has the final word once it's uploaded."
         }
         val areaLine = container.trackRepository.getPoints(sessionId).lastOrNull()?.let { last ->
             val areas = container.coverageRepository.observeAreasWithStats().first()
@@ -271,8 +268,8 @@ class TrackingService : LifecycleService() {
         }
         Notifications.showDriveSummary(context, title, added + (areaLine ?: ""))
         CoverageWidget.refresh(context)
-        // The web is the record, so every drive goes up as soon as there is a network.
-        PortalPushWorker.enqueue(context)
+        // The server is the record, so every drive goes up as soon as there is a network.
+        SyncWorker.enqueue(context)
     }
 
     // ---- automatic stop with grace period ---------------------------------------------------
@@ -581,9 +578,7 @@ class TrackingService : LifecycleService() {
     private suspend fun maybeSnapIncrementally(sessionId: Long) {
         val count = (TrackingStateHolder.status.value as? TrackingStatus.Recording)?.pointCount ?: return
         if (count % SNAP_EVERY_POINTS != 0) return
-        val settings = container.settings.current()
-        if (!settings.snapToRoadsEnabled) return
-        container.applicationScope.launch { container.roadMatcher.matchSession(sessionId) }
+        container.applicationScope.launch { runCatching { container.provisional.update(sessionId) } }
     }
 
     // ---- foreground plumbing ----------------------------------------------------------------
@@ -641,7 +636,7 @@ class TrackingService : LifecycleService() {
         const val GPS_ALERT_MS = 2 * 60_000L
 
         /** Match the newest points to roads every N stored points while driving. */
-        const val SNAP_EVERY_POINTS = 20
+        const val SNAP_EVERY_POINTS = 10
 
         /** Fixes timestamped more than this before the session started are treated as stale cache. */
         const val STALE_FIX_TOLERANCE_MS = 2_000L

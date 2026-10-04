@@ -5,7 +5,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Log
 import android.util.LruCache
-import com.example.streetsweep.data.osm.ValhallaClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -74,7 +73,7 @@ class OsmTiles(
         return try {
             conn.connectTimeout = 10_000
             conn.readTimeout = 15_000
-            conn.setRequestProperty("User-Agent", ValhallaClient.USER_AGENT)
+            conn.setRequestProperty("User-Agent", com.example.streetsweep.data.server.ServerClient.USER_AGENT)
             com.example.streetsweep.ui.map.MapTiles.token
                 ?.takeIf { com.example.streetsweep.ui.map.MapTiles.serverBase != null }
                 ?.let { conn.setRequestProperty("Authorization", "Bearer $it") }

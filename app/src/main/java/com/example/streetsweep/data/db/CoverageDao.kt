@@ -221,8 +221,9 @@ interface CoverageDao {
     @Query(
         """
         SELECT COUNT(*) AS total,
-               SUM(w.lengthMeters) AS meters,
-               SUM(MIN(w.lengthMeters, (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END))) AS drivenMeters,
+               SUM(COALESCE(aw.insideMeters, w.lengthMeters)) AS meters,
+               SUM(MIN(w.lengthMeters, (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END))
+                   * COALESCE(aw.insideMeters, w.lengthMeters) / MAX(w.lengthMeters, 0.01)) AS drivenMeters,
                SUM(CASE WHEN (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END) >= w.minDoneFraction * w.lengthMeters THEN 1 ELSE 0 END) AS done,
                SUM(CASE WHEN (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END) > 0.02 * w.lengthMeters AND (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END) < w.minDoneFraction * w.lengthMeters THEN 1 ELSE 0 END) AS partial,
                (SELECT COUNT(*) FROM area_ways aw2 JOIN street_exclusions x2 ON x2.wayId = aw2.wayId AND x2.active = 1 WHERE aw2.areaId = :areaId) AS excluded
@@ -239,8 +240,9 @@ interface CoverageDao {
     @Query(
         """
         SELECT COUNT(*) AS total,
-               SUM(w.lengthMeters) AS meters,
-               SUM(MIN(w.lengthMeters, (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END))) AS drivenMeters,
+               SUM(COALESCE(aw.insideMeters, w.lengthMeters)) AS meters,
+               SUM(MIN(w.lengthMeters, (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END))
+                   * COALESCE(aw.insideMeters, w.lengthMeters) / MAX(w.lengthMeters, 0.01)) AS drivenMeters,
                SUM(CASE WHEN (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END) >= w.minDoneFraction * w.lengthMeters THEN 1 ELSE 0 END) AS done,
                SUM(CASE WHEN (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END) > 0.02 * w.lengthMeters AND (CASE WHEN c.wayId IS NULL THEN COALESCE(d.m, 0) ELSE w.lengthMeters END) < w.minDoneFraction * w.lengthMeters THEN 1 ELSE 0 END) AS partial,
                (SELECT COUNT(*) FROM area_ways aw2 JOIN street_exclusions x2 ON x2.wayId = aw2.wayId AND x2.active = 1 WHERE aw2.areaId = :areaId) AS excluded

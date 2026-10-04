@@ -72,6 +72,33 @@ class HomeViewModel(private val container: AppContainer, private val context: Co
     val settings: StateFlow<TrackingSettings> = container.settings.settings
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TrackingSettings())
 
+    // ---- what kind of drive, in which vehicle ----
+
+    val driveTypes: StateFlow<List<com.example.streetsweep.data.db.DriveTypeEntity>> = container.database.serverDao().observeDriveTypes()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val vehicles: StateFlow<List<com.example.streetsweep.data.db.VehicleEntity>> = container.database.serverDao().observeVehicles()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** The drive being recorded, for its type and vehicle. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val currentDrive: StateFlow<com.example.streetsweep.data.db.TrackSession?> = TrackingStateHolder.status
+        .map { (it as? TrackingStatus.Recording)?.sessionId }
+        .distinctUntilChanged()
+        .flatMapLatest { id -> if (id == null) kotlinx.coroutines.flow.flowOf(null) else container.trackRepository.observeSession(id) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
+     * Changes the drive being recorded. The type becomes the default for the next drive;
+     * the notification picks the new words up at the next fix.
+     */
+    fun setDriveDetails(type: String, vehicleId: String?) = viewModelScope.launch {
+        val id = (TrackingStateHolder.status.value as? TrackingStatus.Recording)?.sessionId ?: return@launch
+        container.trackRepository.setDriveDetails(id, type, vehicleId)
+        container.settings.setLastDriveType(type)
+        val label = com.example.streetsweep.data.server.DriveDefaults.label(container.database, type, vehicleId)
+        TrackingStateHolder.updateRecording { it.copy(driveLabel = label) }
+    }
+
     val carConnected: StateFlow<Boolean> = CarConnection(context).type.asFlow()
         .map { CarConnectionState.isConnectedType(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)

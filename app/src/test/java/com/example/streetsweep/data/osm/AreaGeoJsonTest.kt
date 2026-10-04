@@ -81,7 +81,7 @@ class AreaGeoJsonTest {
     }
 
     @Test
-    fun `each polygon of a multipolygon becomes its own area`() {
+    fun `a multipolygon is one area in several pieces`() {
         val multi = """
             {"type":"FeatureCollection","features":[
               {"type":"Feature","properties":{"kind":"area","name":"Split"},
@@ -89,7 +89,9 @@ class AreaGeoJsonTest {
                  [[[-1,1],[1,1],[1,2],[-1,1]]],
                  [[[5,5],[6,5],[6,6],[5,5]]]]}}]}
         """.trimIndent()
-        assertEquals(2, AreaGeoJson.parse(multi).size)
+        val areas = AreaGeoJson.parse(multi)
+        assertEquals("one area", 1, areas.size)
+        assertEquals("with both pieces", 1, areas.single().morePieces.size)
     }
 
     @Test

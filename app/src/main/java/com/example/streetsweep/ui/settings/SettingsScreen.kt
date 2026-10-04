@@ -47,6 +47,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.streetsweep.tracking.CarAppHealth
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -332,79 +333,68 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
                 supportingContent = { Text("Area outlines and every driven street segment") },
             )
 
-            SectionHeader("Area builder server")
-            UrlField(label = "Server address", value = settings.portalUrl.orEmpty(), onCommit = viewModel::setPortalUrl)
-            // Signing in replaces pasting a token by hand: the server issues this phone one
-            // of its own, so a drive can be attributed to the person who made it. Signing in
-            // is the gate in front of the app, so there is always an account to show here.
-            run {
-                ListItem(
-                    leadingContent = { Icon(Icons.Default.AccountCircle, contentDescription = null) },
-                    headlineContent = {
-                        Text(settings.portalUserName ?: settings.portalUserEmail ?: "Signed in")
-                    },
-                    supportingContent = {
-                        Text(
-                            when {
-                                settings.portalUserName != null && settings.portalUserEmail != null ->
-                                    settings.portalUserEmail!!
-                                // A token typed in by hand, from before accounts existed.
-                                else -> "Signed in with a token"
-                            },
-                        )
-                    },
-                    trailingContent = {
-                        TextButton(onClick = viewModel::signOutOfPortal) { Text("Sign out") }
-                    },
+            SectionHeader("StreetSweep server")
+            // Signing in is the gate in front of the app, so there is always an account here.
+            ListItem(
+                leadingContent = { Icon(Icons.Default.AccountCircle, contentDescription = null) },
+                headlineContent = { Text(settings.serverUserName ?: settings.serverUserEmail ?: "Signed in") },
+                supportingContent = { settings.serverUserEmail?.let { Text(it) } },
+                trailingContent = { TextButton(onClick = viewModel::signOut) { Text("Sign out") } },
+            )
+            val teams by viewModel.teams.collectAsStateWithLifecycle()
+            val shown = teams.firstOrNull { it.id == settings.coverageTeamId } ?: teams.firstOrNull { it.isPersonal }
+            if (teams.size > 1) {
+                PickerRow(
+                    title = "Coverage shown",
+                    current = shown?.let { if (it.isPersonal) "Just me" else it.name } ?: "Just me",
+                    detail = "Whose streets the map, figures and guidance show. Drives count for every team they qualify for either way.",
+                    options = teams.map { it.id to if (it.isPersonal) "Just me" else it.name },
+                    onPick = { id -> id?.let(viewModel::showTeam) },
                 )
             }
-            // Syncing sends this phone's drives, places and marks, and takes back the web's
-            // areas, figures and deletions: there is nothing to fetch separately.
-            val serverReady = !settings.portalUrl.isNullOrBlank()
+            settings.bluetoothTriggerAddress?.let {
+                val vehicles by viewModel.vehicles.collectAsStateWithLifecycle()
+                if (vehicles.isNotEmpty()) {
+                    val linked = settings.bluetoothVehicles[it]
+                    PickerRow(
+                        title = "${settings.bluetoothTriggerName ?: "Your car"}'s Bluetooth is",
+                        current = vehicles.firstOrNull { v -> v.id == linked }?.name ?: "Not linked to a vehicle",
+                        detail = "Drives it starts are logged in that vehicle.",
+                        options = listOf<Pair<String?, String>>(null to "Not linked to a vehicle") + vehicles.map { v -> v.id to v.name },
+                        onPick = viewModel::linkBluetoothVehicle,
+                    )
+                }
+            }
+            val waiting by viewModel.pendingUploads.collectAsStateWithLifecycle()
             Column(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Button(
-                    onClick = { viewModel.pushToPortal(false) },
-                    enabled = serverReady,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
+                Button(onClick = viewModel::syncNow, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Default.Sync, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text("Sync now")
                 }
-                OutlinedButton(
-                    onClick = viewModel::testPortal,
-                    enabled = serverReady,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Test the connection") }
-            }
-            if (settings.portalUrl != TrackingSettings.DEFAULT_PORTAL_URL) {
-                ListItem(
-                    modifier = Modifier.clickable { viewModel.useHostedPortal() },
-                    headlineContent = { Text("Use the hosted server") },
-                    supportingContent = { Text(TrackingSettings.DEFAULT_PORTAL_URL) },
-                )
             }
             Text(
-                "Syncs by itself when the app opens and after every drive.",
+                listOfNotNull(
+                    "Syncs by itself when the app opens, after every drive, and every few hours.",
+                    if (waiting > 0) "$waiting ${if (waiting == 1) "drive is" else "drives are"} waiting to go up." else null,
+                    if (settings.lastSyncAt > 0) "Last synced ${Format.dateTime(settings.lastSyncAt)}." else "Not synced yet.",
+                ).joinToString(" "),
                 Modifier.padding(horizontal = 16.dp),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            ListItem(
-                modifier = Modifier.clickable(enabled = !settings.portalUrl.isNullOrBlank()) { viewModel.pushToPortal(true) },
-                headlineContent = { Text("Send everything again") },
-                supportingContent = { Text("Re-sends every drive, place and street segment this phone holds. Use after restoring a backup.") },
-            )
-            Text(
-                if (settings.lastPortalPushAt > 0) "Last synced ${Format.dateTime(settings.lastPortalPushAt)}."
-                else "Nothing sent yet. Give the server's address, then sign in.",
-                Modifier.padding(16.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            UrlField(label = "Server address", value = settings.serverUrl, onCommit = viewModel::setServerUrl)
+            if (settings.serverUrl != TrackingSettings.DEFAULT_SERVER_URL) {
+                ListItem(
+                    modifier = Modifier.clickable { viewModel.useHostedServer() },
+                    headlineContent = { Text("Use the hosted server") },
+                    supportingContent = { Text(TrackingSettings.DEFAULT_SERVER_URL) },
+                )
+            }
+            Spacer(Modifier.height(8.dp))
 
             SectionHeader("Permissions")
             PermissionRow(
@@ -445,15 +435,6 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
                 onClick = { context.startActivity(Permissions.appSettingsIntent(context)) },
                 modifier = Modifier.padding(horizontal = 8.dp),
             ) { Text("Open app settings") }
-
-            // Maps, street data and matching all come through the server now, which holds
-            // the addresses of anything further afield; the phone has none of its own to set.
-            SectionHeader("Matching")
-            ListItem(
-                headlineContent = { Text("Match drives to streets") },
-                supportingContent = { Text("Snaps each drive to OpenStreetMap roads, through the server, so streets count as covered") },
-                trailingContent = { Switch(checked = settings.snapToRoadsEnabled, onCheckedChange = viewModel::setSnapToRoads) },
-            )
 
             SectionHeader("How recording works")
             Text(
@@ -519,6 +500,38 @@ private fun UrlField(label: String, value: String, onCommit: (String) -> Unit) {
             if (text.trim() != value) TextButton(onClick = { onCommit(text) }) { Text("Save") }
         },
     )
+}
+
+/** A setting with a few choices: shows the current one, and a list to pick from. */
+@Composable
+private fun <T> PickerRow(title: String, current: String, detail: String?, options: List<Pair<T, String>>, onPick: (T) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    ListItem(
+        modifier = Modifier.clickable { open = true },
+        headlineContent = { Text(title) },
+        supportingContent = { Column { Text(current, color = MaterialTheme.colorScheme.primary); detail?.let { Text(it) } } },
+    )
+    if (open) {
+        AlertDialog(
+            onDismissRequest = { open = false },
+            title = { Text(title) },
+            text = {
+                Column {
+                    options.forEach { (value, label) ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { open = false; onPick(value) }.padding(vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = label == current, onClick = { open = false; onPick(value) })
+                            Spacer(Modifier.width(8.dp))
+                            Text(label)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
+        )
+    }
 }
 
 @Composable

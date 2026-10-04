@@ -50,6 +50,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -57,6 +58,7 @@ import com.example.streetsweep.data.PlacePhotos
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -92,6 +94,31 @@ class PlacesViewModel(
         PlacePhotos.delete(context, id)
         container.trackRepository.setPoiPhoto(id, null)
     }
+
+    /** Your shared teams, to share a place with. */
+    val teams: StateFlow<List<com.example.streetsweep.data.db.TeamEntity>> = container.database.serverDao().observeTeams()
+        .map { all -> all.filter { !it.isPersonal } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun setTeams(id: Long, teamIds: List<String>) = viewModelScope.launch {
+        container.trackRepository.setPoiTeams(id, teamIds)
+        com.example.streetsweep.data.server.SyncWorker.enqueue(context)
+    }
+
+    /**
+     * The first photo the server holds for a place (added on the web, or by whoever shared
+     * it), fetched once and kept in the app's cache.
+     */
+    suspend fun serverPhoto(p: Poi): android.graphics.Bitmap? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val photoId = p.serverPhotos.split(',').firstOrNull { it.isNotBlank() } ?: return@withContext null
+        val file = java.io.File(context.cacheDir, "place-photos/$photoId.jpg")
+        if (!file.exists()) {
+            val bytes = runCatching { container.server.placePhoto(p.uuid, photoId) }.getOrNull() ?: return@withContext null
+            file.parentFile?.mkdirs()
+            file.writeBytes(bytes)
+        }
+        runCatching { android.graphics.BitmapFactory.decodeFile(file.path, android.graphics.BitmapFactory.Options().apply { inSampleSize = 4 }) }.getOrNull()
+    }
 }
 
 @Composable
@@ -101,6 +128,8 @@ fun PlacesScreen(
     viewModel: PlacesViewModel = containerViewModel { c, ctx -> PlacesViewModel(c, ctx) },
 ) {
     val pois by viewModel.pois.collectAsStateWithLifecycle()
+    val teams by viewModel.teams.collectAsStateWithLifecycle()
+    var sharing by remember { mutableStateOf<Poi?>(null) }
     var editing by remember { mutableStateOf<Poi?>(null) }
     var pendingDelete by remember { mutableStateOf<Poi?>(null) }
     var awaitingPhotoFor by remember { mutableStateOf<Long?>(null) }
@@ -137,17 +166,23 @@ fun PlacesScreen(
                         MapFocus.request(Bounds(p.latitude - d, p.longitude - d, p.latitude + d, p.longitude + d))
                         onShowOnMap()
                     },
-                    leadingContent = { PlaceThumb(p) },
+                    leadingContent = { PlaceThumb(p, viewModel::serverPhoto) },
                     headlineContent = { Text(p.name ?: p.note ?: "Marked spot") },
                     supportingContent = {
+                        val shared = p.teamIds.split(',').filter { it.isNotBlank() }
                         Text(
                             Format.dateTime(p.timestamp) + " · " +
-                                String.format(Locale.US, "%.5f, %.5f", p.latitude, p.longitude) +
-                                (if (p.accuracyMeters > 0) String.format(Locale.US, " · ±%.0f m", p.accuracyMeters) else ""),
+                                when {
+                                    !p.mine -> "Shared by ${p.ownerName ?: "a teammate"}"
+                                    shared.isNotEmpty() -> "Shared with " + shared.mapNotNull { id -> teams.firstOrNull { it.id == id }?.name }.ifEmpty { listOf("a team") }.joinToString(", ")
+                                    else -> "Only you"
+                                },
                         )
                     },
                     trailingContent = {
-                        androidx.compose.foundation.layout.Row {
+                        // Someone else's place is theirs to change; here it can only be looked at.
+                        if (p.mine) androidx.compose.foundation.layout.Row {
+                            if (teams.isNotEmpty()) IconButton(onClick = { sharing = p }) { Icon(Icons.Default.Share, contentDescription = "Share with a team") }
                             IconButton(onClick = {
                                 awaitingPhotoFor = p.id
                                 takePhoto.launch(viewModel.photoTarget(p.id))
@@ -197,6 +232,30 @@ fun PlacesScreen(
             dismissButton = { TextButton(onClick = { editing = null }) { Text("Cancel") } },
         )
     }
+    sharing?.let { p ->
+        var chosen by remember(p.id) { mutableStateOf(p.teamIds.split(',').filter { it.isNotBlank() }.toSet()) }
+        AlertDialog(
+            onDismissRequest = { sharing = null },
+            title = { Text("Who sees it") },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    Text("Only you, unless you share it. Members of a team you share it with can see it and its photos; only you can change it.",
+                        style = MaterialTheme.typography.bodySmall)
+                    teams.forEach { t ->
+                        androidx.compose.foundation.layout.Row(
+                            Modifier.fillMaxWidth().clickable { chosen = if (t.id in chosen) chosen - t.id else chosen + t.id },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            androidx.compose.material3.Checkbox(checked = t.id in chosen, onCheckedChange = { on -> chosen = if (on) chosen + t.id else chosen - t.id })
+                            Text(t.name)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { viewModel.setTeams(p.id, chosen.toList()); sharing = null }) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { sharing = null }) { Text("Cancel") } },
+        )
+    }
     pendingDelete?.let { p ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
@@ -208,10 +267,18 @@ fun PlacesScreen(
     }
 }
 
-/** The photo, if one was taken here, small enough to sit in a list row. */
+/** The photo, if one was taken here (or is on the server), small enough to sit in a list row. */
 @Composable
-private fun PlaceThumb(p: Poi) {
+private fun PlaceThumb(p: Poi, serverPhoto: suspend (Poi) -> android.graphics.Bitmap?) {
     val path = p.photoPath
+    if (path == null && p.serverPhotos.isNotBlank()) {
+        val fetched by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(null, p.uuid, p.serverPhotos) { value = serverPhoto(p) }
+        fetched?.let {
+            Image(bitmap = it.asImageBitmap(), contentDescription = "Photo of this spot", contentScale = ContentScale.Crop,
+                modifier = Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)))
+            return
+        }
+    }
     if (path == null) {
         Icon(
             Icons.Default.Place,

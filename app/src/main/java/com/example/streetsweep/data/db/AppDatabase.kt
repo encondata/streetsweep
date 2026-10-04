@@ -16,14 +16,17 @@ import com.example.streetsweep.domain.RoadShape
         CoverageArea::class, AreaWay::class, OsmWay::class, StreetChunk::class, DrivenEdge::class,
         Poi::class, StreetExclusion::class, StreetCompletion::class, WayCoverage::class, AreaStatsCache::class,
         PendingDeletion::class,
+        TeamEntity::class, DriveTypeEntity::class, VehicleEntity::class, MarkEntity::class, MarkOp::class,
+        CoverageEntity::class, ProvisionalEntity::class, LegacyMark::class,
     ],
-    version = 16,
+    version = 17,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun trackDao(): TrackDao
     abstract fun coverageDao(): CoverageDao
     abstract fun poiDao(): PoiDao
+    abstract fun serverDao(): ServerDao
 
     companion object {
         /** v5: points of interest. Must match the exported schema in app/schemas/…/5.json exactly. */
@@ -240,11 +243,87 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** A random (v4) uuid, made in SQL for rows that predate ids made on the phone. */
+        private const val NEW_UUID =
+            "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || " +
+                "substr('89ab', 1 + (abs(random()) % 4), 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))"
+
+        /**
+         * v17: the phone moves onto the v2 server, which is the record for streets, areas,
+         * coverage and marks (see v2/docs/APP-API.md).
+         *  - Drives get an id, type, vehicle and upload state. Every drive already here
+         *    starts "not uploaded": that is the one-time move of the history to v2, where
+         *    the server matches it.
+         *  - Places get an id and sharing; all start unsent.
+         *  - v1's streets (whole OSM ways), areas, coverage and figures go: v2 sends its
+         *    own, keyed by its ids, at the first sync.
+         *  - Streets excluded or marked complete wait in legacy_marks (by OSM way) until
+         *    v2's segments arrive, then become marks for the personal team.
+         */
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `sessions` ADD COLUMN `driveUuid` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `sessions` ADD COLUMN `driveTypeKey` TEXT")
+                db.execSQL("ALTER TABLE `sessions` ADD COLUMN `vehicleId` TEXT")
+                db.execSQL("ALTER TABLE `sessions` ADD COLUMN `uploadedAt` INTEGER")
+                db.execSQL("ALTER TABLE `sessions` ADD COLUMN `serverStatus` TEXT")
+                db.execSQL("UPDATE `sessions` SET `driveUuid` = $NEW_UUID")
+
+                db.execSQL("ALTER TABLE `pois` ADD COLUMN `uuid` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `pois` ADD COLUMN `mine` INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE `pois` ADD COLUMN `ownerName` TEXT")
+                db.execSQL("ALTER TABLE `pois` ADD COLUMN `teamIds` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `pois` ADD COLUMN `serverPhotos` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `pois` ADD COLUMN `dirty` INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("UPDATE `pois` SET `uuid` = $NEW_UUID, `photoSyncedAt` = 0")
+
+                for (col in listOf("`version`", "`builtVersion`", "`packageVersion`", "`segmentCount`")) {
+                    db.execSQL("ALTER TABLE `areas` ADD COLUMN $col INTEGER NOT NULL DEFAULT 0")
+                }
+                db.execSQL("ALTER TABLE `areas` ADD COLUMN `serverId` TEXT")
+                db.execSQL("ALTER TABLE `areas` ADD COLUMN `teamIds` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `areas` ADD COLUMN `color` TEXT")
+                db.execSQL("ALTER TABLE `osm_ways` ADD COLUMN `wayId` INTEGER")
+                db.execSQL("ALTER TABLE `area_ways` ADD COLUMN `insideMeters` REAL")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_osm_ways_wayId` ON `osm_ways` (`wayId`)")
+
+                db.execSQL("CREATE TABLE IF NOT EXISTS `legacy_marks` (`wayId` INTEGER NOT NULL, `kind` TEXT NOT NULL, `note` TEXT, PRIMARY KEY(`wayId`))")
+                db.execSQL(
+                    "INSERT OR REPLACE INTO `legacy_marks` (`wayId`, `kind`, `note`) " +
+                        "SELECT `wayId`, 'excluded', COALESCE(`note`, `reason`) FROM `street_exclusions` WHERE `active` = 1",
+                )
+                db.execSQL(
+                    "INSERT OR IGNORE INTO `legacy_marks` (`wayId`, `kind`, `note`) " +
+                        "SELECT `wayId`, 'complete', NULL FROM `street_completions` WHERE `marked` = 1",
+                )
+                for (t in listOf("street_exclusions", "street_completions", "driven_edges", "way_coverage", "area_ways",
+                        "osm_ways", "street_chunks", "area_stats", "areas", "snapped_points", "pending_deletions")) {
+                    db.execSQL("DELETE FROM `$t`")
+                }
+
+                db.execSQL("CREATE TABLE IF NOT EXISTS `teams` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `kind` TEXT NOT NULL, `role` TEXT NOT NULL, `sort` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `drive_types` (`key` TEXT NOT NULL, `label` TEXT NOT NULL, `sort` INTEGER NOT NULL, `teamCounts` TEXT NOT NULL, PRIMARY KEY(`key`))")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `vehicles` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `kind` TEXT NOT NULL, `teamId` TEXT NOT NULL, " +
+                        "`teamName` TEXT NOT NULL, `teamKind` TEXT NOT NULL, `permanent` INTEGER NOT NULL, `checkoutUserId` TEXT, PRIMARY KEY(`id`))",
+                )
+                db.execSQL("CREATE TABLE IF NOT EXISTS `marks` (`teamId` TEXT NOT NULL, `segmentId` INTEGER NOT NULL, `kind` TEXT NOT NULL, `note` TEXT, PRIMARY KEY(`teamId`, `segmentId`))")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `mark_ops` (`teamId` TEXT NOT NULL, `segmentId` INTEGER NOT NULL, `kind` TEXT, `note` TEXT, " +
+                        "`at` INTEGER NOT NULL, PRIMARY KEY(`teamId`, `segmentId`))",
+                )
+                db.execSQL("CREATE TABLE IF NOT EXISTS `coverage` (`teamId` TEXT NOT NULL, `segmentId` INTEGER NOT NULL, `drivenAt` INTEGER NOT NULL, PRIMARY KEY(`teamId`, `segmentId`))")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_coverage_segmentId` ON `coverage` (`segmentId`)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `provisional` (`sessionId` INTEGER NOT NULL, `segmentId` INTEGER NOT NULL, `drivenAt` INTEGER NOT NULL, PRIMARY KEY(`sessionId`, `segmentId`))")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_provisional_segmentId` ON `provisional` (`segmentId`)")
+            }
+        }
+
         /** Hand-written migrations, oldest first. Add one for each version bump. */
         val MIGRATIONS: Array<Migration> =
             arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
                 MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14,
-                MIGRATION_14_15, MIGRATION_15_16)
+                MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17)
 
         fun build(context: Context): AppDatabase =
             // The phone now holds real drives and areas. Every schema change from version 4 on

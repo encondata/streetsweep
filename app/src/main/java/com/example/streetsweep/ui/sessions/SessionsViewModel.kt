@@ -5,7 +5,6 @@ import androidx.lifecycle.viewModelScope
 import com.example.streetsweep.AppContainer
 import com.example.streetsweep.data.db.SessionTotalsRow
 import com.example.streetsweep.data.db.TrackSession
-import com.example.streetsweep.data.osm.RoadMatcher
 import com.example.streetsweep.domain.LatLngPoint
 import com.example.streetsweep.tracking.TrackingStateHolder
 import com.example.streetsweep.tracking.TrackingStatus
@@ -54,12 +53,17 @@ class SessionDetailViewModel(private val container: AppContainer, private val se
         if (_snapping.value) return
         viewModelScope.launch {
             _snapping.value = true
-            _message.value = when (val r = container.roadMatcher.matchSession(sessionId)) {
-                is RoadMatcher.Result.Matched -> "Matched: ${r.newEdges} new segments, ${com.example.streetsweep.domain.Geo.formatDistance(r.newMeters)} of new streets"
-                RoadMatcher.Result.NothingNew -> "Already matched to roads"
-                RoadMatcher.Result.NotEnoughPoints -> "Need at least 2 points to match"
-                is RoadMatcher.Result.Failed -> "Matching failed: ${r.message}"
-            }
+            // The server matches drives; the phone's preview is redone and the drive sent now.
+            _message.value = runCatching {
+                container.provisional.update(sessionId)
+                com.example.streetsweep.data.server.SyncWorker.enqueue(container.context)
+                val s = container.trackRepository.getSession(sessionId)
+                when {
+                    s?.serverStatus == "matched" -> "Matched by the server"
+                    s?.uploadedAt != null -> "Sent; the server is matching it"
+                    else -> "Sending to the server to be matched…"
+                }
+            }.getOrElse { "Couldn't: ${it.message}" }
             _snapping.value = false
         }
     }

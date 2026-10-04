@@ -10,23 +10,6 @@ class CoverageRepositoryTest {
     private val b = LatLngPoint(30.26830, -97.74310)
 
     @Test
-    fun `edge key ignores direction`() {
-        assertEquals(CoverageRepository.edgeKey(1L, a, b), CoverageRepository.edgeKey(1L, b, a))
-    }
-
-    @Test
-    fun `edge key distinguishes ways and end points`() {
-        assertNotEquals(CoverageRepository.edgeKey(1L, a, b), CoverageRepository.edgeKey(2L, a, b))
-        assertNotEquals(CoverageRepository.edgeKey(1L, a, b), CoverageRepository.edgeKey(1L, a, LatLngPoint(30.2690, -97.7431)))
-    }
-
-    @Test
-    fun `edge key tolerates sub-metre jitter`() {
-        val jittered = LatLngPoint(b.latitude + 0.000004, b.longitude)
-        assertEquals(CoverageRepository.edgeKey(1L, a, b), CoverageRepository.edgeKey(1L, a, jittered))
-    }
-
-    @Test
     fun `street is done above the threshold and partial below`() {
         fun status(fraction: Double) = StreetStatus(1L, "A St", "residential", 100.0, emptyList(), fraction)
         assertEquals(true, status(0.85).isDone)

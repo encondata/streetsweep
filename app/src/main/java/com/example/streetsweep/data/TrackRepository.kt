@@ -84,10 +84,14 @@ class TrackRepository(private val db: AppDatabase) {
     suspend fun deletePoi(id: Long, tellServer: Boolean = true) = db.withTransaction {
         val poi = pois.get(id) ?: return@withTransaction
         pois.delete(id)
-        if (tellServer) {
-            pois.addPendingDeletion(PendingDeletion(PendingDeletion.KIND_POI, poi.serverKey, System.currentTimeMillis()))
+        // Only yours can be deleted on the server; someone else's just leaves this phone.
+        if (tellServer && poi.mine) {
+            pois.addPendingDeletion(PendingDeletion(PendingDeletion.KIND_POI, poi.uuid, System.currentTimeMillis()))
         }
     }
+
+    suspend fun setPoiTeams(id: Long, teamIds: List<String>) =
+        pois.setTeams(id, teamIds.joinToString(","), System.currentTimeMillis())
 
     suspend fun addCoverageStats(sessionId: Long, segments: Int, meters: Double) =
         dao.addCoverageStats(sessionId, segments, meters)
@@ -96,7 +100,15 @@ class TrackRepository(private val db: AppDatabase) {
     suspend fun getOpenSession(): TrackSession? = dao.getOpenSession()
     suspend fun getPoints(sessionId: Long): List<TrackPoint> = dao.getPoints(sessionId)
     suspend fun getAllSessions(): List<TrackSession> = dao.getAllSessions()
-    suspend fun getUnmatchedSessions(): List<TrackSession> = dao.getUnmatchedSessions()
+    suspend fun pendingUploads(): List<TrackSession> = dao.pendingUploads()
+    fun observePendingUploadCount(): Flow<Int> = dao.observePendingUploadCount()
+    suspend fun markUploaded(id: Long, status: String?) = dao.markUploaded(id, System.currentTimeMillis(), status)
+    suspend fun getByUuid(uuid: String): TrackSession? = dao.getByUuid(uuid)
+    suspend fun setServerStatus(id: Long, status: String?) = dao.setServerStatus(id, status)
+    suspend fun setMatchedThrough(id: Long, n: Int) = dao.setMatchedThrough(id, n)
+
+    /** Which kind of drive, and in which vehicle: set at the start, changeable until it goes up. */
+    suspend fun setDriveDetails(id: Long, type: String?, vehicleId: String?) = dao.setDriveDetails(id, type, vehicleId)
     /** Adds a stretch of standing still to a drive, so it is not counted as driving. */
     suspend fun addPausedMs(sessionId: Long, millis: Long) {
         if (millis > 0) dao.addPausedMs(sessionId, millis)
@@ -105,8 +117,11 @@ class TrackRepository(private val db: AppDatabase) {
     suspend fun getAllPois(): List<Poi> = pois.getAll()
     fun observeWeeklyDriving(): Flow<List<WeeklyDrivingRow>> = dao.observeWeeklyDriving()
 
-    suspend fun startSession(trigger: TriggerSource, startedAt: Long = System.currentTimeMillis()): TrackSession {
-        val session = TrackSession(startedAt = startedAt, trigger = trigger.name)
+    suspend fun startSession(
+        trigger: TriggerSource, startedAt: Long = System.currentTimeMillis(),
+        driveTypeKey: String? = null, vehicleId: String? = null,
+    ): TrackSession {
+        val session = TrackSession(startedAt = startedAt, trigger = trigger.name, driveTypeKey = driveTypeKey, vehicleId = vehicleId)
         val id = dao.insertSession(session)
         return session.copy(id = id)
     }
@@ -166,60 +181,18 @@ class TrackRepository(private val db: AppDatabase) {
         if (keys.isNotEmpty()) pois.clearPendingDeletions(kind, keys)
     }
 
-    /**
-     * Applies deletions made on the web: drives by when they started, places by the
-     * server's key for them. Nothing is sent back. Returns how many were found here.
-     */
-    suspend fun applyServerDeletions(driveStarts: List<Long>, poiKeys: Set<String>): Int {
-        var n = 0
-        for (at in driveStarts) {
-            dao.getSessionsStartedAt(at).forEach { deleteSession(it.id, tellServer = false); n++ }
-        }
-        if (poiKeys.isNotEmpty()) {
-            pois.getAll().filter { it.serverKey in poiKeys }.forEach {
-                it.photoPath?.let { path -> runCatching { java.io.File(path).delete() } }
-                deletePoi(it.id, tellServer = false); n++
-            }
-        }
-        return n
-    }
-
     suspend fun deleteSession(sessionId: Long, tellServer: Boolean = true) = db.withTransaction {
         val session = dao.getSession(sessionId) ?: return@withTransaction
-        // Told at the next sync, which deletes the web's copy and the coverage it earned.
-        if (tellServer) {
-            val at = System.currentTimeMillis()
-            pois.addPendingDeletion(PendingDeletion(PendingDeletion.KIND_DRIVE, session.startedAt.toString(), at))
-            // Its segments by key: they are stamped when matched, which can be well after
-            // the drive ended, so the server cannot find them all by time.
-            db.coverageDao().edgeKeysDrivenIn(sessionId).forEach {
-                pois.addPendingDeletion(PendingDeletion(PendingDeletion.KIND_EDGE, it, at))
-            }
+        // Told at the next sync, which deletes the server's copy; the server then recounts
+        // the coverage it earned, and the next sync brings that back.
+        if (tellServer && session.uploadedAt != null) {
+            pois.addPendingDeletion(PendingDeletion(PendingDeletion.KIND_DRIVE, session.driveUuid, System.currentTimeMillis()))
         }
-        // The streets it drove are measured again once its segments are gone.
+        // Its provisional preview goes now.
         val touched = db.coverageDao().wayIdsDrivenIn(sessionId)
         db.coverageDao().deleteDrivenEdgesForSession(sessionId)
+        db.serverDao().clearProvisional(sessionId)
         dao.deleteSession(sessionId)
         com.example.streetsweep.data.WayCoverageBuilder(db).refresh(touched)
     }
-
-    /** Appends road-matched geometry and advances the session's matched watermark atomically. */
-    suspend fun appendSnappedPoints(sessionId: Long, points: List<LatLngPoint>, newWatermark: Int) =
-        db.withTransaction {
-            var seq = dao.maxSnappedSequence(sessionId) + 1
-            if (points.isNotEmpty()) {
-                dao.insertSnappedPoints(
-                    points.map { p ->
-                        SnappedPoint(
-                            sessionId = sessionId,
-                            sequence = seq++,
-                            latitude = p.latitude,
-                            longitude = p.longitude,
-                            placeId = null,
-                        )
-                    },
-                )
-            }
-            dao.getSession(sessionId)?.let { s -> dao.updateSession(s.copy(snappedRawCount = newWatermark)) }
-        }
 }

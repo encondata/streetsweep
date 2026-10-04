@@ -27,7 +27,7 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.rememberCoroutineScope
 import com.example.streetsweep.data.db.CoverageArea
-import com.example.streetsweep.data.sync.PortalPushWorker
+import com.example.streetsweep.data.server.SyncWorker
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -88,7 +88,7 @@ class AreasViewModel(private val container: AppContainer, private val context: C
 
     /** Where areas are drawn, to say so when there are none. */
     val webAddress: StateFlow<String> = container.settings.settings
-        .map { it.portalUrl.orEmpty().removePrefix("https://").removePrefix("http://").trimEnd('/') }
+        .map { it.serverUrl.removePrefix("https://").removePrefix("http://").trimEnd('/') }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
 
     private val _message = MutableStateFlow<String?>(null)
@@ -109,8 +109,8 @@ class AreasViewModel(private val container: AppContainer, private val context: C
      * web's areas, figures and deletions come down, with streets for any new area after.
      */
     fun syncNow() {
-        PortalPushWorker.enqueue(context)
-        _message.value = "Syncing with the web…"
+        SyncWorker.enqueue(context)
+        _message.value = "Syncing with the server…"
     }
 }
 

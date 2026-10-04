@@ -4,6 +4,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -189,6 +190,7 @@ fun HomeScreen(
                 .padding(start = 8.dp, end = 8.dp, top = 2.dp)
                 .fillMaxWidth(),
         ) {
+            var choosingDrive by remember { mutableStateOf(false) }
             StatusCard(
                 status = status,
                 mode = settings.mode,
@@ -199,7 +201,22 @@ fun HomeScreen(
                 focused = focused,
                 hasAreas = areas.isNotEmpty(),
                 onExcludeShape = { viewModel.startDrawing(DrawMode.EXCLUDE) },
+                onChangeDrive = { choosingDrive = true },
             )
+            // Collected all along, so it's loaded by the time the dialog opens.
+            val drive by viewModel.currentDrive.collectAsStateWithLifecycle()
+            if (choosingDrive) {
+                val types by viewModel.driveTypes.collectAsStateWithLifecycle()
+                val vehicles by viewModel.vehicles.collectAsStateWithLifecycle()
+                drive?.let { d ->
+                    DriveDetailsDialog(
+                        type = d.driveTypeKey ?: "personal", vehicleId = d.vehicleId, types = types, vehicles = vehicles,
+                        onDone = { t, v -> viewModel.setDriveDetails(t, v); choosingDrive = false },
+                        onDismiss = { choosingDrive = false },
+                    )
+                }
+            }
+            if (status !is TrackingStatus.Recording) choosingDrive = false
             if (drawing) {
                 Spacer(Modifier.height(8.dp))
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
@@ -577,6 +594,7 @@ private fun StatusCard(
     focused: AreaWithStats?,
     hasAreas: Boolean,
     onExcludeShape: () -> Unit,
+    onChangeDrive: () -> Unit,
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f))) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -618,6 +636,12 @@ private fun StatusCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    status.driveLabel?.let { label ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                            androidx.compose.material3.TextButton(onClick = onChangeDrive) { Text("Change") }
+                        }
+                    }
                     Text(
                         "Started by ${status.trigger.label}" +
                             (status.lastFixAt?.let { " · last fix ${Format.time(it)}" } ?: " · waiting for GPS"),
@@ -846,4 +870,50 @@ private fun GuidanceChoice(
         enabled = enabled,
         onClick = onClick,
     )
+}
+
+/**
+ * The kind of drive and the vehicle, changeable while recording. Each team counts the
+ * drive types it chooses; the vehicle decides whose fleet the drive belongs to.
+ */
+@Composable
+private fun DriveDetailsDialog(
+    type: String,
+    vehicleId: String?,
+    types: List<com.example.streetsweep.data.db.DriveTypeEntity>,
+    vehicles: List<com.example.streetsweep.data.db.VehicleEntity>,
+    onDone: (String, String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var t by remember { mutableStateOf(type) }
+    var v by remember { mutableStateOf(vehicleId) }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("This drive") },
+        text = {
+            Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+                Text("Kind of drive", style = MaterialTheme.typography.labelLarge)
+                (types.ifEmpty { listOf(com.example.streetsweep.data.db.DriveTypeEntity("personal", "Personal", 0, "{}")) }).forEach { dt ->
+                    ChoiceLine(dt.label, selected = t == dt.key) { t = dt.key }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("Vehicle", style = MaterialTheme.typography.labelLarge)
+                vehicles.forEach { ve ->
+                    ChoiceLine(if (ve.teamKind == "personal") ve.name else "${ve.name} (${ve.teamName})", selected = v == ve.id) { v = ve.id }
+                }
+                ChoiceLine("No vehicle", selected = v == null) { v = null }
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = { onDone(t, v) }) { Text("Save") } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun ChoiceLine(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.material3.RadioButton(selected = selected, onClick = onClick)
+        Spacer(Modifier.width(6.dp))
+        Text(label)
+    }
 }

@@ -26,9 +26,28 @@ interface TrackDao {
     @Query("SELECT * FROM sessions ORDER BY startedAt")
     suspend fun getAllSessions(): List<TrackSession>
 
-    /** Drives that ended without being fully matched, for the retry job. */
-    @Query("SELECT * FROM sessions WHERE endedAt IS NOT NULL AND snappedRawCount < pointCount AND pointCount >= 2 ORDER BY startedAt")
-    suspend fun getUnmatchedSessions(): List<TrackSession>
+    /** Finished drives the server doesn't have yet, oldest first. */
+    @Query("SELECT * FROM sessions WHERE endedAt IS NOT NULL AND uploadedAt IS NULL ORDER BY startedAt")
+    suspend fun pendingUploads(): List<TrackSession>
+
+    @Query("SELECT COUNT(*) FROM sessions WHERE endedAt IS NOT NULL AND uploadedAt IS NULL")
+    fun observePendingUploadCount(): Flow<Int>
+
+    @Query("UPDATE sessions SET uploadedAt = :at, serverStatus = :status WHERE id = :id")
+    suspend fun markUploaded(id: Long, at: Long, status: String?)
+
+    @Query("SELECT * FROM sessions WHERE driveUuid = :uuid")
+    suspend fun getByUuid(uuid: String): TrackSession?
+
+    @Query("UPDATE sessions SET serverStatus = :status WHERE id = :id")
+    suspend fun setServerStatus(id: Long, status: String?)
+
+    /** How far through the drive the provisional preview has looked. */
+    @Query("UPDATE sessions SET snappedRawCount = :n WHERE id = :id")
+    suspend fun setMatchedThrough(id: Long, n: Int)
+
+    @Query("UPDATE sessions SET driveTypeKey = :type, vehicleId = :vehicleId WHERE id = :id")
+    suspend fun setDriveDetails(id: Long, type: String?, vehicleId: String?)
 
     @Query("SELECT (startedAt / 604800000) AS week, COUNT(*) AS drives, SUM(distanceMeters) AS meters, SUM(newMeters) AS newMeters FROM sessions GROUP BY week ORDER BY week")
     fun observeWeeklyDriving(): Flow<List<WeeklyDrivingRow>>
@@ -38,10 +57,6 @@ interface TrackDao {
 
     @Query("DELETE FROM sessions WHERE id = :id")
     suspend fun deleteSession(id: Long)
-
-    /** The server knows a drive by when it started. */
-    @Query("SELECT * FROM sessions WHERE startedAt = :startedAt")
-    suspend fun getSessionsStartedAt(startedAt: Long): List<TrackSession>
 
     @Query("UPDATE sessions SET pausedMs = pausedMs + :millis WHERE id = :id")
     suspend fun addPausedMs(id: Long, millis: Long)

@@ -53,6 +53,18 @@ data class CoverageArea(
      * fields cover every piece.
      */
     @ColumnInfo(defaultValue = "") val morePieces: String = "",
+    /** The area's id on the server. */
+    val serverId: String? = null,
+    /** The outline's version on the server; a newer one means fetch the outline again. */
+    @ColumnInfo(defaultValue = "0") val version: Int = 0,
+    /** The server's latest street-list build, and the one whose package is on the phone. */
+    @ColumnInfo(defaultValue = "0") val builtVersion: Int = 0,
+    @ColumnInfo(defaultValue = "0") val packageVersion: Int = 0,
+    @ColumnInfo(defaultValue = "0") val segmentCount: Int = 0,
+    /** Your teams that track it (draw or follow it), comma-separated ids. */
+    @ColumnInfo(defaultValue = "") val teamIds: String = "",
+    /** Its colour on the web, "#rrggbb", if it has one. */
+    val color: String? = null,
 ) {
     val bounds: Bounds get() = Bounds(south, west, north, east)
     /** The main piece. */
@@ -73,16 +85,26 @@ data class CoverageArea(
     val isDownloading: Boolean get() = !onDemand && streetsLoadedAt == null && lastError == null && chunksTotal > 0
 }
 
-/** Which streets fall inside which area (by centroid, point-in-polygon). Recomputed on download or redraw. */
+/**
+ * Which streets are in which area. From a package, the server says, with how much of each
+ * lies inside ([insideMeters]: an edge street counts only for its inside part, as on the
+ * web). From map cells (big areas), by centroid, with no inside length: all of it counts.
+ */
 @Entity(tableName = "area_ways", primaryKeys = ["areaId", "wayId"], indices = [Index("wayId")])
-data class AreaWay(val areaId: Long, val wayId: Long)
+data class AreaWay(val areaId: Long, val wayId: Long, val insideMeters: Double? = null)
 
 data class WayCentroid(val id: Long, val cLat: Double, val cLng: Double)
 
-/** One OSM way, stored once globally with its bounding box and centroid for spatial queries. */
+/**
+ * One street segment from the server (v2): a piece of an OSM way between intersections,
+ * with its bounding box and centroid for spatial queries. [id] is the server's segment
+ * id (stable across street imports); the table keeps its v1 name, from when a row was a
+ * whole way, because every coverage query, guidance and the gate walk read it as "a
+ * street", which a segment is.
+ */
 @Entity(
     tableName = "osm_ways",
-    indices = [Index("minLat", "minLng"), Index("cLat", "cLng")],
+    indices = [Index("minLat", "minLng"), Index("cLat", "cLng"), Index("wayId")],
 )
 data class OsmWay(
     @PrimaryKey val id: Long,
@@ -104,6 +126,8 @@ data class OsmWay(
      * drive all of one. See [RoadShape].
      */
     val minDoneFraction: Double = RoadShape.DEFAULT_DONE_FRACTION,
+    /** The OSM way it's a piece of. */
+    val wayId: Long? = null,
 )
 
 /** A 0.1° grid cell whose streets have been downloaded; shared between areas. */

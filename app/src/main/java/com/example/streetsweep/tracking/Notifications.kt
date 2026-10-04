@@ -66,6 +66,7 @@ object Notifications {
             text = buildString {
                 if (status.isPaused) append("Not recording. ")
                 if (!status.isPaused && status.gpsQuietSince != null) append("Waiting for GPS. ")
+                status.driveLabel?.let { append(it).append(" · ") }
                 append("${status.pointCount} points since $started")
                 if (status.trigger.isAutomatic) append(" · via ${status.trigger.label}")
                 status.stopScheduledAt?.let { at ->

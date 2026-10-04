@@ -66,6 +66,10 @@ object AreaGeoJson {
         return out
     }
 
+    /** An outline's pieces (outer rings, unclosed), from a Polygon or MultiPolygon geometry. */
+    fun pieces(geometry: JSONObject): List<List<LatLngPoint>> =
+        rings(geometry).map { it.dropLastIfClosed() }.filter { it.size >= 3 }
+
     /** Outer rings only: a hole in a coverage area has no meaning here. */
     private fun rings(geometry: JSONObject): List<List<LatLngPoint>> = when (geometry.optString("type")) {
         "Polygon" -> listOfNotNull(ring(geometry.optJSONArray("coordinates")?.optJSONArray(0)))

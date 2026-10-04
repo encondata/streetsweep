@@ -42,7 +42,7 @@ object NearbyStreets {
     private fun request(context: Context, cells: List<ChunkGrid.Cell>) = scope.launch {
         val container = context.appContainer
         val s = container.settings.current()
-        if (s.portalUrl.isNullOrBlank() || s.portalToken.isNullOrBlank()) return@launch
+        if (!s.signedIn) return@launch
         val areas = container.coverageRepository.onDemandAreas()
         if (areas.isEmpty()) return@launch
         val wanted = cells.filter { c -> areas.any { it.bounds.intersects(c.bounds) } }.map { it.key }

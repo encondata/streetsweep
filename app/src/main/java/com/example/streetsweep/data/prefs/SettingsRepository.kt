@@ -20,9 +20,6 @@ data class TrackingSettings(
     val bluetoothTriggerAddress: String? = null,
     val bluetoothTriggerName: String? = null,
     val androidAutoTriggerEnabled: Boolean = false,
-    val snapToRoadsEnabled: Boolean = true,
-    val valhallaUrl: String = DEFAULT_VALHALLA_URL,
-    val overpassUrl: String = DEFAULT_OVERPASS_URL,
     /** How often to ask for a GPS fix while recording. The 50 ft spacing rule still applies. */
     val gpsIntervalSeconds: Int = DEFAULT_GPS_INTERVAL_SECONDS,
     /** Folder chosen for automatic backups, as a persisted document-tree URI. */
@@ -36,15 +33,23 @@ data class TrackingSettings(
     /** What the map points you towards while you drive. */
     val guidanceMode: GuidanceMode = GuidanceMode.NEAREST,
     val inVehicleTriggerEnabled: Boolean = false,
-    /** Address of the area builder's server. Defaults to the hosted one. */
-    val portalUrl: String? = DEFAULT_PORTAL_URL,
-    val portalToken: String? = null,
-    /** Who the token belongs to, kept only so the app can say whose account it is signed into. */
-    val portalUserName: String? = null,
-    val portalUserEmail: String? = null,
-    val lastPortalPushAt: Long = 0,
-    /** Up to when the server's list of deletions has been applied here (its clock). */
-    val lastDeletionsPullAt: Long = 0,
+    /** The StreetSweep server (v2). Defaults to the hosted one. */
+    val serverUrl: String = DEFAULT_SERVER_URL,
+    /** This phone's device token; null = signed out (the app asks you to sign in). */
+    val serverToken: String? = null,
+    /** Whose account it is, so the app can say so and spot a different person signing in. */
+    val serverUserId: String? = null,
+    val serverUserName: String? = null,
+    val serverUserEmail: String? = null,
+    /** Where the last sync got to (the server's cursor); null = sync everything. */
+    val syncCursor: String? = null,
+    val lastSyncAt: Long = 0,
+    /** Whose coverage the map, figures and guidance show: one of your teams. Null = your own. */
+    val coverageTeamId: String? = null,
+    /** The drive type a new drive gets unless told otherwise: the last one used. */
+    val lastDriveType: String? = null,
+    /** Bluetooth car address → vehicle id, so a drive started by that car is in that vehicle. */
+    val bluetoothVehicles: Map<String, String> = emptyMap(),
 ) {
     val gpsIntervalMs: Long get() = gpsIntervalSeconds * 1000L
 
@@ -53,11 +58,10 @@ data class TrackingSettings(
         val GPS_INTERVAL_CHOICES = listOf(1, 2, 5, 15)
         val BACKUP_DAY_CHOICES = listOf(0, 1, 7)
         val IDLE_STOP_CHOICES = listOf(0, 15, 30, 60)
-        /** Our own Valhalla, behind the reverse proxy. Signed in, drives go through the server instead. */
-        const val DEFAULT_VALHALLA_URL = "https://valhalla.streetsweep.net"
-        const val DEFAULT_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
-        const val DEFAULT_PORTAL_URL = "https://streetsweep.streetsweep.net"
+        const val DEFAULT_SERVER_URL = com.example.streetsweep.data.server.ServerClient.DEFAULT_URL
     }
+
+    val signedIn: Boolean get() = !serverToken.isNullOrBlank()
 
     val hasAnyAutoTrigger: Boolean get() = bluetoothTriggerAddress != null || androidAutoTriggerEnabled
 }
@@ -73,9 +77,6 @@ class SettingsRepository(context: Context) {
         val BT_ADDRESS = stringPreferencesKey("bt_trigger_address")
         val BT_NAME = stringPreferencesKey("bt_trigger_name")
         val AA_ENABLED = booleanPreferencesKey("android_auto_trigger_enabled")
-        val SNAP_ENABLED = booleanPreferencesKey("snap_to_roads_enabled")
-        val VALHALLA_URL = stringPreferencesKey("valhalla_url")
-        val OVERPASS_URL = stringPreferencesKey("overpass_url")
         val GPS_INTERVAL = intPreferencesKey("gps_interval_seconds")
         val BACKUP_FOLDER = stringPreferencesKey("backup_folder_uri")
         val BACKUP_DAYS = intPreferencesKey("backup_every_days")
@@ -83,14 +84,17 @@ class SettingsRepository(context: Context) {
         val IDLE_STOP = intPreferencesKey("auto_stop_idle_minutes")
         val RECENCY = booleanPreferencesKey("colour_by_recency")
         val IN_VEHICLE = booleanPreferencesKey("in_vehicle_trigger")
-        val PORTAL_URL = stringPreferencesKey("portal_url")
-        val PORTAL_TOKEN = stringPreferencesKey("portal_token")
-        val PORTAL_USER_NAME = stringPreferencesKey("portal_user_name")
-        val PORTAL_USER_EMAIL = stringPreferencesKey("portal_user_email")
-        /** Only ever removed now: going without an account is no longer offered. */
-        val STANDALONE = booleanPreferencesKey("standalone")
-        val LAST_PUSH = androidx.datastore.preferences.core.longPreferencesKey("portal_last_push_at")
-        val LAST_DELETIONS = androidx.datastore.preferences.core.longPreferencesKey("portal_last_deletions_at")
+        // v2's server. v1's portal_* keys are left unread: a v1 token means nothing to v2.
+        val SERVER_URL = stringPreferencesKey("server_url")
+        val SERVER_TOKEN = stringPreferencesKey("server_token")
+        val SERVER_USER_ID = stringPreferencesKey("server_user_id")
+        val SERVER_USER_NAME = stringPreferencesKey("server_user_name")
+        val SERVER_USER_EMAIL = stringPreferencesKey("server_user_email")
+        val SYNC_CURSOR = stringPreferencesKey("sync_cursor")
+        val LAST_SYNC = androidx.datastore.preferences.core.longPreferencesKey("last_sync_at")
+        val COVERAGE_TEAM = stringPreferencesKey("coverage_team")
+        val LAST_DRIVE_TYPE = stringPreferencesKey("last_drive_type")
+        val BT_VEHICLES = stringPreferencesKey("bluetooth_vehicles")
     }
 
     val settings: Flow<TrackingSettings> = store.data.map { p ->
@@ -99,9 +103,6 @@ class SettingsRepository(context: Context) {
             bluetoothTriggerAddress = p[Keys.BT_ADDRESS],
             bluetoothTriggerName = p[Keys.BT_NAME],
             androidAutoTriggerEnabled = p[Keys.AA_ENABLED] ?: false,
-            snapToRoadsEnabled = p[Keys.SNAP_ENABLED] ?: true,
-            valhallaUrl = p[Keys.VALHALLA_URL]?.takeIf { it.isNotBlank() } ?: TrackingSettings.DEFAULT_VALHALLA_URL,
-            overpassUrl = p[Keys.OVERPASS_URL]?.takeIf { it.isNotBlank() } ?: TrackingSettings.DEFAULT_OVERPASS_URL,
             gpsIntervalSeconds = p[Keys.GPS_INTERVAL]?.takeIf { it in TrackingSettings.GPS_INTERVAL_CHOICES } ?: TrackingSettings.DEFAULT_GPS_INTERVAL_SECONDS,
             backupFolderUri = p[Keys.BACKUP_FOLDER],
             backupEveryDays = p[Keys.BACKUP_DAYS] ?: 0,
@@ -111,12 +112,16 @@ class SettingsRepository(context: Context) {
             guidanceMode = p[Keys.GUIDANCE]?.let { g -> GuidanceMode.entries.firstOrNull { it.name == g } }
                 ?: GuidanceMode.NEAREST,
             inVehicleTriggerEnabled = p[Keys.IN_VEHICLE] ?: false,
-            portalUrl = p[Keys.PORTAL_URL]?.takeIf { it.isNotBlank() } ?: TrackingSettings.DEFAULT_PORTAL_URL,
-            portalToken = p[Keys.PORTAL_TOKEN]?.takeIf { it.isNotBlank() },
-            portalUserName = p[Keys.PORTAL_USER_NAME]?.takeIf { it.isNotBlank() },
-            portalUserEmail = p[Keys.PORTAL_USER_EMAIL]?.takeIf { it.isNotBlank() },
-            lastPortalPushAt = p[Keys.LAST_PUSH] ?: 0L,
-            lastDeletionsPullAt = p[Keys.LAST_DELETIONS] ?: 0L,
+            serverUrl = p[Keys.SERVER_URL]?.takeIf { it.isNotBlank() } ?: TrackingSettings.DEFAULT_SERVER_URL,
+            serverToken = p[Keys.SERVER_TOKEN]?.takeIf { it.isNotBlank() },
+            serverUserId = p[Keys.SERVER_USER_ID],
+            serverUserName = p[Keys.SERVER_USER_NAME]?.takeIf { it.isNotBlank() },
+            serverUserEmail = p[Keys.SERVER_USER_EMAIL]?.takeIf { it.isNotBlank() },
+            syncCursor = p[Keys.SYNC_CURSOR],
+            lastSyncAt = p[Keys.LAST_SYNC] ?: 0L,
+            coverageTeamId = p[Keys.COVERAGE_TEAM],
+            lastDriveType = p[Keys.LAST_DRIVE_TYPE],
+            bluetoothVehicles = p[Keys.BT_VEHICLES]?.let(::decodeMap).orEmpty(),
         )
     }
 
@@ -138,12 +143,6 @@ class SettingsRepository(context: Context) {
 
     suspend fun setAndroidAutoTrigger(enabled: Boolean) = store.edit { it[Keys.AA_ENABLED] = enabled }
 
-    suspend fun setSnapToRoads(enabled: Boolean) = store.edit { it[Keys.SNAP_ENABLED] = enabled }
-
-    suspend fun setValhallaUrl(url: String) = store.edit { it[Keys.VALHALLA_URL] = url.trim() }
-
-    suspend fun setOverpassUrl(url: String) = store.edit { it[Keys.OVERPASS_URL] = url.trim() }
-
     suspend fun setGpsIntervalSeconds(seconds: Int) = store.edit { it[Keys.GPS_INTERVAL] = seconds }
 
     suspend fun setBackupFolder(uri: String?) = store.edit { p ->
@@ -160,39 +159,52 @@ class SettingsRepository(context: Context) {
 
     suspend fun setInVehicleTrigger(on: Boolean) = store.edit { it[Keys.IN_VEHICLE] = on }
 
-    suspend fun setPortalUrl(url: String?) = store.edit { p ->
+    suspend fun setServerUrl(url: String?) = store.edit { p ->
         val clean = url?.trim().orEmpty()
-        if (clean.isEmpty()) p.remove(Keys.PORTAL_URL) else p[Keys.PORTAL_URL] = clean
-    }
-
-    suspend fun setPortalToken(value: String?) = store.edit { p ->
-        val clean = value?.trim().orEmpty()
-        if (clean.isEmpty()) p.remove(Keys.PORTAL_TOKEN) else p[Keys.PORTAL_TOKEN] = clean
-    }
-
-    /** Signing in: the device token the server issued, and whose account it is. */
-    suspend fun setPortalIdentity(token: String, name: String?, email: String?) = store.edit { p ->
-        p[Keys.PORTAL_TOKEN] = token.trim()
-        p.remove(Keys.STANDALONE)
-        // Deletions are told per person: a different account starts its list afresh.
-        p.remove(Keys.LAST_DELETIONS)
-        if (name.isNullOrBlank()) p.remove(Keys.PORTAL_USER_NAME) else p[Keys.PORTAL_USER_NAME] = name
-        if (email.isNullOrBlank()) p.remove(Keys.PORTAL_USER_EMAIL) else p[Keys.PORTAL_USER_EMAIL] = email
+        if (clean.isEmpty()) p.remove(Keys.SERVER_URL) else p[Keys.SERVER_URL] = clean
     }
 
     /**
-     * Signing out forgets the token and the name. Drives already recorded stay on the
-     * phone: they are this device's own history, not the portal's copy of it.
+     * Signing in. A different person than last time starts the sync afresh and goes back
+     * to their own coverage; the same person carries on where they were.
      */
-    suspend fun clearPortalIdentity() = store.edit { p ->
-        p.remove(Keys.PORTAL_TOKEN)
-        p.remove(Keys.PORTAL_USER_NAME)
-        p.remove(Keys.PORTAL_USER_EMAIL)
-        p.remove(Keys.STANDALONE)
-        p.remove(Keys.LAST_DELETIONS)
+    suspend fun setServerIdentity(token: String, userId: String, name: String?, email: String?) = store.edit { p ->
+        if (p[Keys.SERVER_USER_ID] != userId) {
+            p.remove(Keys.SYNC_CURSOR)
+            p.remove(Keys.COVERAGE_TEAM)
+        }
+        p[Keys.SERVER_TOKEN] = token.trim()
+        p[Keys.SERVER_USER_ID] = userId
+        if (name.isNullOrBlank()) p.remove(Keys.SERVER_USER_NAME) else p[Keys.SERVER_USER_NAME] = name
+        if (email.isNullOrBlank()) p.remove(Keys.SERVER_USER_EMAIL) else p[Keys.SERVER_USER_EMAIL] = email
     }
 
-    suspend fun setLastPortalPushAt(at: Long) = store.edit { it[Keys.LAST_PUSH] = at }
+    /**
+     * Signing out forgets the token. Drives already recorded stay on the phone (and go up
+     * after the next sign-in): they are this device's own history.
+     */
+    suspend fun clearServerToken() = store.edit { it.remove(Keys.SERVER_TOKEN) }
 
-    suspend fun setLastDeletionsPullAt(at: Long) = store.edit { it[Keys.LAST_DELETIONS] = at }
+    suspend fun setSyncCursor(cursor: String?, at: Long) = store.edit { p ->
+        if (cursor == null) p.remove(Keys.SYNC_CURSOR) else p[Keys.SYNC_CURSOR] = cursor
+        p[Keys.LAST_SYNC] = at
+    }
+
+    suspend fun setCoverageTeam(teamId: String?) = store.edit { p ->
+        if (teamId == null) p.remove(Keys.COVERAGE_TEAM) else p[Keys.COVERAGE_TEAM] = teamId
+    }
+
+    suspend fun setLastDriveType(key: String) = store.edit { it[Keys.LAST_DRIVE_TYPE] = key }
+
+    /** Link (or with null, unlink) a Bluetooth car to one of your vehicles. */
+    suspend fun setBluetoothVehicle(address: String, vehicleId: String?) = store.edit { p ->
+        val map = p[Keys.BT_VEHICLES]?.let(::decodeMap).orEmpty().toMutableMap()
+        if (vehicleId == null) map.remove(address) else map[address] = vehicleId
+        p[Keys.BT_VEHICLES] = org.json.JSONObject(map as Map<*, *>).toString()
+    }
 }
+
+private fun decodeMap(json: String): Map<String, String> = runCatching {
+    val o = org.json.JSONObject(json)
+    o.keys().asSequence().associateWith { o.getString(it) }
+}.getOrDefault(emptyMap())

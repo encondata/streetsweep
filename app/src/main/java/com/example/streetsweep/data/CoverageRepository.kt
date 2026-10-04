@@ -12,9 +12,7 @@ import com.example.streetsweep.data.db.StreetCompletion
 import com.example.streetsweep.data.db.StreetExclusion
 import com.example.streetsweep.data.db.WayCoverageRow
 import com.example.streetsweep.data.db.WeeklyMetersRow
-import com.example.streetsweep.data.osm.MatchedEdge
-import com.example.streetsweep.data.osm.ImportedArea
-import com.example.streetsweep.data.osm.OsmStreet
+import com.example.streetsweep.data.server.ServerSegment
 import com.example.streetsweep.data.osm.ShapeText
 import com.example.streetsweep.domain.AreaLevel
 import com.example.streetsweep.domain.Bounds
@@ -81,12 +79,6 @@ data class StreetStatus(
     }
 }
 
-/** One area's figures as the web counts them (GET /api/areas/progress). */
-data class ServerAreaFigures(
-    val name: String, val total: Int, val done: Int, val partial: Int, val excluded: Int,
-    val metersTotal: Double, val metersDriven: Double, val computedAt: Long, val pending: Boolean,
-)
-
 data class AreaStats(
     /** Counts and lengths are over countable streets only; [excluded] are left out of them. */
     val total: Int,
@@ -147,7 +139,6 @@ data class AreaWithStats(val area: CoverageArea, val stats: AreaStats) {
     fun contains(p: LatLngPoint) = area.contains(p)
 }
 
-data class Recorded(val segments: Int, val meters: Double)
 
 /** A proposed "everything past this gate is private" selection, awaiting confirmation. */
 data class GateSelection(
@@ -204,13 +195,6 @@ class CoverageRepository(private val db: AppDatabase) {
 
     // ---- keeping the figures ----
 
-    /**
-     * Whether this phone takes its figures from a server. Set by AppContainer; when true,
-     * an area the server has figures for is left to the server (the record), and only areas
-     * it does not know are worked out here.
-     */
-    @Volatile var serverBacked: suspend () -> Boolean = { false }
-
     private val statsScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
     private val pendingStats = HashSet<Long>()
     private var statsJob: kotlinx.coroutines.Job? = null
@@ -236,12 +220,14 @@ class CoverageRepository(private val db: AppDatabase) {
         }
     }
 
-    private suspend fun recomputeStats(ids: List<Long>, force: Boolean = false) {
-        val server = serverBacked()
-        val kept = dao.allCachedStats().associateBy { it.areaId }
+    /**
+     * An area's figures, worked out here from the chosen team's coverage (the server's,
+     * plus this phone's provisional preview) and marks. The same rule as the server's, so
+     * the two agree once the preview is replaced.
+     */
+    private suspend fun recomputeStats(ids: List<Long>) {
         val now = System.currentTimeMillis()
         val rows = ids.distinct().mapNotNull { id ->
-            if (!force && server && kept[id]?.source == SOURCE_SERVER) return@mapNotNull null
             val r = dao.statsForNow(id)
             com.example.streetsweep.data.db.AreaStatsCache(
                 areaId = id, total = r.total, done = r.done ?: 0, partial = r.partial ?: 0,
@@ -256,27 +242,11 @@ class CoverageRepository(private val db: AppDatabase) {
     suspend fun fillMissingStats() {
         val kept = dao.allCachedStats().map { it.areaId }.toSet()
         val missing = dao.getAreas().map { it.id }.filter { it !in kept }
-        if (missing.isNotEmpty()) recomputeStats(missing, force = true)
+        if (missing.isNotEmpty()) recomputeStats(missing)
     }
 
-    /**
-     * The web's figures, matched to this phone's areas by name. They replace whatever was
-     * worked out here: the web counts everyone's driving and every street, which a phone
-     * holding part of a metro cannot.
-     */
-    suspend fun applyServerStats(rows: List<ServerAreaFigures>): Int {
-        val byName = dao.getAreas().associateBy { it.name.lowercase() }
-        val out = rows.mapNotNull { f ->
-            val a = byName[f.name.lowercase()] ?: return@mapNotNull null
-            com.example.streetsweep.data.db.AreaStatsCache(
-                areaId = a.id, total = f.total, done = f.done, partial = f.partial, excluded = f.excluded,
-                metersTotal = f.metersTotal, metersDriven = f.metersDriven,
-                source = SOURCE_SERVER, updatedAt = f.computedAt,
-            )
-        }
-        if (out.isNotEmpty()) dao.upsertCachedStats(out)
-        return out.size
-    }
+    /** Every area's figures again: after the coverage shown changes wholesale (another team, a recount). */
+    suspend fun recomputeAllStats() = recomputeStats(dao.getAreas().map { it.id })
 
     /**
      * Every area in sight with its live numbers, A to Z. Areas hidden on this phone are
@@ -318,96 +288,55 @@ class CoverageRepository(private val db: AppDatabase) {
         return created
     }
 
-    /**
-     * Brings in areas drawn elsewhere. Larger levels are created first so a neighbourhood can
-     * name the city it belongs to, and each one is matched against a parent already in the
-     * database or one created earlier in this same import.
-     */
-    suspend fun importAreas(imported: List<ImportedArea>): List<CoverageArea> {
-        val created = ArrayList<CoverageArea>()
-        val byName = HashMap<String, Long>()
-        dao.getAreas().forEach { byName[it.name.lowercase()] = it.id }
-        for (area in imported.sortedByDescending { it.level.ordinal }) {
-            if (area.polygon.size < 3) continue
-            val parentId = area.parent?.lowercase()?.let { byName[it] }
-            val made = createArea(area.name, area.level, parentId, area.polygon, area.morePieces)
-            byName[made.name.lowercase()] = made.id
-            created += made
-        }
-        return created
-    }
-
-    /** What a pull did to one area that the phone already had. */
-    enum class WebSync { UNCHANGED, UPDATED, KEPT_LOCAL }
+    // ---- areas from the server ----
 
     /**
-     * Brings one area into line with the portal's copy.
-     *
-     * The portal is where outlines are drawn and refined, so its outline wins — with one
-     * exception. If this phone has redrawn the area since it last received it, that redraw
-     * is somebody's deliberate work and a sync must not throw it away; the phone's outline
-     * is kept and the caller is told, so it can say so.
-     *
-     * [pulledOutline] is what makes the difference visible. An area that has never been
-     * pulled under this rule has none, and is treated as unedited: that is how the
-     * outlines that had already drifted — April Sound at 26 corners here against 269 on
-     * the web — get brought back into line the first time.
+     * Brings one of the server's areas in (or up to date). The phone keeps its own Long
+     * ids, so screens and routes don't change; [CoverageArea.serverId] links the two.
+     * [pieces] is null when the outline didn't come with the metadata (an incremental
+     * sync): the existing outline stays until the caller fetches the new one.
+     * Returns the local area, and whether its outline changed.
      */
-    suspend fun syncFromWeb(mine: CoverageArea, incoming: ImportedArea, parentId: Long?): WebSync {
-        if (incoming.polygon.size < 3) return WebSync.UNCHANGED
-        val webOutline = ShapeText.encode(incoming.polygon)
-        val webPieces = ShapeText.encodeRings(incoming.morePieces.filter { it.size >= 3 })
-        val redrawnHere = mine.pulledOutline != null && mine.polygon != mine.pulledOutline
-        val outlineDiffers = mine.polygon != webOutline || mine.morePieces != webPieces
-        val levelDiffers = mine.level != incoming.level.ordinal
-        val parentDiffers = parentId != null && mine.parentId != parentId
-
-        if (outlineDiffers && redrawnHere) return WebSync.KEPT_LOCAL
-        if (!outlineDiffers && !levelDiffers && !parentDiffers) {
-            // Already identical; remember that it is, so a later redraw here is noticed.
-            if (mine.pulledOutline != webOutline) dao.updateArea(mine.copy(pulledOutline = webOutline))
-            return WebSync.UNCHANGED
+    suspend fun upsertServerArea(
+        serverId: String, name: String, level: AreaLevel, color: String?, version: Int, builtVersion: Int,
+        segmentCount: Int, teamIds: List<String>, pieces: List<List<LatLngPoint>>?, parentServerId: String?,
+    ): Pair<CoverageArea, Boolean> {
+        val all = dao.getAreas()
+        val mine = all.firstOrNull { it.serverId == serverId }
+        val parentId = parentServerId?.let { p -> all.firstOrNull { it.serverId == p }?.id }
+        val outline = pieces?.takeIf { it.isNotEmpty() }
+        val b = outline?.let { Bounds.of(it.flatten()) }
+        if (mine == null) {
+            if (outline == null || b == null) throw IllegalStateException("New area $name came without an outline")
+            val area = CoverageArea(
+                name = name, level = level.ordinal, parentId = parentId,
+                polygon = ShapeText.encode(outline.first()), morePieces = ShapeText.encodeRings(outline.drop(1)),
+                south = b.south, west = b.west, north = b.north, east = b.east,
+                createdAt = System.currentTimeMillis(),
+                serverId = serverId, version = version, builtVersion = builtVersion, segmentCount = segmentCount,
+                teamIds = teamIds.joinToString(","), color = color,
+            )
+            return area.copy(id = dao.insertArea(area)) to true
         }
-
-        val b = Bounds.of(incoming.polygon + incoming.morePieces.flatten())!!
+        val newOutline = outline != null && (ShapeText.encode(outline.first()) != mine.polygon || ShapeText.encodeRings(outline.drop(1)) != mine.morePieces)
         val updated = mine.copy(
-            polygon = webOutline, pulledOutline = webOutline, morePieces = webPieces,
-            south = b.south, west = b.west, north = b.north, east = b.east,
-            level = incoming.level.ordinal,
-            parentId = parentId ?: mine.parentId,
-        )
-        dao.updateArea(updated)
-        if (outlineDiffers) refreshMembership(updated)
-        return WebSync.UPDATED
-    }
-
-    /** Stamps freshly imported areas as having come from the portal. */
-    suspend fun markPulled(ids: List<Long>) {
-        for (id in ids) {
-            val a = dao.getArea(id) ?: continue
-            dao.updateArea(a.copy(pulledOutline = a.polygon))
+            name = name, level = level.ordinal, parentId = parentId ?: mine.parentId, color = color,
+            version = if (outline != null) version else mine.version, builtVersion = builtVersion, segmentCount = segmentCount,
+            teamIds = teamIds.joinToString(","),
+        ).let { a ->
+            if (!newOutline || b == null) a
+            else a.copy(polygon = ShapeText.encode(outline!!.first()), morePieces = ShapeText.encodeRings(outline.drop(1)),
+                south = b.south, west = b.west, north = b.north, east = b.east)
         }
+        if (updated != mine) dao.updateArea(updated)
+        return updated to newOutline
     }
 
-    /** Replaces an area's outline and recomputes which streets it contains. */
-    suspend fun updatePolygon(id: Long, polygon: List<LatLngPoint>) {
-        require(polygon.size >= 3)
-        val area = dao.getArea(id) ?: return
-        val b = Bounds.of(polygon)!!
-        val updated = area.copy(polygon = ShapeText.encode(polygon), south = b.south, west = b.west, north = b.north, east = b.east)
-        dao.updateArea(updated)
-        refreshMembership(updated)
-    }
-
-    /**
-     * Areas the web no longer has, taken off the phone. Only ones that came from the web
-     * (or went up to it) — [CoverageArea.pulledOutline] says so — so an area that was only
-     * ever on this phone is never lost to a sync. Returns the names removed.
-     */
-    suspend fun removeAreasGoneFromWeb(webNames: Set<String>): List<String> {
-        val gone = dao.getAreas().filter { it.pulledOutline != null && it.name.lowercase() !in webNames }
+    /** Areas none of your teams track any more leave the phone. Returns how many. */
+    suspend fun removeServerAreasExcept(serverIds: Set<String>): Int {
+        val gone = dao.getAreas().filter { it.serverId == null || it.serverId !in serverIds }
         gone.forEach { deleteArea(it.id) }
-        return gone.map { it.name }
+        return gone.size
     }
 
     suspend fun deleteArea(id: Long) = db.withTransaction {
@@ -436,7 +365,7 @@ class CoverageRepository(private val db: AppDatabase) {
      * outline of thousands of corners, for each cell loaded during a drive, would be most of
      * the phone's time.
      */
-    private suspend fun addMembershipFor(streets: List<OsmStreet>, b: Bounds) {
+    private suspend fun addMembershipFor(streets: List<ServerSegment>, b: Bounds) {
         val areas = dao.getAreasIntersecting(b.south, b.west, b.north, b.east)
         if (areas.isEmpty() || streets.isEmpty()) return
         val centres = streets.mapNotNull { s -> Bounds.of(s.shape)?.center?.let { s.id to it } }
@@ -703,29 +632,47 @@ class CoverageRepository(private val db: AppDatabase) {
         }
     }
 
-    suspend fun storeChunk(key: String, streets: List<OsmStreet>) = db.withTransaction {
-        val now = System.currentTimeMillis()
-        dao.insertWays(
-            streets.map { s ->
-                val b = Bounds.of(s.shape)!!
-                val c = b.center
-                OsmWay(
-                    id = s.id, name = s.name, highway = s.highway, lengthMeters = s.lengthMeters,
-                    shape = ShapeText.encode(s.shape),
-                    minLat = b.south, minLng = b.west, maxLat = b.north, maxLng = b.east,
-                    cLat = c.latitude, cLng = c.longitude, loadedAt = now,
-                    // Read off the shape at import, so the coverage queries never have
-                    // to decode a polyline to decide whether a street can be finished.
-                    minDoneFraction = RoadShape.doneFractionFor(s.lengthMeters, s.shape),
-                )
-            },
+    private fun wayRows(segments: List<ServerSegment>, now: Long): List<OsmWay> = segments.map { s ->
+        val b = Bounds.of(s.shape)!!
+        val c = b.center
+        OsmWay(
+            id = s.id, name = s.name, highway = s.highway, lengthMeters = s.lengthMeters,
+            shape = ShapeText.encode(s.shape),
+            minLat = b.south, minLng = b.west, maxLat = b.north, maxLng = b.east,
+            cLat = c.latitude, cLng = c.longitude, loadedAt = now,
+            // Read off the shape at import, so the coverage queries never have
+            // to decode a polyline to decide whether a street can be finished.
+            minDoneFraction = RoadShape.doneFractionFor(s.lengthMeters, s.shape),
+            wayId = s.wayId,
         )
-        dao.upsertChunk(StreetChunk(key = key, loadedAt = now, wayCount = streets.size))
-        // A street driven before its shape was here was measured by adding its segments up;
-        // with the shape, it can be measured properly.
-        coverageBuilder.refresh(streets.map { it.id })
-    }.also {
-        Bounds.of(streets.flatMap { s -> listOf(s.shape.first(), s.shape.last()) })?.let { addMembershipFor(streets, it) }
+    }
+
+    /**
+     * An area's package arrived: its segments, and exactly which ones are in it (the
+     * server worked that out from the outline, edge streets included).
+     */
+    suspend fun storeAreaPackage(areaId: Long, segments: List<ServerSegment>, version: Int) {
+        val now = System.currentTimeMillis()
+        db.withTransaction {
+            segments.chunked(500).forEach { dao.insertWays(wayRows(it, now)) }
+            dao.clearMembership(areaId)
+            segments.chunked(500).forEach { part -> dao.insertMembership(part.map { AreaWay(areaId, it.id, it.insideMeters) }) }
+            dao.getArea(areaId)?.let { a ->
+                dao.updateArea(a.copy(packageVersion = version, streetsLoadedAt = now, chunksTotal = 1, chunksDone = 1,
+                    lastError = null, onDemand = false))
+            }
+        }
+        statsChanged(listOf(areaId))
+    }
+
+    /** One map cell's segments, for areas too big to download whole. */
+    suspend fun storeCell(key: String, segments: List<ServerSegment>) {
+        val now = System.currentTimeMillis()
+        db.withTransaction {
+            segments.chunked(500).forEach { dao.insertWays(wayRows(it, now)) }
+            dao.upsertChunk(StreetChunk(key = key, loadedAt = now, wayCount = segments.size))
+        }
+        Bounds.of(segments.flatMap { s -> listOf(s.shape.first(), s.shape.last()) })?.let { addMembershipFor(segments, it) }
     }
 
     fun observeWayCount(): Flow<Int> = dao.observeWayCount()
@@ -743,32 +690,6 @@ class CoverageRepository(private val db: AppDatabase) {
 
     fun observeWeeklyAreaProgress(areaId: Long): Flow<List<WeeklyMetersRow>> = dao.observeWeeklyAreaProgress(areaId)
 
-    /** Records matched edges as driven. Returns what was new. */
-    suspend fun recordDrivenEdges(edges: List<MatchedEdge>, sessionId: Long?): Recorded {
-        val now = System.currentTimeMillis()
-        val rows = edges.filter { it.wayId > 0 && it.shape.size >= 2 }.map { e ->
-            val b = Bounds.of(e.shape)!!
-            DrivenEdge(
-                key = edgeKey(e.wayId, e.shape.first(), e.shape.last()),
-                wayId = e.wayId,
-                name = e.names.firstOrNull(),
-                roadClass = e.roadClass,
-                lengthMeters = e.lengthMeters,
-                shape = ShapeText.encode(e.shape),
-                minLat = b.south, minLng = b.west, maxLat = b.north, maxLng = b.east,
-                sessionId = sessionId,
-                drivenAt = now,
-            )
-        }.distinctBy { it.key }
-        if (rows.isEmpty()) return Recorded(0, 0.0)
-        val ids = dao.insertDrivenEdges(rows)
-        coverageBuilder.refresh(rows.map { it.wayId })
-        var n = 0
-        var m = 0.0
-        ids.forEachIndexed { i, id -> if (id != -1L) { n++; m += rows[i].lengthMeters } }
-        return Recorded(n, m)
-    }
-
     companion object {
         const val AREA_STREET_LIMIT = 5_000
         const val SOURCE_SERVER = "server"
@@ -784,13 +705,6 @@ class CoverageRepository(private val db: AppDatabase) {
         /** SQLite caps how many values one IN clause can hold. */
         private const val WAY_LOOKUP_CHUNK = 900
         private val SEARCH_RADII_METERS = listOf(1_200.0, 4_000.0, 12_000.0)
-
-        /** Direction-independent identity for a segment: way id plus its two end points (≈1 m rounding). */
-        fun edgeKey(wayId: Long, a: LatLngPoint, b: LatLngPoint): String {
-            val ka = String.format(Locale.US, "%.5f,%.5f", a.latitude, a.longitude)
-            val kb = String.format(Locale.US, "%.5f,%.5f", b.latitude, b.longitude)
-            return if (ka <= kb) "$wayId|$ka|$kb" else "$wayId|$kb|$ka"
-        }
 
         /** The smallest-level area whose outline contains the point, if any. */
         fun deepestContaining(areas: List<AreaWithStats>, p: LatLngPoint): AreaWithStats? =

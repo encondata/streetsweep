@@ -134,43 +134,37 @@ class StatsViewModel(private val container: AppContainer) : ViewModel() {
 
     init {
         viewModelScope.launch {
-            server.value = runCatching { parseServerStats(container.portalClient.getJson("/api/me/stats")) }
-                .getOrNull()
+            server.value = runCatching { parseServerStats(container.server.stats()) }.getOrNull()
         }
     }
 
-    private fun parseServerStats(body: String): ServerStats {
-        val json = JSONObject(body)
-        val t = json.getJSONObject("totals")
-        val weekly = json.optJSONArray("weekly")
-        val areas = json.optJSONArray("areas")
+    /** The server's figures (GET /api/stats): drives and new streets as it counted them. */
+    private fun parseServerStats(json: JSONObject): ServerStats {
+        val t = json.getJSONObject("total")
+        val weeks = json.optJSONArray("weeks")
         return ServerStats(
             totals = SessionTotalsRow(
-                drives = t.optInt("drives"), meters = t.optDouble("meters", 0.0),
-                durationMs = t.optLong("durationMs"), newMeters = t.optDouble("newMeters", 0.0),
-                newSegments = t.optInt("newSegments"),
+                drives = t.optInt("drives"), meters = t.optDouble("drive_m", 0.0),
+                // The server doesn't time drives; the phone's own total stands in.
+                durationMs = null, newMeters = t.optDouble("street_m", 0.0), newSegments = t.optInt("streets"),
             ),
-            weekly = (0 until (weekly?.length() ?: 0)).map { i ->
-                val w = weekly!!.getJSONObject(i)
-                WeeklyDrivingRow(w.getLong("week"), w.optInt("drives"), w.optDouble("meters", 0.0), w.optDouble("newMeters", 0.0))
+            weekly = (0 until (weeks?.length() ?: 0)).map { i ->
+                val w = weeks!!.getJSONObject(i)
+                val start = java.time.LocalDate.parse(w.getString("week")).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                WeeklyDrivingRow(start / 604_800_000L, 0, w.optDouble("drive_m", 0.0), w.optDouble("street_m", 0.0))
             },
-            areaWeeks = (0 until (areas?.length() ?: 0)).associate { i ->
-                val a = areas!!.getJSONObject(i)
-                val weeks = a.getJSONArray("weeks")
-                a.getString("name").lowercase() to (0 until weeks.length()).map { j ->
-                    val w = weeks.getJSONObject(j)
-                    w.getLong("week") to w.optDouble("meters", 0.0)
-                }
-            },
+            // Per-area pace is worked out on the phone, from the coverage it holds.
+            areaWeeks = emptyMap(),
         )
     }
 
     val totals: StateFlow<SessionTotalsRow?> = combine(container.trackRepository.observeTotals(), server) { local, web ->
-        web?.totals ?: local
+        web?.totals?.copy(durationMs = local.durationMs) ?: local
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val weekly: StateFlow<List<WeeklyDrivingRow>> = combine(container.trackRepository.observeWeeklyDriving(), server) { local, web ->
-        web?.weekly ?: local
+        // The server's miles; the count of drives from the phone, which the server doesn't break down by week.
+        web?.weekly?.map { w -> w.copy(drives = local.firstOrNull { it.week == w.week }?.drives ?: 0) } ?: local
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** Each area with the pace of the last few weeks, for the "done by" estimate. */

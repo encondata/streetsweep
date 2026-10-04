@@ -69,12 +69,12 @@ fun StreetSweepApp() {
     val error by auth.error.collectAsStateWithLifecycle()
     val notice by auth.notice.collectAsStateWithLifecycle()
 
-    if (settings.portalToken.isNullOrBlank()) {
+    if (!settings.signedIn) {
         SignInScreen(
             busy = busy,
             error = error,
             notice = notice,
-            serverLabel = settings.portalUrl.orEmpty()
+            serverLabel = settings.serverUrl
                 .removePrefix("https://").removePrefix("http://"),
             onSignIn = auth::signIn,
             onChangeServer = auth::setServer,
@@ -92,7 +92,7 @@ private fun MainShell() {
     // and send anything waiting. Once per launch (and again straight after signing in).
     val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        com.example.streetsweep.data.sync.PortalPushWorker.enqueue(appContext)
+        com.example.streetsweep.data.server.SyncWorker.enqueue(appContext)
     }
     val navController = rememberNavController()
     val backStack by navController.currentBackStackEntryAsState()

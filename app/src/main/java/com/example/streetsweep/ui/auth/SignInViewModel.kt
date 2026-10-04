@@ -41,9 +41,9 @@ class SignInViewModel(private val container: AppContainer) : ViewModel() {
         _notice.value = null
         try {
             val label = android.os.Build.MODEL?.takeIf { it.isNotBlank() } ?: "Phone"
-            val result = container.portalClient.signInDevice(email, password, label)
+            val result = container.server.signInDevice(email, password, label, com.example.streetsweep.BuildConfig.VERSION_NAME)
             // Storing the token is what takes the gate down.
-            container.settings.setPortalIdentity(result.token, result.name, result.email)
+            container.settings.setServerIdentity(result.token, result.userId, result.name, result.email)
         } catch (e: Exception) {
             _error.value = e.message ?: "Could not sign in"
         } finally {
@@ -55,9 +55,9 @@ class SignInViewModel(private val container: AppContainer) : ViewModel() {
     fun setServer(address: String) = viewModelScope.launch {
         val clean = address.trim()
         if (clean.isEmpty()) return@launch
-        container.settings.setPortalUrl(clean)
+        container.settings.setServerUrl(clean)
         clearMessages()
     }
 
-    fun signOut() = viewModelScope.launch { container.settings.clearPortalIdentity() }
+    fun signOut() = viewModelScope.launch { container.settings.clearServerToken() }
 }

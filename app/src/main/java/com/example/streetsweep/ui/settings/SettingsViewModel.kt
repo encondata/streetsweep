@@ -88,42 +88,48 @@ class SettingsViewModel(private val container: AppContainer, private val context
         "Coverage exported as GeoJSON"
     }
 
-    // ---- the area builder's server ----
+    // ---- the StreetSweep server (v2) ----
 
-    fun setPortalUrl(url: String) = viewModelScope.launch { container.settings.setPortalUrl(url) }
+    val teams: StateFlow<List<com.example.streetsweep.data.db.TeamEntity>> = container.database.serverDao().observeTeams()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val vehicles: StateFlow<List<com.example.streetsweep.data.db.VehicleEntity>> = container.database.serverDao().observeVehicles()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    /** Drives recorded here that the server doesn't have yet (the v1 history, at first). */
+    val pendingUploads: StateFlow<Int> = container.trackRepository.observePendingUploadCount()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
-    fun setPortalToken(value: String) = viewModelScope.launch { container.settings.setPortalToken(value) }
+    fun setServerUrl(url: String) = viewModelScope.launch { container.settings.setServerUrl(url) }
 
     /** Puts the address back to the hosted one, undoing a temporary address used for testing. */
-    fun useHostedPortal() = viewModelScope.launch {
-        container.settings.setPortalUrl(TrackingSettings.DEFAULT_PORTAL_URL)
-    }
-
-    fun testPortal() = work { "Reached " + container.portalClient.ping() }
+    fun useHostedServer() = viewModelScope.launch { container.settings.setServerUrl(null) }
 
     /**
      * Clearing the token brings the sign-in gate straight back: the app watches the same
      * setting, so there is nothing to navigate to. Drives already recorded stay on the
-     * phone — they are this device's history, not the portal's copy of it.
+     * phone, and go up after the next sign-in.
      */
-    fun signOutOfPortal() = viewModelScope.launch { container.settings.clearPortalIdentity() }
+    fun signOut() = viewModelScope.launch { container.settings.clearServerToken() }
 
-    fun pushToPortal(full: Boolean) = work {
-        val r = container.portalSync.push(full)
-        "Sent ${r.edges} street segments, ${r.areas} areas and ${r.drives} drives" +
-            (describe(r.pulled)?.let { ". $it" } ?: "")
+    fun syncNow() = work {
+        val r = container.sync.sync()
+        listOfNotNull(
+            if (r.drivesUploaded > 0) "${r.drivesUploaded} ${if (r.drivesUploaded == 1) "drive" else "drives"} sent" else null,
+            if (r.drivesWaiting > 0) "${r.drivesWaiting} still to send" else null,
+            if (r.marksSent > 0) "${r.marksSent} street marks sent" else null,
+            if (r.placesSent > 0) "${r.placesSent} places sent" else null,
+            "${r.areas} ${if (r.areas == 1) "area" else "areas"} up to date",
+        ).joinToString(" · ")
     }
 
-    /** Queues street downloads for whatever changed and says what happened, or null when nothing did. */
-    private suspend fun describe(p: com.example.streetsweep.data.sync.AreaPull): String? {
-        val unfinished = container.coverageRepository.unfinishedAreaIds()
-        val queued = com.example.streetsweep.data.osm.StreetDownloadWorker.enqueueAll(context, p.needStreets + unfinished)
-        val retrying = (unfinished - p.needStreets.toSet()).size
-        return listOfNotNull(
-            p.summary(),
-            if (retrying > 0) "retrying streets for $retrying unfinished ${if (retrying == 1) "area" else "areas"}" else null,
-        ).joinToString(" · ").ifEmpty { null }
-            ?.let { it + if (queued > 0) " — downloading one area at a time" else "" }
+    /** Whose coverage the map, figures and guidance show. */
+    fun showTeam(teamId: String) = work {
+        container.sync.selectTeam(teamId)
+        "Showing ${teams.value.firstOrNull { it.id == teamId }?.let { if (it.isPersonal) "your own" else it.name + "'s" } ?: "that team's"} coverage"
+    }
+
+    /** The car whose Bluetooth starts drives is this vehicle (or, with null, no particular one). */
+    fun linkBluetoothVehicle(vehicleId: String?) = viewModelScope.launch {
+        settings.value.bluetoothTriggerAddress?.let { container.settings.setBluetoothVehicle(it, vehicleId) }
     }
 
     fun restoreFrom(uri: Uri) = work {
@@ -161,8 +167,6 @@ class SettingsViewModel(private val container: AppContainer, private val context
         if (intent != null) context.startActivity(intent)
         Runtime.getRuntime().exit(0)
     }
-
-    fun setSnapToRoads(enabled: Boolean) = viewModelScope.launch { container.settings.setSnapToRoads(enabled) }
 
     fun setGpsInterval(seconds: Int) = viewModelScope.launch { container.settings.setGpsIntervalSeconds(seconds) }
 
