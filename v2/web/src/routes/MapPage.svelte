@@ -24,6 +24,15 @@
   let ctl = $state<MapController | null>(null);
   let panel = $state<ReturnType<typeof AreaPanel>>();
   const PANEL_W = 360;
+  // The areas panel can be put away for a bigger map; remembered between visits.
+  let panelShown = $state(readPanel());
+  function readPanel(): boolean {
+    try { return localStorage.getItem("streetsweep.areasPanel") !== "hidden"; } catch { return true; }
+  }
+  function showPanel(on: boolean) {
+    panelShown = on;
+    try { localStorage.setItem("streetsweep.areasPanel", on ? "shown" : "hidden"); } catch { /* fine */ }
+  }
   let info = $state<Info | null>(null);
   let zoom = $state(11);
   let base = $state<Base>(readBase());
@@ -181,9 +190,13 @@
 <div class="mapwrap">
   <div class="map" bind:this={box}></div>
 
-  {#if ctl}<AreaPanel bind:this={panel} {ctl} panelWidth={PANEL_W} onteam={chooseTeam} />{/if}
+  {#if ctl}<AreaPanel bind:this={panel} {ctl} panelWidth={PANEL_W} onteam={chooseTeam}
+    shown={panelShown} onshow={() => showPanel(true)} onhide={() => showPanel(false)} />{/if}
 
   <div class="top">
+    <button class="tool" class:open={panelShown} aria-pressed={panelShown} onclick={() => showPanel(!panelShown)} title={panelShown ? "Hide areas" : "Show areas"}>
+      <Icon name="map" size={16} /> Areas
+    </button>
     <button class="tool" class:on={picking} aria-pressed={picking} onclick={startPick} title="Mark a place on the map">
       <Icon name="pin" size={16} /> {picking ? "Click the spot… (cancel)" : "Add place"}
     </button>
@@ -194,7 +207,7 @@
     </div>
   </div>
 
-  <div class="bottom">
+  <div class="bottom" class:full={!panelShown}>
     {#if info?.running}
       <div class="chip busy">
         <span class="dot"></span>
@@ -239,6 +252,7 @@
 <style>
   .tool { height: 38px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); gap: 6px; font-size: 13px; }
   .tool.on { background: #fce4ec; border-color: #f48fb1; color: #880e4f; }
+  .tool.open { background: var(--accent-soft); border-color: var(--green-600); color: var(--green-700); }
   .check { display: flex; align-items: center; gap: 8px; font-weight: 400; }
   .check input { width: auto; height: auto; }
   :global(.pthumb) { display: block; width: 100%; max-height: 140px; object-fit: cover; border-radius: 8px; margin-bottom: 6px; }
@@ -248,6 +262,7 @@
   .seg { display: flex; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 3px; box-shadow: var(--shadow); }
   .seg button { height: 30px; border: 0; background: none; padding: 0 12px; font-size: 13px; border-radius: 7px; color: var(--ink-soft); }
   .seg button.on { background: var(--accent-soft); color: var(--green-700); }
+  .bottom.full { left: 50%; }
   .bottom { position: absolute; left: calc(50% + 187px); transform: translateX(-50%); bottom: 36px; display: flex; justify-content: center; pointer-events: none; max-width: calc(100% - 32px); }
   .chip {
     pointer-events: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 99px; padding: 8px 14px;

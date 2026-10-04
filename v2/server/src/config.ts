@@ -10,6 +10,8 @@ export const config = {
   dataDir: env.DATA_DIR ?? "/data",
   valhallaUrl: env.VALHALLA_URL ?? "http://valhalla:8002",
   overpassUrl: env.OVERPASS_URL ?? "",
+  // Address search (Nominatim). The public one by default; any Nominatim works.
+  geocoderUrl: env.GEOCODER_URL || "https://nominatim.openstreetmap.org",
   // The region the server imports streets and boundaries for (a Geofabrik extract).
   osmExtractUrl: env.OSM_EXTRACT_URL || "https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf",
   // Basemap tiles come from these, through the server's cache. Override for a private tile server.

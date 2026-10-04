@@ -41,6 +41,7 @@ function style(): StyleSpecification {
       "drive-streets": { type: "geojson", data: empty() },
       "drive-track": { type: "geojson", data: empty() },
       places: { type: "geojson", data: empty(), promoteId: "id" },
+      "search-pin": { type: "geojson", data: empty() },
     },
     layers: [
       { id: "base-osm", type: "raster", source: "osm", paint: { "raster-saturation": -0.35 } },
@@ -104,6 +105,11 @@ function style(): StyleSpecification {
           "circle-color": ["case", ["boolean", ["get", "mine"], false], PLACE_COLOR, "#8e44ad"],
           "circle-stroke-color": "#ffffff", "circle-stroke-width": 2,
         },
+      },
+      // An address found with the search box.
+      {
+        id: "search-pin", type: "circle", source: "search-pin",
+        paint: { "circle-radius": 9, "circle-color": "#e2721f", "circle-stroke-color": "#ffffff", "circle-stroke-width": 3 },
       },
       {
         id: "preview-line", type: "line", source: "preview", layout: { "line-join": "round" },
@@ -312,6 +318,23 @@ export class MapController {
       const xs = coords.map((c) => c[0]), ys = coords.map((c) => c[1]);
       this.fitBounds([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]);
     }
+  }
+
+  /**
+   * Go to an address from the search box and pin it. A place with an outline of its
+   * own (a street, a park) is framed; a single address is zoomed to street level.
+   */
+  showSearchResult(lon: number, lat: number, bbox: [number, number, number, number] | null, opts: { left?: number } = {}) {
+    this.whenReady(() => (this.map.getSource("search-pin") as GeoJSONSource).setData({
+      type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [lon, lat] } }],
+    }));
+    const small = bbox && bbox[2] - bbox[0] < 0.05 && bbox[3] - bbox[1] < 0.05 && bbox[2] - bbox[0] > 0.0005;
+    if (bbox && small) this.fitBounds(bbox, { left: opts.left, animate: true });
+    else this.map.flyTo({ center: [lon, lat], zoom: 17, duration: 800, padding: { left: opts.left ?? 0, top: 0, right: 0, bottom: 0 } });
+  }
+
+  clearSearchResult() {
+    this.whenReady(() => (this.map.getSource("search-pin") as GeoJSONSource).setData(empty()));
   }
 
   /** The person's street colours (Preferences). */

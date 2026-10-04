@@ -113,7 +113,17 @@
 
   {#if d && v}
     <div class="hero card">
-      <div class="pic"><VehicleImage photo={v.photo_url} kind={v.kind} height={190} round={0} /></div>
+      <div class="pic">
+        <VehicleImage photo={v.photo_url} kind={v.kind} height={190} round={0} />
+        <!-- The picture is where you change it: admins of the vehicle's team only. -->
+        {#if d.can_admin}
+          <div class="pic-actions">
+            <button class="sm" disabled={busy} onclick={() => fileInput?.click()}><Icon name="camera" size={15} /> {v.photo_url ? "Change photo" : "Add photo"}</button>
+            {#if v.photo_url}<button class="sm" disabled={busy} onclick={removePhoto}>Remove</button>{/if}
+            <input bind:this={fileInput} type="file" accept="image/*" hidden onchange={(e) => pickPhoto(e.currentTarget.files?.[0])} />
+          </div>
+        {/if}
+      </div>
       <div class="info">
         <div class="title">
           <h1>{v.name}</h1>
@@ -257,15 +267,6 @@
         <div><button type="submit" disabled={busy}>Save</button></div>
       </form>
 
-      <section class="card pad stack">
-        <h2>Photo</h2>
-        <p class="muted small">Optional. Without one, the drawing for its type is used.</p>
-        <div class="inline">
-          <button disabled={busy} onclick={() => fileInput?.click()}>{v.photo_url ? "Change photo" : "Add a photo"}</button>
-          {#if v.photo_url}<button class="ghost" disabled={busy} onclick={removePhoto}>Remove</button>{/if}
-          <input bind:this={fileInput} type="file" accept="image/*" hidden onchange={(e) => pickPhoto(e.currentTarget.files?.[0])} />
-        </div>
-      </section>
 
       {#if moveTargets.length && !v.archived_at}
         <section class="card pad stack">
@@ -314,4 +315,7 @@
   .scroll { overflow-x: auto; }
   .hist :global(th:first-child), .hist :global(td:first-child) { padding-left: 18px; }
   @media (max-width: 760px) { .hero { grid-template-columns: 1fr; } }
+  .pic { position: relative; }
+  .pic-actions { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 6px; }
+  .pic-actions button { background: rgba(255, 255, 255, .94); box-shadow: var(--shadow); }
 </style>

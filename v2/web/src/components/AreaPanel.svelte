@@ -12,7 +12,11 @@
   import { AREA_COLORS, LEVEL_LABEL, type Area } from "../lib/types";
   import { assignAreaColors } from "../lib/areaColors";
 
-  let { ctl, panelWidth = 360, onteam }: { ctl: MapController; panelWidth?: number; onteam?: (teamId: string) => void } = $props();
+  let { ctl, panelWidth = 360, onteam, shown = true, onshow, onhide }: {
+    ctl: MapController; panelWidth?: number; onteam?: (teamId: string) => void;
+    /** Hidden, the panel keeps working (team, areas on the map); it's just out of the way. */
+    shown?: boolean; onshow?: () => void; onhide?: () => void;
+  } = $props();
 
   type Mode = "list" | "detail" | "draw";
   let mode = $state<Mode>("list");
@@ -27,6 +31,10 @@
   let q = $state("");
   let results = $state<Area[]>([]);
   let searching = $state(false);
+  // Addresses: looked up only when asked (Enter), as the geocoder's rules require.
+  type Address = { label: string; lon: number; lat: number; bbox: [number, number, number, number] | null; kind: string | null };
+  let addresses = $state<Address[] | null>(null);
+  let lookingUp = $state(false);
 
   let area = $state<Area | null>(null);
   let areaCanEdit = $state(false);
@@ -94,6 +102,7 @@
   $effect(() => {
     const term = q.trim();
     clearTimeout(searchTimer);
+    addresses = null; // a new search: old address results no longer apply
     if (term.length < 2) {
       results = [];
       return;
@@ -110,9 +119,35 @@
     }, 250);
   });
 
+  async function findAddress() {
+    const term = q.trim();
+    if (term.length < 3 || lookingUp) return;
+    lookingUp = true;
+    error = null;
+    try {
+      addresses = (await api<{ results: Address[] }>(`/api/geocode?q=${encodeURIComponent(term)}`)).results;
+      // One clear answer: go straight there.
+      if (addresses.length === 1) goTo(addresses[0]);
+    } catch (e) {
+      error = errorText(e);
+    } finally {
+      lookingUp = false;
+    }
+  }
+
+  function goTo(a: Address) {
+    ctl.showSearchResult(a.lon, a.lat, a.bbox, { left: panelWidth });
+  }
+
+  /** "123 Main Street, Austin, Travis County, Texas, 78701, United States" → first two parts, then the rest. */
+  const addressHead = (l: string) => l.split(", ").slice(0, 2).join(", ");
+  const addressTail = (l: string) => l.split(", ").slice(2).filter((p) => p !== "United States").join(", ");
+
   // ---- one area ----
   export async function open(id: string, move = true) {
     error = null;
+    // Asked for an area (a click on the map): come back into view to show it.
+    onshow?.();
     try {
       const r = await api<{ area: Area; can_edit: boolean }>(`/api/areas/${id}`);
       area = r.area;
@@ -272,7 +307,7 @@
   const kind = (a: Area) => `${LEVEL_LABEL[a.level]}${a.parent_name ? ` in ${a.parent_name}` : ""}`;
 </script>
 
-<aside class="panel" style:width="{panelWidth}px">
+<aside class="panel" class:hidden={!shown && mode !== "draw"} style:width="{panelWidth}px">
   {#if mode === "list"}
     <header>
       <label class="team">
@@ -282,12 +317,13 @@
         </select>
       </label>
       {#if canEdit}<button class="sm primary" onclick={() => startDraw(null)}><Icon name="plus" size={16} /> Draw</button>{/if}
+      {#if onhide}<button class="sm ghost icon" onclick={onhide} aria-label="Hide areas" title="Hide areas">✕</button>{/if}
     </header>
 
-    <label class="search">
+    <form class="search" role="search" onsubmit={(e) => { e.preventDefault(); findAddress(); }}>
       <Icon name="search" size={17} />
-      <input type="search" placeholder="Find a county or city" bind:value={q} aria-label="Find a county or city" />
-    </label>
+      <input type="search" placeholder="County, city or address" bind:value={q} aria-label="Find a county, city or address" />
+    </form>
 
     {#if error}<p class="notice error">{error}</p>{/if}
 
@@ -300,8 +336,26 @@
             {#if a.followed_by?.includes(teamId)}<span class="badge green">Following</span>{/if}
           </button>
         {:else}
-          <p class="muted small pad">{searching ? "Searching…" : "No county or city by that name in the imported region."}</p>
+          {#if searching}<p class="muted small pad">Searching…</p>{/if}
         {/each}
+        {#if addresses === null}
+          {#if q.trim().length >= 3}
+            <button class="item addr-ask" disabled={lookingUp} onclick={findAddress}>
+              <Icon name="pin" size={16} />
+              <span class="grow"><strong>{lookingUp ? "Looking up…" : `Find “${q.trim()}” as an address`}</strong><span class="muted small">or press Enter</span></span>
+            </button>
+          {/if}
+        {:else}
+          <p class="muted small pad addr-head">Addresses</p>
+          {#each addresses as a (a.label + a.lat)}
+            <button class="item" onclick={() => goTo(a)}>
+              <span class="pin"><Icon name="pin" size={16} /></span>
+              <span class="grow"><strong>{addressHead(a.label)}</strong><span class="muted small">{addressTail(a.label)}</span></span>
+            </button>
+          {:else}
+            <p class="muted small pad">No address like that in the imported region.</p>
+          {/each}
+        {/if}
       </div>
     {:else}
       <div class="list">
@@ -333,6 +387,7 @@
   {:else if mode === "detail" && area}
     <header>
       <button class="sm ghost back" onclick={back}><Icon name="back" size={16} /> Areas</button>
+      {#if onhide}<button class="sm ghost icon" onclick={onhide} aria-label="Hide areas" title="Hide areas">✕</button>{/if}
     </header>
     {#if error}<p class="notice error">{error}</p>{/if}
     <div class="detail">
@@ -435,11 +490,16 @@
     display: flex; flex-direction: column; gap: 10px; padding: 12px; overflow: auto;
   }
   header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .hidden { display: none; }
+  .icon { width: 30px; padding: 0; flex: none; }
   .team { display: grid; gap: 2px; flex: 1; min-width: 0; }
   .team select { height: 34px; font-weight: 700; }
   .search { position: relative; display: block; color: var(--ink-soft); }
   .search :global(svg) { position: absolute; left: 11px; top: 11px; }
   .search input { padding-left: 34px; }
+  .pin { color: #e2721f; display: grid; place-items: center; width: 14px; flex: none; }
+  .addr-ask { color: var(--link); }
+  .addr-head { padding-bottom: 0; text-transform: uppercase; letter-spacing: .04em; font-size: 11.5px; }
   .list { display: grid; gap: 2px; }
   .item {
     display: flex; align-items: center; justify-content: flex-start; gap: 10px; text-align: left; height: auto; padding: 9px 10px; white-space: normal;

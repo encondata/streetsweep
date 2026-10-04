@@ -11,6 +11,7 @@
   import { ago } from "../../lib/format";
   import { emptyVehicleForm, formToBody } from "../../lib/vehicleForm";
   import { syncFrom } from "../../lib/forms";
+  import { cropToBlob } from "../../lib/image";
   import { vehicleLine, type Vehicle, type VehicleDetail } from "../../lib/types";
 
   let showArchived = $derived(router.query.get("archived") === "1");
@@ -19,6 +20,9 @@
   let busy = $state<string | null>(null);
 
   let adding = $state(false);
+  // A photo chosen in the form goes up once the vehicle exists.
+  let photo = $state<File | null>(null);
+  let photoPreview = $derived(photo ? URL.createObjectURL(photo) : null);
   let form = $state(emptyVehicleForm());
   let teamId = $state("");
 
@@ -72,6 +76,7 @@
 
   function openAdd() {
     form = emptyVehicleForm();
+    photo = null;
     teamId = adminTeams.find((t) => t.kind === "personal")?.id ?? adminTeams[0]?.id ?? "";
     adding = true;
   }
@@ -84,6 +89,10 @@
       const d = await api<VehicleDetail>("/api/vehicles", {
         body: { team_id: teamId, ...body, ...(chosenTeam?.kind === "shared" ? {} : { checkout_policy: undefined }) },
       });
+      if (photo) {
+        // The vehicle is made either way; a photo that won't go up can be added on its page.
+        await api(`/api/vehicles/${d.vehicle.id}/photo`, { method: "PUT", raw: await cropToBlob(photo, 960, 540) }).catch(() => {});
+      }
       adding = false;
       router.go(`/fleet/vehicles/${d.vehicle.id}`);
     } catch (e) {
@@ -164,6 +173,15 @@
       </select>
     </label>
     <VehicleForm bind:value={form} shared={chosenTeam?.kind === "shared"} />
+    <div class="field">Photo
+      <span class="help">Optional. Without one, a drawing for its type is shown.</span>
+      <div class="photo-pick">
+        {#if photoPreview}<img src={photoPreview} alt="" />{/if}
+        <label class="btn sm"><Icon name="camera" size={15} /> {photo ? "Choose another" : "Choose a photo"}
+          <input type="file" accept="image/*" hidden onchange={(e) => (photo = e.currentTarget.files?.[0] ?? null)} /></label>
+        {#if photo}<button type="button" class="sm ghost" onclick={() => (photo = null)}>Remove</button>{/if}
+      </div>
+    </div>
   </form>
   {#snippet footer()}
     <button class="ghost" onclick={() => (adding = false)}>Cancel</button>
@@ -180,4 +198,6 @@
   .name { color: var(--ink); font-weight: 700; font-size: 15px; }
   .status { display: flex; align-items: center; gap: 6px; margin-top: 4px; min-height: 24px; min-width: 0; }
   .foot { padding: 0 14px 12px; display: flex; justify-content: flex-end; }
+  .photo-pick { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .photo-pick img { width: 120px; height: 68px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
 </style>
