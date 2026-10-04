@@ -31,13 +31,14 @@ until v2 replaces it. v2 starts with an empty database — no v1 import.
 | **Vehicle** | Owned by no person. It is **managed by a team**, which decides who edits it and who may drive it. A personal car sits under your personal team (you become its permanent driver automatically), a shared family car under a household team, and a van under the company team. A car can move between teams you run. Archiving it hands it back from everyone and takes its loggers out. |
 | **Assignment** | Links a vehicle to a user. Either **permanent** (my car — several people can hold this, e.g. husband and wife) or **checkout** (van taken out, then returned; only one open checkout per vehicle at a time). Full history is kept. |
 | **Device** | A signed-in phone (per-device token, revocable). |
-| **Logger** | An ESP32 + GPS a user builds and registers. Has its own secret key, which signs every request with HMAC-SHA256. The server stores the secret itself, because HMAC needs it (see `docs/LOGGER-PROTOCOL.md`). It can be **installed** in any vehicle its builder may drive, with history kept, and has a default drive type. It uploads over Wi-Fi, with a BLE relay through the phone later that forwards the same signed requests. |
+| **Logger** | An ESP32 + GPS + e-ink box on car power (see `docs/LOGGER-HARDWARE.md`). On first boot it makes a permanent device ID (UUIDv4) and a P-256 key pair. It is set up from the app over BLE: Wi-Fi, a name, and a **binding**, either to a vehicle (which the user may drive, or creates) or to the user. It signs every request with its private key, so the server keeps only the public key (see `docs/LOGGER-PROTOCOL.md`). Settings (interval, auto upload, default drive type) live on the server. A device can have only one active claim; the owner (or a site admin) deregisters it to release it. It uploads over Wi-Fi, with a BLE relay through the phone later that forwards the same signed requests. |
 
 **Drive attribution.** Phone drive: the user is the signed-in person, and the vehicle is
 the one picked on the phone (defaulting to their open checkout, otherwise their only
-permanent car). Logger drive: the vehicle is the one the logger was installed in at that
-time, and the driver is whoever had that vehicle checked out at that time, otherwise
-its only permanent assignee, otherwise "unknown driver" (fixable on the web).
+permanent car). Logger drive, from the logger's binding at that time: bound to a vehicle,
+the driver is whoever had that vehicle checked out at that time, otherwise its only
+permanent assignee, otherwise "unknown driver" (fixable on the web). Bound to a user,
+the driver is that user and the vehicle follows the phone rule.
 
 **Coverage.** A drive counts for a team when the driver belonged to that team at the
 time **and** the team counts that drive's type. Example: a driver in "Household" and
@@ -115,10 +116,12 @@ vehicle_assignments
                  assigned_by, note)
   -- EXCLUDE USING gist (vehicle_id WITH =, during WITH &&) WHERE kind='checkout'
   --   → a van can't be checked out to two people at once
-loggers         (id, owner_user_id, name, secret, default_drive_type_key, hardware_id,
+loggers         (id, device_id, owner_user_id, name, public_key, settings jsonb, hardware_id,
                  firmware_version, last_seen_at, last_battery_mv,
-                 created_at, revoked_at)
-logger_installs (id, logger_id, vehicle_id, during tstzrange)   -- same EXCLUDE per logger
+                 created_at, deregistered_at)               -- one row per claim; device_id
+                                                            -- unique WHERE deregistered_at IS NULL
+logger_bindings (id, logger_id, vehicle_id NULL, user_id NULL, during tstzrange)
+                                                            -- exactly one set; same EXCLUDE per logger
 ```
 
 ### Map data (server-built)
@@ -182,12 +185,14 @@ audit_log       (id, at, user_id, team_id, action, entity, entity_id, data jsonb
   assignments and tombstones. `GET /api/areas/:id/package` downloads a prebuilt
   street and tile pack.
 - **Upload:** `POST /api/drives` (phone, gzip NDJSON of fixes, idempotent on drive id).
-- **Logger:** `POST /api/logger/batches`, with header `X-Logger-Id`, a body of fixes, and
-  an HMAC-SHA256 signature over the body using the logger key. Idempotent on (logger, seq).
-  A phone relaying over BLE forwards the same signed blob unchanged, so the phone never
-  holds the logger's key.
-- **Logger provisioning:** register on the web, which shows the key once with a QR code
-  and a `curl` line to flash. The logger pulls its time and settings from `GET /api/logger/config`.
+- **Logger:** `POST /api/logger/batches`, with header `X-Logger-Id` (the device ID), a body
+  of fixes, and an ECDSA P-256 signature made with the logger's private key. Idempotent on
+  (logger, seq). A phone relaying over BLE forwards the same signed blob unchanged, and
+  can't forge one.
+- **Logger provisioning:** the app pairs over BLE (ESP-IDF provisioning, security 2) and
+  calls `POST /api/loggers/claim` with the device's public key. `409` if the device is
+  already claimed. The logger pulls its time and settings from `GET /api/logger/config`.
+  `410` there means it was deregistered: it wipes and goes back to pairing.
 
 ## Build stages
 
@@ -214,7 +219,10 @@ audit_log       (id, at, user_id, team_id, action, entity, entity_id, data jsonb
    Done: sync API, packages, app data layer (Room v17), provisional preview, drive type and
    vehicle, places sharing, Settings. Open: a drive-type control on the car screen, and the
    first install on a real phone (after v2 is deployed at streetsweep.net).
-7. **Logger firmware.** Reference ESP32 sketch for Wi-Fi upload, and BLE after that.
+7. **Logger.** Server moves to the v2 protocol (key pair, claim, bindings, settings, 410),
+   the app gets the BLE setup wizard and logger settings, and the reference firmware
+   (`docs/LOGGER-HARDWARE.md`): pairing, logging, shutdown on car power loss, Wi-Fi
+   upload. BLE relay after that.
 
 ## Decisions (2026-10-03)
 
@@ -308,3 +316,17 @@ audit_log       (id, at, user_id, team_id, action, entity, entity_id, data jsonb
 
 - **Finding teams.** Draft: teams are searchable by name, and a team can be made unlisted,
   in which case people join through a link with a code.
+
+## Decisions (2026-10-04): logger
+
+11. **Logger setup is app-only.** The device makes its own ID and key pair. The app pairs
+    over BLE with ESP-IDF's provisioning library (security 2, the pairing code from the
+    e-ink QR is the password), sets Wi-Fi, name, binding and settings, then claims it on
+    the server. The web's "Register a logger" and shared HMAC secrets go away.
+12. **Claims are blocked, not taken over.** A device ID with an active claim can't be
+    claimed again, even after a factory reset, until the owner deregisters it or a site
+    admin force-releases it.
+13. **User-bound loggers use the phone rule** for the vehicle: the user's open checkout
+    at the time, otherwise their only permanent car, otherwise none.
+14. **Private or shared is the vehicle's team**, not a logger setting. The wizard's "Who
+    uses this car?" decides which team a new vehicle goes under.

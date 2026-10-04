@@ -95,3 +95,19 @@ Google's outlines come from licensed and in-house data, so OSM alone won't match
 - Subdivisions are often split into phases ("Phase 1", "Phase 2"). Group them into one neighborhood, or offer each phase separately?
 - How often to refresh the CAD data (yearly is probably enough).
 - Search ranking when OSM and CAD both return a match with similar names.
+
+---
+
+## Logger extras
+
+**Idea:** Things the logger could do beyond the first build (`docs/LOGGER-HARDWARE.md`).
+
+- **Drive-type button.** Switch Personal ↔ Delivery on the device, with the type shown on
+  the e-ink. Needs a protocol addition: a `drive_type` per batch or a marker event in the
+  points stream, which `logger-assemble` would honour when it cuts drives.
+- **Place pin.** A long press drops a place ("missed street", pothole) at the current fix.
+  It would map onto `places`.
+- **OTA firmware updates.** `GET /api/logger/config` advertises a firmware version and a
+  signed image URL. The logger updates while parked on Wi-Fi.
+- **Always-on BLE relay.** Keep BLE advertising while driving so the phone can carry
+  batches when there's no Wi-Fi.
