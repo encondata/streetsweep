@@ -79,7 +79,9 @@ check("coverage arrives as new segments, not a reset", inc.coverage[ann.personal
 const ia = inc.areas.find((a) => a.id === area.id);
 check("areas still listed, outline not resent, version to compare", ia?.geometry === null && ia.version === fa.version && ia.build_status === "built");
 
-const seg = String(pkg.segments.find((x) => !inc.coverage[ann.personal].segments.includes(String(x[0])))[0]);
+check("each as [segment, first driven]", inc.coverage[ann.personal].segments.every(([id, t]) => Number.isInteger(id) && Math.abs(t - t0) < 3600));
+const covered = new Set(inc.coverage[ann.personal].segments.map(([id]) => id));
+const seg = String(pkg.segments.find((x) => !covered.has(x[0]))[0]);
 await expect("phone marks a street done", phone.call("PUT", `/api/teams/${ann.personal}/marks/${seg}`, { kind: "complete", note: "Walked" }), 200);
 const placeId = crypto.randomUUID();
 await expect("phone adds a place with its own id", phone.call("POST", "/api/places", { id: placeId, name: "Gate", lon: -97.7262, lat: 30.3061 }), 201);

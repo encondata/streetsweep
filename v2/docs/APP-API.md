@@ -26,7 +26,7 @@ A 401 means the token was revoked or the account changed: sign in again.
 | `place_ids` you can see | whole | drops any place not listed |
 | `places` | changed since | upserts |
 | `drives` you drove or uploaded (status, segment_count, `deleted`) | changed since | updates; once `matched`, drops the drive's provisional preview |
-| `coverage` {team: {reset, segments: [segment ids]}} | since, or whole when `reset` | adds; on `reset`, replaces that team's set first |
+| `coverage` {team: {reset, segments: [[segment id, first driven (unix s)]]}} | since, or whole when `reset` | adds; on `reset`, replaces that team's set first |
 
 The cursor is a few seconds behind the server clock, so rows may arrive twice. Apply
 everything as an upsert.

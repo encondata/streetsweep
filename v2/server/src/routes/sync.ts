@@ -7,7 +7,7 @@
 // come only on a full sync; later, a changed `version` tells the phone to fetch one.
 // Bigger things come as changes since the cursor: area outlines that changed, marks
 // (with tombstones), places that changed, your drives' status, and each team's coverage
-// (segment ids; a team recounted since the cursor comes whole, flagged `reset`).
+// ([segment id, first driven]; a team recounted since the cursor comes whole, flagged `reset`).
 //
 // The cursor is the server's clock at the start of the read, minus a little, so nothing
 // written during the read is missed (a phone may get a few rows twice; that's harmless).
@@ -112,14 +112,16 @@ export default async function syncRoutes(app: FastifyInstance) {
           ORDER BY d.started_at DESC LIMIT 5000`, [me.id, sinceIso]);
 
       // Coverage per team: segment ids. Whole when first syncing or after a recount.
-      const coverage: Record<string, { reset: boolean; segments: string[] }> = {};
+      // Each as [segment id, first driven (unix seconds)], for the phone's recency colours.
+      const coverage: Record<string, { reset: boolean; segments: [number, number][] }> = {};
       for (const t of teams) {
         // Whole on a first sync, after a recount, or for a team joined since the cursor.
         const reset = !sinceIso || (t.coverage_reset_at && new Date(t.coverage_reset_at) > since!) || new Date(t.joined_at) > since!;
-        const rows = await q<{ segment_id: string }>(
-          `SELECT segment_id FROM team_coverage WHERE team_id = $1 ${reset ? "" : "AND updated_at > $2"}`,
+        const rows = await q<{ segment_id: string; t: number }>(
+          `SELECT segment_id, extract(epoch FROM first_driven_at)::bigint AS t FROM team_coverage
+            WHERE team_id = $1 ${reset ? "" : "AND updated_at > $2"}`,
           reset ? [t.id] : [t.id, sinceIso]);
-        coverage[t.id] = { reset: !!reset, segments: rows.map((r) => r.segment_id) };
+        coverage[t.id] = { reset: !!reset, segments: rows.map((r) => [Number(r.segment_id), Number(r.t)]) };
       }
 
       await client.query("COMMIT");
