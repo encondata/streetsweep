@@ -1,0 +1,70 @@
+<!doctype html>
+<!-- The Play Store feature graphic, 1024 x 500. Rendered to feature-1024x500.png by
+     headless Chrome (see brand/README.md); uses the real map screenshot from screenshots/. -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --ink: #111b27;
+    --ink-soft: #46525f;
+    --green: #16a34a;
+    --blue: #1a6fd4;
+    --bg: #f4f8f5;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1024px; height: 500px; overflow: hidden; background: var(--bg); }
+  body { position: relative; font-family: "SF Compact Display", -apple-system, "Helvetica Neue", Arial, sans-serif; color: var(--ink); }
+
+  /* A faint street grid, driven (green) fading into to-do (blue), behind everything. */
+  .grid { position: absolute; inset: 0; opacity: .12; }
+
+  .copy { position: absolute; left: 64px; top: 0; bottom: 0; width: 600px; display: flex; flex-direction: column; justify-content: center; gap: 26px; }
+  .brand { display: flex; align-items: center; gap: 18px; }
+  .brand .mark { height: 96px; }
+  .brand .word { height: 66px; }
+  h1 { font-size: 41px; line-height: 1.08; font-weight: 800; letter-spacing: -.5px; }
+  h1 .g { color: var(--green); }
+  h1 .b { color: var(--blue); }
+  .points { display: flex; gap: 22px; font-size: 18px; font-weight: 600; color: var(--ink-soft); }
+  .points span { display: flex; align-items: center; gap: 8px; }
+  .points i { width: 18px; height: 5px; border-radius: 3px; display: block; }
+
+  /* The phone: the real map screen, cropped at the bottom by the edge of the graphic. */
+  .phone {
+    position: absolute; right: 70px; top: 42px; width: 300px; height: 533px;
+    border-radius: 40px; background: #0f1720; padding: 10px;
+    box-shadow: 0 30px 60px rgba(17, 27, 39, .28), 0 6px 16px rgba(17, 27, 39, .18);
+    transform: rotate(4deg);
+  }
+  .phone img { width: 100%; height: 100%; object-fit: cover; object-position: top; border-radius: 31px; display: block; }
+</style>
+</head>
+<body>
+  <svg class="grid" viewBox="0 0 1024 500" preserveAspectRatio="none" aria-hidden="true">
+    <defs>
+      <linearGradient id="fade" x1="0" x2="1" y1="0" y2="0">
+        <stop offset="0" stop-color="#16a34a"/><stop offset=".55" stop-color="#16a34a"/><stop offset=".75" stop-color="#1a6fd4"/>
+      </linearGradient>
+    </defs>
+    <g stroke="url(#fade)" stroke-width="5" stroke-linecap="round" fill="none" transform="rotate(-24 512 250)">
+      <path d="M-200 40H1300M-200 120H1300M-200 200H1300M-200 280H1300M-200 360H1300M-200 440H1300M-200 520H1300"/>
+      <path d="M-100 -300V900M0 -300V900M100 -300V900M200 -300V900M300 -300V900M400 -300V900M500 -300V900M600 -300V900M700 -300V900M800 -300V900M900 -300V900M1000 -300V900M1100 -300V900"/>
+    </g>
+  </svg>
+
+  <div class="copy">
+    <div class="brand">
+      <img class="mark" src="../mark.png" alt="">
+      <img class="word" src="../wordmark.png" alt="StreetSweep">
+    </div>
+    <h1>Drive every street.<br><span class="g">See what's done,</span> <span class="b">what's left.</span></h1>
+    <div class="points">
+      <span><i style="background: var(--green)"></i>Track your drives</span>
+      <span><i style="background: var(--blue)"></i>Find the next street</span>
+    </div>
+  </div>
+
+  <div class="phone"><img src="screenshots/01-map.png" alt=""></div>
+</body>
+</html>
