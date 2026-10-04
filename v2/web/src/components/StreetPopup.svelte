@@ -15,17 +15,24 @@
     residential: "Residential street", living_street: "Living street",
   };
 
+  type Street = { pieces: number; meters: number; left_m: number; marked_done: number; left_out: number };
   let seg = $state<Segment | null>(null);
+  /** The whole street this piece is part of (same name, joined end to end). */
+  let street = $state<Street | null>(null);
   let canMark = $state(false);
   let error = $state<string | null>(null);
   let busy = $state(false);
   let note = $state("");
   let noting = $state<"complete" | "excluded" | null>(null);
+  /** The note being written is for the whole street, not just this piece. */
+  let whole = $state(false);
+  let done = $state<string | null>(null);
 
   async function load() {
     try {
-      const r = await api<{ segment: Segment; can_mark: boolean }>(`/api/segments/${hit.id}${teamId ? `?team=${teamId}` : ""}`);
+      const r = await api<{ segment: Segment; street: Street | null; can_mark: boolean }>(`/api/segments/${hit.id}${teamId ? `?team=${teamId}` : ""}`);
       seg = r.segment;
+      street = r.street;
       canMark = !!teamId && r.can_mark;
     } catch (e) {
       error = errorText(e);
@@ -36,10 +43,17 @@
   async function mark(kind: "complete" | "excluded" | null) {
     busy = true;
     error = null;
+    done = null;
     try {
-      if (kind) await api(`/api/teams/${teamId}/marks/${hit.id}`, { method: "PUT", body: { kind, note: note.trim() || null } });
+      if (whole) {
+        const r = await api<{ pieces: number; meters: number }>(`/api/teams/${teamId}/marks/street`, {
+          body: kind ? { segment_id: hit.id, kind, note: note.trim() || null } : { segment_id: hit.id, kind: "clear", clear: seg?.mark },
+        });
+        done = `${kind === "complete" ? "Marked" : kind === "excluded" ? "Left out" : "Unmarked"} ${len(r.meters)} of ${hit.name ?? "the street"}.`;
+      } else if (kind) await api(`/api/teams/${teamId}/marks/${hit.id}`, { method: "PUT", body: { kind, note: note.trim() || null } });
       else await api(`/api/teams/${teamId}/marks/${hit.id}`, { method: "DELETE" });
       noting = null;
+      whole = false;
       note = "";
       await load();
       onchange();
@@ -49,6 +63,11 @@
       busy = false;
     }
   }
+
+  const len = (m: number) => { const ft = Math.round(m * 3.28084); return ft < 1000 ? `${ft.toLocaleString()} ft` : miles(m); };
+  const ask = (kind: "complete" | "excluded", all: boolean) => { noting = kind; whole = all; };
+  /** More of the street than this piece, still to do: worth offering "all of it". */
+  let wholeLeft = $derived(street && street.pieces > 1 && street.left_m > hit.length_m + 1 ? street.left_m : 0);
 
   // The note box takes the typing as soon as it opens.
   const focus = (el: HTMLInputElement) => el.focus();
@@ -92,17 +111,32 @@
         <input type="text" use:focus bind:value={note} maxlength="500" placeholder={noting === "complete" ? "Note, e.g. walked it" : "Why, e.g. private road"} aria-label="Note" />
         <div class="btns">
           <button type="button" class="sm ghost" onclick={() => (noting = null)}>Cancel</button>
-          <button type="submit" class="sm primary" disabled={busy}>{noting === "complete" ? "Mark done" : "Leave out"}</button>
+          <button type="submit" class="sm primary" disabled={busy}>{noting === "complete" ? (whole ? "Mark all done" : "Mark done") : (whole ? "Leave all out" : "Leave out")}</button>
         </div>
       </form>
     {:else if seg.mark}
-      <div class="btns"><button class="sm" disabled={busy} onclick={() => mark(null)}>{seg.mark === "complete" ? "Unmark" : "Count it again"}</button></div>
+      <div class="btns">
+        <button class="sm" disabled={busy} onclick={() => { whole = false; mark(null); }}>{seg.mark === "complete" ? "Unmark" : "Count it again"}</button>
+        {#if street && (seg.mark === "complete" ? street.marked_done : street.left_out) > 1}
+          <button class="sm ghost" disabled={busy} onclick={() => { whole = true; mark(null); }}>{seg.mark === "complete" ? "Unmark whole street" : "Count whole street again"}</button>
+        {/if}
+      </div>
     {:else}
       <div class="btns">
-        {#if !seg.first_driven_at}<button class="sm" disabled={busy} onclick={() => (noting = "complete")}>Mark done</button>{/if}
-        <button class="sm ghost" disabled={busy} onclick={() => (noting = "excluded")}>Leave out</button>
+        {#if !seg.first_driven_at}<button class="sm" disabled={busy} onclick={() => ask("complete", false)}>Mark done</button>{/if}
+        <button class="sm ghost" disabled={busy} onclick={() => ask("excluded", false)}>Leave out</button>
       </div>
+      {#if wholeLeft}
+        <div class="whole">
+          <span class="muted">Whole street: {len(wholeLeft)} still to do</span>
+          <div class="btns">
+            <button class="sm" disabled={busy} onclick={() => ask("complete", true)}>Mark whole street done</button>
+            <button class="sm ghost" disabled={busy} onclick={() => ask("excluded", true)}>Leave it all out</button>
+          </div>
+        </div>
+      {/if}
     {/if}
+    {#if done}<div class="ok">{done}</div>{/if}
   {/if}
 </div>
 
@@ -115,6 +149,9 @@
   .pill.blue { background: #e3effc; color: #1a5fb4; }
   .note { font-size: 12.5px; font-style: italic; color: var(--ink-soft); }
   .err { color: var(--danger); font-size: 12.5px; }
+  .ok { color: #15803d; font-size: 12.5px; }
+  .whole { display: grid; gap: 2px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); font-size: 12.5px; }
+  .whole .btns { margin-top: 2px; }
   .btns { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; flex-wrap: wrap; }
   .noting { display: grid; gap: 4px; margin-top: 6px; }
   .noting input { height: 32px; font-size: 13px; }

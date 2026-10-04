@@ -214,6 +214,24 @@ export default async function driveRoutes(app: FastifyInstance) {
 
   // ---- a street, as the map's popup shows it for one team -------------------------
 
+  /**
+   * The whole street a piece belongs to, as someone looking at the map means it: the
+   * pieces with its name that run on from it, gaps of up to ~150 m bridged (a park, a jog
+   * at a junction), so another town's street of the same name stays separate. For an
+   * unnamed piece, the OpenStreetMap way it's part of.
+   */
+  const STREET_RUN = (seg: string) => `
+    WITH me AS (
+      SELECT s.id, s.way_id, s.geom, lower(w.name) AS nm
+        FROM street_segments s JOIN street_ways w ON w.way_id = s.way_id WHERE s.id = ${seg}),
+    cand AS (
+      SELECT s.id, s.geom FROM me, street_segments s JOIN street_ways w ON w.way_id = s.way_id
+       WHERE me.nm IS NOT NULL AND s.retired_at IS NULL AND s.geom && ST_Expand(me.geom, 0.1) AND lower(w.name) = me.nm
+      UNION ALL
+      SELECT s.id, s.geom FROM me, street_segments s WHERE me.nm IS NULL AND s.way_id = me.way_id AND s.retired_at IS NULL),
+    cl AS (SELECT id, ST_ClusterDBSCAN(geom, eps := 0.0015, minpoints := 1) OVER () AS k FROM cand)
+    SELECT id FROM cl WHERE k = (SELECT k FROM cl WHERE id = (SELECT id FROM me))`;
+
   app.get<{ Params: { id: string }; Querystring: { team?: string } }>("/api/segments/:id", async (req) => {
     const me = requireUser(req);
     const teamId = req.query.team ?? null;
@@ -233,7 +251,22 @@ export default async function driveRoutes(app: FastifyInstance) {
     );
     if (!rows[0]) throw notFound("No such street segment.");
     const role = teamId ? await roleIn(teamId, me.id) : null;
-    return { segment: rows[0], can_mark: canDrive(role) || me.is_site_admin };
+    // The whole street, for "mark all of it": how long, and how much still to sweep.
+    let street = null;
+    if (teamId) {
+      const st = await query<{ n: number; m: number; left_m: number; done_n: number; out_n: number }>(
+        `SELECT count(*)::int AS n, coalesce(sum(s.length_m), 0)::float AS m,
+                coalesce(sum(s.length_m) FILTER (WHERE c.segment_id IS NULL AND mk.kind IS NULL), 0)::float AS left_m,
+                count(*) FILTER (WHERE mk.kind = 'complete')::int AS done_n,
+                count(*) FILTER (WHERE mk.kind = 'excluded')::int AS out_n
+           FROM (${STREET_RUN("$1")}) r JOIN street_segments s ON s.id = r.id
+           LEFT JOIN team_coverage c ON c.team_id = $2 AND c.segment_id = s.id
+           LEFT JOIN segment_marks mk ON mk.team_id = $2 AND mk.segment_id = s.id`,
+        [req.params.id, teamId]);
+      const r = st.rows[0];
+      street = { pieces: r.n, meters: Math.round(r.m), left_m: Math.round(r.left_m), marked_done: r.done_n, left_out: r.out_n };
+    }
+    return { segment: rows[0], street, can_mark: canDrive(role) || me.is_site_admin };
   });
 
   // Mark a street for a team: done by hand ("complete"), or left out ("excluded").
@@ -255,6 +288,50 @@ export default async function driveRoutes(app: FastifyInstance) {
       await audit(pool, { userId: me.id, teamId: team.id, action: `street.${req.body.kind}`, entity: "segment", entityId: req.params.segmentId });
       await sendJob("achievements", { teamId: team.id }, { singletonKey: team.id });
       return { ok: true };
+    },
+  );
+
+  // The whole street at once (see STREET_RUN): "complete" marks what isn't driven or
+  // marked yet; "excluded" leaves out what isn't marked; "clear" takes off marks of the
+  // kind named in `clear`. Never overrides a mark of the other kind.
+  app.post<{ Params: { id: string }; Body: { segment_id: number; kind: "complete" | "excluded" | "clear"; clear?: "complete" | "excluded"; note?: string | null } }>(
+    "/api/teams/:id/marks/street",
+    { schema: { body: { type: "object", required: ["segment_id", "kind"], properties: {
+        segment_id: { type: "integer" }, kind: { type: "string", enum: ["complete", "excluded", "clear"] },
+        clear: { type: "string", enum: ["complete", "excluded"] }, note: { type: ["string", "null"], maxLength: 500 } } } } },
+    async (req) => {
+      const me = requireUser(req);
+      const team = await loadTeam(req.params.id);
+      if (!canDrive(await roleIn(team.id, me.id)) && !me.is_site_admin) throw forbidden("Viewers can't mark streets.");
+      const b = req.body;
+      if (b.kind === "clear" && !b.clear) throw badRequest("Say which marks to clear.");
+      const changed = await tx(async (c) => {
+        if (b.kind === "clear") {
+          const { rows } = await c.query<{ segment_id: string; length_m: number }>(
+            `DELETE FROM segment_marks mk USING street_segments s
+              WHERE mk.team_id = $2 AND mk.kind = $3 AND mk.segment_id IN (${STREET_RUN("$1")}) AND s.id = mk.segment_id
+              RETURNING mk.segment_id, s.length_m`,
+            [b.segment_id, team.id, b.clear]);
+          if (rows.length) {
+            await c.query(`INSERT INTO deletions (kind, team_id, key) SELECT 'mark', $1, unnest($2::text[])`,
+              [team.id, rows.map((r) => String(r.segment_id))]);
+          }
+          return rows;
+        }
+        const { rows } = await c.query<{ segment_id: string; length_m: number }>(
+          `INSERT INTO segment_marks (team_id, segment_id, kind, user_id, note)
+           SELECT $2, s.id, $3, $4, $5 FROM (${STREET_RUN("$1")}) r JOIN street_segments s ON s.id = r.id
+            WHERE NOT EXISTS (SELECT 1 FROM segment_marks mk WHERE mk.team_id = $2 AND mk.segment_id = s.id)
+              AND ($3 <> 'complete' OR NOT EXISTS (SELECT 1 FROM team_coverage tc WHERE tc.team_id = $2 AND tc.segment_id = s.id))
+           ON CONFLICT DO NOTHING
+           RETURNING segment_id, (SELECT length_m FROM street_segments WHERE id = segment_id)`,
+          [b.segment_id, team.id, b.kind, me.id, b.note?.trim() || null]);
+        return rows;
+      });
+      await audit(pool, { userId: me.id, teamId: team.id, action: b.kind === "clear" ? `street.unmark_${b.clear}` : `street.${b.kind}`,
+        entity: "segment", entityId: String(b.segment_id), data: { whole_street: true, pieces: changed.length } });
+      if (changed.length) await sendJob("achievements", { teamId: team.id }, { singletonKey: team.id });
+      return { pieces: changed.length, meters: Math.round(changed.reduce((t, r) => t + Number(r.length_m), 0)) };
     },
   );
 
