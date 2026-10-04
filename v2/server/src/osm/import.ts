@@ -16,7 +16,12 @@ import { NodeCounter, copyField, lineEwkt, parseWayLine, splitWay } from "./opl.
 
 /** The kinds of road that count as streets to sweep (and their ramps). Same as v1. */
 export const SWEEPABLE = ["primary", "secondary", "tertiary", "unclassified", "residential", "living_street"];
-const HIGHWAYS = SWEEPABLE.flatMap((h) => [h, `${h}_link`]);
+/**
+ * Highways: imported and drawn so they can be marked, but counted only by teams that
+ * choose to (teams.count_highways). No ramps: a freeway's are a tangle of short pieces.
+ */
+export const MAJOR = ["trunk", "motorway"];
+const HIGHWAYS = [...SWEEPABLE.flatMap((h) => [h, `${h}_link`]), ...MAJOR];
 /** Tags worth keeping on a street; the rest of OpenStreetMap's are dropped. */
 const KEEP_TAGS = ["name", "ref", "oneway", "junction", "access", "surface", "lanes", "maxspeed", "service"];
 

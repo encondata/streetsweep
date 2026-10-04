@@ -107,7 +107,10 @@ export default async function tileRoutes(app: FastifyInstance) {
          SELECT s.id, w.highway, w.name, s.length_m,
                 -- For a team: done (driven), complete (marked by hand), excluded, or nothing.
                 CASE WHEN mk.kind = 'excluded' THEN 'excluded' WHEN mk.kind = 'complete' THEN 'complete'
-                     WHEN c.segment_id IS NOT NULL THEN 'done' END AS state,
+                     WHEN c.segment_id IS NOT NULL THEN 'done'
+                     -- A highway this team doesn't count: drawn faint, still there to mark.
+                     WHEN w.highway IN ('trunk', 'motorway') AND NOT coalesce((SELECT count_highways FROM teams WHERE id = $4), false) THEN 'nc'
+                     END AS state,
                 ST_AsMVTGeom(ST_Transform(s.geom, 3857), b.env, 4096, 64, true) AS geom
            FROM b, street_segments s JOIN street_ways w ON w.way_id = s.way_id
            LEFT JOIN team_coverage c ON c.team_id = $4 AND c.segment_id = s.id

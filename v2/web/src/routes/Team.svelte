@@ -73,7 +73,7 @@
   let tabs = $derived(detail ? [
     { key: "members", label: "Members", count: 0 },
     ...(detail.can_admin && !personal ? [{ key: "requests", label: "Requests", count: detail.requests.length }] : []),
-    { key: "drive-types", label: "Drive types", count: 0 },
+    { key: "drive-types", label: "What counts", count: 0 },
     ...(detail.can_admin ? [{ key: "settings", label: "Settings", count: 0 }] : []),
   ] : []);
   let current = $derived(tabs.some((t) => t.key === tab) ? tab : "members");
@@ -105,6 +105,9 @@
 
   const toggleType = (key: string, counts: boolean) =>
     act(() => api(`/api/teams/${id}/drive-types/${key}`, { method: "PUT", body: { counts } }));
+  const toggleHighways = (on: boolean) =>
+    act(async () => { await api(`/api/teams/${id}`, { method: "PATCH", body: { count_highways: on } }); await load(); },
+      on ? "Highways now count." : "Highways no longer count.");
 
   const saveSettings = () =>
     act(() => api(`/api/teams/${id}`, { method: "PATCH", body: personal ? { name } : { name, listed } }), "Saved.");
@@ -252,6 +255,20 @@
           </label>
         {/each}
       </div>
+      <h3 class="sub">Roads</h3>
+      <div class="card list">
+        <label class="row type">
+          <span class="type-icon">H</span>
+          <span class="grow"><strong>Highways</strong><br />
+            <span class="muted small">Trunk roads and freeways, like US 59 and US 90 (not their ramps). Off: they're on the map and can be
+              marked, but don't count toward areas, stats or leaderboards.</span></span>
+          <span class="switch">
+            <input type="checkbox" checked={!!detail.team.count_highways} disabled={!detail.can_admin || busy}
+              onchange={(e) => toggleHighways(e.currentTarget.checked)} aria-label="Count highways" />
+            <span></span>
+          </span>
+        </label>
+      </div>
       {#if !detail.can_admin}<p class="muted small">Only this team's admins can change these.</p>{/if}
 
     {:else if current === "settings"}
@@ -304,6 +321,7 @@
   .type { cursor: pointer; }
   .type-icon { width: 32px; height: 32px; border-radius: 8px; background: var(--surface-2); display: grid; place-items: center; font-weight: 700; color: var(--ink-soft); flex: none; }
   .type-icon img { width: 26px; height: 26px; }
+  .sub { margin: 18px 0 8px; font-size: 15px; }
   .toggle { display: flex; gap: 12px; align-items: flex-start; cursor: pointer; }
   .linkrow { display: flex; gap: 8px; }
   .mono { font-family: ui-monospace, Menlo, monospace; letter-spacing: .06em; }

@@ -17,6 +17,8 @@ export interface TeamSummary {
   kind: "personal" | "shared";
   role: Role;
   pending_requests: number;
+  /** Highways (trunk roads, freeways) count toward its areas and figures. */
+  count_highways?: boolean;
 }
 
 export interface Me {
@@ -51,7 +53,7 @@ export interface DriveTypeToggle {
 }
 
 export interface TeamDetail {
-  team: { id: string; name: string; kind: "personal" | "shared"; listed: boolean; join_code?: string };
+  team: { id: string; name: string; kind: "personal" | "shared"; listed: boolean; join_code?: string; count_highways?: boolean };
   my_role: Role | null;
   can_admin: boolean;
   members: Member[];

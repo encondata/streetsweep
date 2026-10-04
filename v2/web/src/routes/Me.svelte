@@ -92,6 +92,13 @@
     settings.start_page !== (mySettings().start_page ?? "home") || settings.base !== (mySettings().base ?? "map")
     || settings.team_id !== (mySettings().team_id ?? null),
   );
+  let personalTeam = $derived(teams.find((t) => t.kind === "personal"));
+  const setHighways = (on: boolean) =>
+    run(async () => {
+      await api(`/api/teams/${personalTeam!.id}`, { method: "PATCH", body: { count_highways: on } });
+      await session.refresh();
+    }, on ? "Highways now count for you." : "Highways no longer count for you.");
+
   const saveSettings = () =>
     run(async () => {
       session.set(await api<Me>("/api/me/preferences", { method: "PATCH", body: { settings } }));
@@ -225,6 +232,22 @@
       </label>
       <div class="btns"><button class="primary" disabled={busy || !settingsChanged} onclick={saveSettings}>Save</button></div>
     </section>
+
+    {#if personalTeam}
+      <section class="card pad stack">
+        <div class="toggle-row">
+          <div class="grow">
+            <h2>Count highways</h2>
+            <p class="muted small">Trunk roads and freeways, like US 59 and US 90 (not their ramps), in your own areas, stats and
+              badges. Off: they're on the map and can be marked, but don't count. Each team chooses for itself under Teams.</p>
+          </div>
+          <label class="switch" aria-label="Count highways">
+            <input type="checkbox" checked={!!personalTeam.count_highways} disabled={busy} onchange={(e) => setHighways(e.currentTarget.checked)} />
+            <span></span>
+          </label>
+        </div>
+      </section>
+    {/if}
   {/if}
 </div>
 

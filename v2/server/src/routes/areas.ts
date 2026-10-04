@@ -49,7 +49,11 @@ const PROGRESS = (area: string, team: string) => `
         LEFT JOIN team_coverage c ON c.team_id = ${team} AND c.segment_id = s.segment_id
         LEFT JOIN segment_marks mk ON mk.team_id = ${team} AND mk.segment_id = s.segment_id
        WHERE s.area_id = ${area}.id AND ${area}.build_status = 'built' AND mk.kind IS DISTINCT FROM 'excluded'
+         AND (NOT s.major OR ${COUNTS_HIGHWAYS(team)})
        GROUP BY s.street_key) st`;
+
+/** SQL: does this team count highways (see migration 0015)? */
+const COUNTS_HIGHWAYS = (team: string) => `coalesce((SELECT count_highways FROM teams WHERE id = ${team}), false)`;
 
 async function queueBuild(areaId: string) {
   await query(`UPDATE areas SET build_status = 'queued', build_error = NULL WHERE id = $1 AND build_status <> 'building'`, [areaId]);
@@ -296,6 +300,7 @@ export default async function areaRoutes(app: FastifyInstance) {
            LEFT JOIN team_coverage c ON c.team_id = $2 AND c.segment_id = s.segment_id
            LEFT JOIN segment_marks mk ON mk.team_id = $2 AND mk.segment_id = s.segment_id
           WHERE a.id = $1 AND a.build_status = 'built' AND c.segment_id IS NULL AND mk.kind IS NULL
+            AND (NOT s.major OR ${COUNTS_HIGHWAYS("$2")})
           ORDER BY s.inside_m DESC LIMIT ${LIMIT}),
        parts AS (SELECT ST_Subdivide(geom, 256) AS g FROM areas WHERE id = $1),
        clipped AS (

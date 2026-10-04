@@ -14,10 +14,12 @@ export interface TeamRow {
   kind: "personal" | "shared";
   listed: boolean;
   join_code: string;
+  /** Highways (trunk, motorway) count toward its areas and figures. */
+  count_highways: boolean;
 }
 
 export async function loadTeam(id: string, db: pg.Pool | pg.PoolClient | null = null): Promise<TeamRow> {
-  const sql = `SELECT id, name, kind, listed, join_code FROM teams WHERE id = $1 AND deleted_at IS NULL`;
+  const sql = `SELECT id, name, kind, listed, join_code, count_highways FROM teams WHERE id = $1 AND deleted_at IS NULL`;
   const { rows } = db ? await db.query<TeamRow>(sql, [id]) : await query<TeamRow>(sql, [id]);
   if (!rows[0]) throw notFound("That team doesn't exist.");
   return rows[0];

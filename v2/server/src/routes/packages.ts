@@ -77,7 +77,7 @@ export default async function packageRoutes(app: FastifyInstance) {
       const { rows } = await pool.query<Row>(
         `SELECT s.id, s.way_id, w.name, w.highway, s.length_m, x.inside_m, ST_AsEncodedPolyline(s.geom, 6) AS line
            FROM area_segments x JOIN street_segments s ON s.id = x.segment_id JOIN street_ways w ON w.way_id = s.way_id
-          WHERE x.area_id = $1 AND s.retired_at IS NULL ORDER BY s.id`, [a.id]);
+          WHERE x.area_id = $1 AND s.retired_at IS NULL AND NOT x.major ORDER BY s.id`, [a.id]);
       body = await gzip(JSON.stringify({ area_id: a.id, version: a.built_version, ...pack(rows, true) }));
       await fs.mkdir(PACKAGE_DIR(), { recursive: true });
       // Older builds of this area are no use to anyone now.
@@ -97,7 +97,9 @@ export default async function packageRoutes(app: FastifyInstance) {
     const { rows } = await pool.query<Row>(
       `SELECT s.id, s.way_id, w.name, w.highway, s.length_m, ST_AsEncodedPolyline(s.geom, 6) AS line
          FROM street_segments s JOIN street_ways w ON w.way_id = s.way_id
-        WHERE s.retired_at IS NULL AND s.geom && ST_MakeEnvelope($1, $2, $3, $4, 4326) ORDER BY s.id`, b);
+        WHERE s.retired_at IS NULL AND s.geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)
+          -- The phone doesn't show highways yet (they count only by choice; see migration 0015).
+          AND w.highway NOT IN ('trunk', 'motorway') ORDER BY s.id`, b);
     const body = await gzip(JSON.stringify({ bbox: b, ...pack(rows, false) }));
     reply.header("Content-Type", "application/json").header("Content-Encoding", "gzip").header("Cache-Control", "private, max-age=3600");
     return reply.send(body);

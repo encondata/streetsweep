@@ -277,6 +277,7 @@ const TEAM_AREA_PCT = `
     LEFT JOIN team_coverage c ON c.team_id = $1 AND c.segment_id = s.segment_id
     LEFT JOIN segment_marks mk ON mk.team_id = $1 AND mk.segment_id = s.segment_id
    WHERE a.deleted_at IS NULL AND a.build_status = 'built'
+     AND (NOT s.major OR coalesce((SELECT count_highways FROM teams WHERE id = $1), false))
      AND (a.team_id = $1 OR a.id IN (SELECT area_id FROM team_areas WHERE team_id = $1))
      -- A whole state is too big to sum on every drive; its progress shows, but no badge.
      AND a.segment_count < 400000
@@ -287,7 +288,8 @@ export async function teamFigures(db: Db, teamId: string): Promise<TeamFigures> 
   const [cov, areas, days, weeks, members] = await Promise.all([
     db.query(
       `SELECT count(*)::int AS streets, coalesce(sum(s.length_m), 0)::float AS meters
-         FROM team_coverage c JOIN street_segments s ON s.id = c.segment_id WHERE c.team_id = $1`, [teamId]),
+         FROM team_coverage c JOIN street_segments s ON s.id = c.segment_id JOIN street_ways w ON w.way_id = s.way_id
+        WHERE c.team_id = $1 AND (w.highway NOT IN ('trunk', 'motorway') OR coalesce((SELECT count_highways FROM teams WHERE id = $1), false))`, [teamId]),
     db.query(
       `SELECT count(*) FILTER (WHERE total > 0 AND done >= total * 0.9999)::int AS completed,
               coalesce(max(CASE WHEN total > 0 THEN least(100, coalesce(done, 0) / total * 100) END), 0)::float AS best_pct

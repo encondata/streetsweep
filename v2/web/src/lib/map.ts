@@ -155,6 +155,9 @@ function style(): StyleSpecification {
   };
 }
 
+/** How faint a highway the team doesn't count is drawn (see migration 0015). */
+export const NOT_COUNTED_OPACITY = 0.3;
+
 /** A street picked with shift-click hides under its orange, so the pulse reads clean. */
 const underSelection = (opacity: unknown) =>
   ["case", ["boolean", ["feature-state", "selected"], false], 0, opacity] as unknown as number;
@@ -179,10 +182,11 @@ function areaFillOpacity(shade: StreetColor | null): any {
 function streetColor(c: MapColors): any {
   return ["case", ["boolean", ["feature-state", "hover"], false], "#0d1b28",
     ["match", ["get", "state"], ["done", "complete"], c.driven.color, "excluded", EXCLUDED_COLOR, c.undriven.color]];
+  // ("nc": a highway the team doesn't count, drawn in the to-do colour but faint.)
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function streetOpacity(c: MapColors): any {
-  return ["match", ["get", "state"], ["done", "complete"], c.driven.opacity, "excluded", 0.7, c.undriven.opacity];
+  return ["match", ["get", "state"], ["done", "complete"], c.driven.opacity, "excluded", 0.7, "nc", NOT_COUNTED_OPACITY, c.undriven.opacity];
 }
 
 export interface StreetHit {

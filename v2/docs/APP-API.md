@@ -47,6 +47,10 @@ everything as an upsert.
 A segment is a piece of an OSM way between intersections. Its id is stable across
 monthly imports; pieces that disappear are simply absent from newer packages.
 
+Highways (`trunk`, `motorway`) are imported for the web map but left out of packages and
+`/api/segments`: they count only for teams that switch on `count_highways`, and the app
+doesn't show them yet. Sync's coverage can still list highway segment ids; skip unknown ones.
+
 ## Uploading
 
 - `POST /api/drives` `{ id (uuid made on the phone), drive_type?, vehicle_id?, points: [[t, lat, lon, accuracy_m?, speed_mps?], ..] }`.

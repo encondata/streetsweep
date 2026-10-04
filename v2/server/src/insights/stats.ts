@@ -26,6 +26,9 @@ export async function personStats(db: Db, userId: string) {
       FROM segment_passes p JOIN drives d ON d.id = p.drive_id JOIN street_segments s ON s.id = p.segment_id
       LEFT JOIN street_ways w ON w.way_id = s.way_id
      WHERE d.user_id = $1 AND d.deleted_at IS NULL AND d.status = 'matched'
+       -- Highways count only if your own coverage counts them.
+       AND (coalesce(w.highway NOT IN ('trunk', 'motorway'), true) OR coalesce((SELECT t.count_highways FROM teams t
+             JOIN team_members m ON m.team_id = t.id WHERE t.kind = 'personal' AND m.user_id = $1 LIMIT 1), false))
      ORDER BY p.segment_id, p.driven_at`;
   const mine = `SELECT * FROM drives WHERE user_id = $1 AND deleted_at IS NULL AND status = 'matched'`;
   const { rows } = await db.query(
@@ -53,7 +56,9 @@ export async function teamStats(db: Db, teamId: string) {
   const counting = `SELECT d.* FROM drives d WHERE d.deleted_at IS NULL AND d.status = 'matched' AND ${COUNTS_FOR("$1::uuid")}`;
   // `street` is the street as people know it: one name, however many pieces it's cut into.
   const cov = `SELECT c.first_driven_at AS driven_at, s.length_m, coalesce(lower(w.name), 'way ' || s.way_id) AS street
-    FROM team_coverage c JOIN street_segments s ON s.id = c.segment_id LEFT JOIN street_ways w ON w.way_id = s.way_id WHERE c.team_id = $1`;
+    FROM team_coverage c JOIN street_segments s ON s.id = c.segment_id LEFT JOIN street_ways w ON w.way_id = s.way_id
+   WHERE c.team_id = $1 AND (coalesce(w.highway NOT IN ('trunk', 'motorway'), true)
+         OR coalesce((SELECT count_highways FROM teams WHERE id = $1), false))`;
   const { rows } = await db.query(
     `WITH f AS (${cov}), d AS (${counting}), w AS (${WEEK_SERIES})
      SELECT
@@ -97,6 +102,7 @@ export async function leaderboard(db: Db, teamId: string, board: Board, period: 
            FROM team_coverage c JOIN drives d ON d.id = c.first_drive_id JOIN street_segments s ON s.id = c.segment_id
            LEFT JOIN street_ways w ON w.way_id = s.way_id
           WHERE c.team_id = $1 AND c.first_driven_at >= ${since(period)} AND d.user_id IS NOT NULL
+            AND (coalesce(w.highway NOT IN ('trunk', 'motorway'), true) OR coalesce((SELECT count_highways FROM teams WHERE id = $1), false))
           GROUP BY d.user_id`
       : `SELECT d.user_id, ${board === "miles" ? "sum(d.distance_m)::float" : "count(*)::float"} AS value,
                 ${board === "miles" ? "count(*)" : "round(sum(d.distance_m))"}::int AS extra

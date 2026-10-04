@@ -168,6 +168,10 @@ async function main() {
       const { id, region } = last.rows[0];
       console.log("boundaries: none yet, importing from the current extract");
       finishWithBoundaries(id, region).catch((err) => console.error("boundaries failed:", err));
+    } else if (last.rows[0] && !(await pool.query(`SELECT 1 FROM street_ways WHERE highway IN ('trunk', 'motorway') LIMIT 1`)).rows.length) {
+      // Highways came later (migration 0015): import again so they're added.
+      console.log("highways: none yet, importing streets again to add them");
+      await boss.send(QUEUES.osmImport, { force: true });
     } else if (last.rows[0]) {
       // Water came later than streets and boundaries: an install from before it gets it now.
       const w = await pool.query(`SELECT 1 FROM water_parts LIMIT 1`);

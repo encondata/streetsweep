@@ -39,7 +39,9 @@ export default async function insightRoutes(app: FastifyInstance) {
       `SELECT (floor(ST_X(c) / 0.01) + 0.5) * 0.01 AS lon, (floor(ST_Y(c) / 0.01) + 0.5) * 0.01 AS lat,
               sum(len)::float AS m, count(*)::int AS n
          FROM (SELECT ST_Centroid(s.geom) AS c, s.length_m AS len
-                 FROM team_coverage tc JOIN street_segments s ON s.id = tc.segment_id WHERE tc.team_id = $1) x
+                 FROM team_coverage tc JOIN street_segments s ON s.id = tc.segment_id JOIN street_ways w ON w.way_id = s.way_id
+                WHERE tc.team_id = $1 AND (w.highway NOT IN ('trunk', 'motorway')
+                      OR coalesce((SELECT count_highways FROM teams WHERE id = $1), false))) x
         GROUP BY 1, 2`,
       [team.id],
     );

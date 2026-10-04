@@ -139,17 +139,19 @@ export default async function teamRoutes(app: FastifyInstance) {
     throw notFound("That team doesn't exist.");
   });
 
-  app.patch<{ Params: { id: string }; Body: { name?: string; listed?: boolean } }>(
+  app.patch<{ Params: { id: string }; Body: { name?: string; listed?: boolean; count_highways?: boolean } }>(
     "/api/teams/:id",
-    { schema: { body: { type: "object", additionalProperties: false, properties: { name: teamName, listed: { type: "boolean" } } } } },
+    { schema: { body: { type: "object", additionalProperties: false, properties: {
+        name: teamName, listed: { type: "boolean" }, count_highways: { type: "boolean" } } } } },
     async (req) => {
       const me = requireUser(req);
       const team = await loadTeam(req.params.id);
       await requireTeamAdmin(team.id, me);
       if (team.kind === "personal" && req.body.listed) throw badRequest("A personal team can't be listed.");
       await query(
-        `UPDATE teams SET name = coalesce($2, name), listed = coalesce($3, listed), updated_at = now() WHERE id = $1`,
-        [team.id, req.body.name?.trim() || null, req.body.listed ?? null],
+        `UPDATE teams SET name = coalesce($2, name), listed = coalesce($3, listed),
+                count_highways = coalesce($4, count_highways), updated_at = now() WHERE id = $1`,
+        [team.id, req.body.name?.trim() || null, req.body.listed ?? null, req.body.count_highways ?? null],
       );
       await audit(pool, { userId: me.id, teamId: team.id, action: "team.updated", entity: "team", entityId: team.id, data: req.body });
       return detail(team.id, me);

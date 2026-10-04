@@ -33,7 +33,7 @@ export async function meSummary(userId: string) {
     [userId],
   );
   const teams = await query(
-    `SELECT t.id, t.name, t.kind, m.role,
+    `SELECT t.id, t.name, t.kind, m.role, t.count_highways,
             CASE WHEN m.role IN ('owner','admin')
                  THEN (SELECT count(*)::int FROM team_join_requests r WHERE r.team_id = t.id AND r.status = 'pending')
                  ELSE 0 END AS pending_requests
