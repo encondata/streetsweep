@@ -115,7 +115,7 @@
               </span>
               <span class="line2 muted small ellipsis">
                 {#if team || d.user_id !== me.id}{driver(d)} · {/if}{d.vehicle_name ?? "No vehicle"}
-                {#if d.status === "matched"} · {d.segment_count ?? 0} street segment{d.segment_count === 1 ? "" : "s"}{/if}
+                {#if d.status === "matched"} · {d.street_count ?? 0} street{d.street_count === 1 ? "" : "s"}{/if}
               </span>
             </span>
             {#if team && d.user_id}<Avatar id={d.user_id} name={d.user_name ?? ""} url={d.user_avatar_url} size={28} />{/if}

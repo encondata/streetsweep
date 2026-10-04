@@ -30,6 +30,23 @@ export default async function insightRoutes(app: FastifyInstance) {
 
   app.get("/api/achievements", async (req) => forPerson(pool, requireUser(req).id));
 
+  // Where a team has swept, summed into cells about a kilometre across: the map's
+  // zoomed-out dots. Streets, not drives, so it shows ground covered without showing
+  // anyone's trips (team drive lists are for admins).
+  app.get<{ Params: { id: string } }>("/api/teams/:id/coverage-cells", async (req, reply) => {
+    const team = await memberTeam(req.params.id, requireUser(req));
+    const { rows } = await pool.query<{ lon: number; lat: number; m: number; n: number }>(
+      `SELECT (floor(ST_X(c) / 0.01) + 0.5) * 0.01 AS lon, (floor(ST_Y(c) / 0.01) + 0.5) * 0.01 AS lat,
+              sum(len)::float AS m, count(*)::int AS n
+         FROM (SELECT ST_Centroid(s.geom) AS c, s.length_m AS len
+                 FROM team_coverage tc JOIN street_segments s ON s.id = tc.segment_id WHERE tc.team_id = $1) x
+        GROUP BY 1, 2`,
+      [team.id],
+    );
+    reply.header("Cache-Control", "private, no-cache");
+    return { cells: rows.map((r) => [Math.round(r.lon * 1e4) / 1e4, Math.round(r.lat * 1e4) / 1e4, Math.round(r.m), r.n]) };
+  });
+
   app.get<{ Params: { id: string } }>("/api/teams/:id/achievements", async (req) => {
     const team = await memberTeam(req.params.id, requireUser(req));
     if (team.kind === "personal") throw badRequest("Team achievements are for shared teams; yours are under Achievements.");

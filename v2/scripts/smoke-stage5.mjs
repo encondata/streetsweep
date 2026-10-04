@@ -47,7 +47,7 @@ for (const [name, id] of Object.entries(drives)) {
 
 console.log("home figures");
 const mine = await expect("Ann's figures", ann.call("GET", "/api/stats"), 200);
-check("one drive, some new streets", mine.total.drives === 1 && mine.total.streets >= 5 && mine.total.street_m > 300, mine.total);
+check("one drive, some new streets", mine.total.drives === 1 && mine.total.streets >= 1 && mine.total.street_m > 300, mine.total);
 check("twelve weeks, this one has it", mine.weeks.length === 12 && mine.weeks[11].street_m > 300, mine.weeks.slice(-2));
 const team = await expect("Acme's figures", bob.call("GET", `/api/teams/${acme.id}/stats`), 200);
 check("three drives, three members, three drivers this month", team.total.drives === 3 && team.members === 3 && team.month_drivers === 3, team);

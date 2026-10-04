@@ -155,7 +155,7 @@
     <div class="facts">
       <div class="card"><span class="muted small">Distance</span><strong>{miles(drive.distance_m)}</strong></div>
       <div class="card"><span class="muted small">Time</span><strong>{duration(drive.started_at, drive.ended_at)}</strong></div>
-      <div class="card"><span class="muted small">Street segments</span><strong>{drive.segment_count ?? "—"}</strong></div>
+      <div class="card"><span class="muted small">Streets</span><strong>{drive.street_count ?? "—"}</strong></div>
       <div class="card"><span class="muted small">GPS fixes</span><strong>{drive.point_count.toLocaleString()}</strong></div>
     </div>
 

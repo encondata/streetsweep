@@ -61,13 +61,32 @@
       ctl?.setTeamAreas(areaFeatures(teamAreas));
     } catch { /* the outlines just don't show */ }
   }
+  // Zoomed out, dots where the team has driven (too far out for the streets themselves).
+  async function loadCells() {
+    const t = coverageTeam;
+    try {
+      const { cells } = await api<{ cells: [number, number, number, number][] }>(`/api/teams/${t}/coverage-cells`);
+      if (t === coverageTeam) ctl?.setCoverageCells(cells);
+    } catch { /* no dots, that's all */ }
+  }
   $effect(() => {
     const t = coverageTeam;
     if (!ctl) return;
     try { localStorage.setItem("streetsweep.areasTeam", t); } catch { /* fine */ }
     ctl.setCoverageTeam(t);
     loadAreas();
+    loadCells();
   });
+
+  // The search box tucks away, like the areas panel did; remembered per device.
+  let toolsShown = $state(readToolsShown());
+  function readToolsShown() {
+    try { return localStorage.getItem("streetsweep.mapTools") !== "hidden"; } catch { return true; }
+  }
+  function showTools(on: boolean) {
+    toolsShown = on;
+    try { localStorage.setItem("streetsweep.mapTools", on ? "shown" : "hidden"); } catch { /* fine */ }
+  }
 
   // ---- search: counties, cities, your areas, addresses ----
   let q = $state("");
@@ -94,7 +113,14 @@
     if (term.length < 3 || lookingUp) return;
     lookingUp = true;
     try {
-      addresses = (await api<{ results: Address[] }>(`/api/geocode?q=${encodeURIComponent(term)}`)).results;
+      // Near where you're looking first: the view, widened to at least a city's worth around it.
+      let near = "";
+      if (ctl) {
+        const b = ctl.map.getBounds(), c = b.getCenter();
+        const hw = Math.max((b.getEast() - b.getWest()) / 2, 0.25), hh = Math.max((b.getNorth() - b.getSouth()) / 2, 0.2);
+        near = `&near=${[c.lng - hw, c.lat - hh, c.lng + hw, c.lat + hh].map((n) => n.toFixed(3)).join(",")}`;
+      }
+      addresses = (await api<{ results: Address[] }>(`/api/geocode?q=${encodeURIComponent(term)}${near}`)).results;
       if (addresses.length === 1) goToAddress(addresses[0]);
     } catch (e) {
       searchError = errorText(e);
@@ -241,7 +267,7 @@
       const team = ctl!.coverageTeam;
       const comp = mount(StreetPopup, {
         target: el,
-        props: { hit, teamId: team, teamLabel: teamLabel(team), onchange: () => { ctl?.refreshCoverage(); loadAreas(); } },
+        props: { hit, teamId: team, teamLabel: teamLabel(team), onchange: () => { ctl?.refreshCoverage(); loadAreas(); loadCells(); } },
       });
       ctl!.showPopupEl(at, el, () => unmount(comp));
     };
@@ -280,13 +306,17 @@
   <div class="map" bind:this={box}></div>
 
   <!-- Whose coverage, and finding a place: everything else about areas is on the Areas page. -->
+  {#if toolsShown}
   <div class="tools">
+    <div class="head">
     <label class="team">
       <span class="muted small">Coverage for</span>
       <select bind:value={coverageTeam} aria-label="Whose coverage">
         {#each teams as t (t.id)}<option value={t.id}>{t.kind === "personal" ? "Just me" : t.name}</option>{/each}
       </select>
     </label>
+    <button class="sm ghost icon close" onclick={() => showTools(false)} aria-label="Hide search" title="Hide search">✕</button>
+    </div>
     <form class="search" role="search" onsubmit={(e) => { e.preventDefault(); findAddress(); }}>
       <Icon name="search" size={16} />
       <input type="search" bind:value={q} placeholder="County, city, area or address" aria-label="Find a county, city, area or address" />
@@ -315,8 +345,14 @@
       </div>
     {/if}
   </div>
+  {/if}
 
   <div class="top">
+    {#if !toolsShown}
+      <button class="tool" onclick={() => showTools(true)} title="Choose whose coverage, and find a place">
+        <Icon name="search" size={16} /> Search
+      </button>
+    {/if}
     <div class="view" bind:this={viewMenu}>
       <button class="tool" class:open={viewOpen} aria-expanded={viewOpen} aria-haspopup="true" onclick={() => (viewOpen = !viewOpen)} title="Choose which kinds of area the map shows">
         <Icon name="layers" size={16} /> View
@@ -421,13 +457,15 @@
     position: absolute; top: 14px; left: 14px; width: 320px; z-index: 2; display: grid; gap: 8px; padding: 10px;
     background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow);
   }
-  .team { display: grid; gap: 2px; }
+  .head { display: flex; align-items: end; gap: 6px; }
+  .team { display: grid; gap: 2px; flex: 1; min-width: 0; }
+  .close { flex: none; margin-bottom: 2px; }
   .team select { height: 34px; font-weight: 700; }
   .search { position: relative; color: var(--ink-soft); }
   .search :global(svg) { position: absolute; left: 10px; top: 11px; }
   .search input { padding-left: 32px; height: 38px; }
   .results { display: grid; gap: 2px; max-height: 50vh; overflow: auto; }
-  .hit { display: grid; gap: 1px; justify-items: start; text-align: left; height: auto; padding: 7px 8px; border: 0; background: none; border-radius: 8px; font-weight: 400; white-space: normal; }
+  .hit { display: grid; gap: 1px; justify-items: start; justify-content: stretch; width: 100%; text-align: left; height: auto; padding: 7px 8px; border: 0; background: none; border-radius: 8px; font-weight: 400; white-space: normal; }
   .hit:hover:not([disabled]) { background: var(--surface-2); }
   .hit.addr strong { color: var(--link); }
   .none { padding: 6px 8px; margin: 0; }

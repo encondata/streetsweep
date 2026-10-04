@@ -22,8 +22,9 @@ const WEEK_SERIES = `
 export async function personStats(db: Db, userId: string) {
   const tz = config.timezone;
   const firsts = `
-    SELECT DISTINCT ON (p.segment_id) p.segment_id, p.driven_at, s.length_m
+    SELECT DISTINCT ON (p.segment_id) p.segment_id, p.driven_at, s.length_m, coalesce(lower(w.name), 'way ' || s.way_id) AS street
       FROM segment_passes p JOIN drives d ON d.id = p.drive_id JOIN street_segments s ON s.id = p.segment_id
+      LEFT JOIN street_ways w ON w.way_id = s.way_id
      WHERE d.user_id = $1 AND d.deleted_at IS NULL AND d.status = 'matched'
      ORDER BY p.segment_id, p.driven_at`;
   const mine = `SELECT * FROM drives WHERE user_id = $1 AND deleted_at IS NULL AND status = 'matched'`;
@@ -32,11 +33,11 @@ export async function personStats(db: Db, userId: string) {
      SELECT
        (SELECT count(*)::int FROM d) AS drives,
        (SELECT coalesce(sum(distance_m), 0)::float FROM d) AS drive_m,
-       (SELECT count(*)::int FROM f) AS streets,
+       (SELECT count(DISTINCT street)::int FROM f) AS streets,
        (SELECT coalesce(sum(length_m), 0)::float FROM f) AS street_m,
        (SELECT count(*)::int FROM d WHERE started_at >= ${since("month")}) AS month_drives,
        (SELECT coalesce(sum(distance_m), 0)::float FROM d WHERE started_at >= ${since("month")}) AS month_drive_m,
-       (SELECT count(*)::int FROM f WHERE driven_at >= ${since("month")}) AS month_streets,
+       (SELECT count(DISTINCT street)::int FROM f WHERE driven_at >= ${since("month")}) AS month_streets,
        (SELECT coalesce(sum(length_m), 0)::float FROM f WHERE driven_at >= ${since("month")}) AS month_street_m,
        (SELECT json_agg(json_build_object('week', w.week,
           'street_m', (SELECT coalesce(sum(length_m), 0) FROM f WHERE date_trunc('week', driven_at AT TIME ZONE $2)::date = w.week),
@@ -50,17 +51,19 @@ export async function personStats(db: Db, userId: string) {
 export async function teamStats(db: Db, teamId: string) {
   const tz = config.timezone;
   const counting = `SELECT d.* FROM drives d WHERE d.deleted_at IS NULL AND d.status = 'matched' AND ${COUNTS_FOR("$1::uuid")}`;
-  const cov = `SELECT c.first_driven_at AS driven_at, s.length_m FROM team_coverage c JOIN street_segments s ON s.id = c.segment_id WHERE c.team_id = $1`;
+  // `street` is the street as people know it: one name, however many pieces it's cut into.
+  const cov = `SELECT c.first_driven_at AS driven_at, s.length_m, coalesce(lower(w.name), 'way ' || s.way_id) AS street
+    FROM team_coverage c JOIN street_segments s ON s.id = c.segment_id LEFT JOIN street_ways w ON w.way_id = s.way_id WHERE c.team_id = $1`;
   const { rows } = await db.query(
     `WITH f AS (${cov}), d AS (${counting}), w AS (${WEEK_SERIES})
      SELECT
        (SELECT count(*)::int FROM d) AS drives,
        (SELECT coalesce(sum(distance_m), 0)::float FROM d) AS drive_m,
-       (SELECT count(*)::int FROM f) AS streets,
+       (SELECT count(DISTINCT street)::int FROM f) AS streets,
        (SELECT coalesce(sum(length_m), 0)::float FROM f) AS street_m,
        (SELECT count(*)::int FROM d WHERE started_at >= ${since("month")}) AS month_drives,
        (SELECT coalesce(sum(distance_m), 0)::float FROM d WHERE started_at >= ${since("month")}) AS month_drive_m,
-       (SELECT count(*)::int FROM f WHERE driven_at >= ${since("month")}) AS month_streets,
+       (SELECT count(DISTINCT street)::int FROM f WHERE driven_at >= ${since("month")}) AS month_streets,
        (SELECT coalesce(sum(length_m), 0)::float FROM f WHERE driven_at >= ${since("month")}) AS month_street_m,
        (SELECT count(DISTINCT user_id)::int FROM d WHERE started_at >= ${since("month")}) AS month_drivers,
        (SELECT count(*)::int FROM team_members WHERE team_id = $1 AND left_at IS NULL) AS members,
@@ -90,8 +93,9 @@ export async function leaderboard(db: Db, teamId: string, board: Board, period: 
   const tz = config.timezone;
   const scores =
     board === "new"
-      ? `SELECT d.user_id, sum(s.length_m)::float AS value, count(*)::int AS extra
+      ? `SELECT d.user_id, sum(s.length_m)::float AS value, count(DISTINCT coalesce(lower(w.name), 'way ' || s.way_id))::int AS extra
            FROM team_coverage c JOIN drives d ON d.id = c.first_drive_id JOIN street_segments s ON s.id = c.segment_id
+           LEFT JOIN street_ways w ON w.way_id = s.way_id
           WHERE c.team_id = $1 AND c.first_driven_at >= ${since(period)} AND d.user_id IS NOT NULL
           GROUP BY d.user_id`
       : `SELECT d.user_id, ${board === "miles" ? "sum(d.distance_m)::float" : "count(*)::float"} AS value,

@@ -217,6 +217,10 @@ export interface Area {
   driven_m?: number | null;
   total_segments?: number | null;
   driven_segments?: number | null;
+  /** Streets as people know them (every piece with one name), and how many are all done or begun. */
+  total_streets?: number | null;
+  driven_streets?: number | null;
+  started_streets?: number | null;
   /** Other areas in the same list that touch or overlap this one (for colouring). */
   neighbors?: string[];
 }
@@ -240,6 +244,7 @@ export interface Drive {
   distance_m: number;
   point_count: number;
   segment_count: number | null;
+  street_count?: number | null;
   drive_type_key: string;
   drive_type_label: string;
   attribution: Attribution;

@@ -18,7 +18,9 @@ const MAX_POINTS = 50_000;
 // One shape for lists and details. $1 is the viewer.
 const DRIVE = `
   SELECT d.id, d.source, d.status, d.match_method, d.match_error, d.started_at, d.ended_at, d.distance_m,
-         d.point_count, d.segment_count, d.drive_type_key, dt.label AS drive_type_label, d.attribution,
+         d.point_count, d.segment_count, d.drive_type_key,
+         (SELECT count(DISTINCT coalesce(lower(w.name), 'way ' || s.way_id))::int FROM segment_passes p JOIN street_segments s ON s.id = p.segment_id
+            LEFT JOIN street_ways w ON w.way_id = s.way_id WHERE p.drive_id = d.id) AS street_count, dt.label AS drive_type_label, d.attribution,
          d.user_id, u.display_name AS user_name, ${avatarUrl("u")} AS user_avatar_url,
          d.vehicle_id, v.name AS vehicle_name, v.kind AS vehicle_kind, v.managed_by_team_id AS vehicle_team_id,
          d.logger_id, l.name AS logger_name, l.owner_user_id AS logger_owner_id, d.uploaded_by, d.created_at

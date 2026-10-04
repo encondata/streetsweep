@@ -110,14 +110,15 @@ export async function buildArea(areaId: string): Promise<void> {
     await client.query("SET LOCAL work_mem = '128MB'");
     await client.query(`DELETE FROM area_segments WHERE area_id = $1`, [areaId]);
     await client.query(
-      `INSERT INTO area_segments (area_id, segment_id, inside_m)
-       SELECT $1, id, inside FROM (
-         SELECT s.id, sum(CASE WHEN ST_CoveredBy(s.geom, p.g) THEN s.length_m
+      `INSERT INTO area_segments (area_id, segment_id, inside_m, street_key)
+       SELECT $1, x.id, inside, hashtext(coalesce(lower(w.name), 'way ' || x.way_id)) FROM (
+         SELECT s.id, s.way_id, sum(CASE WHEN ST_CoveredBy(s.geom, p.g) THEN s.length_m
                                ELSE ST_Length(ST_Intersection(s.geom, p.g)::geography) END) AS inside
            FROM (SELECT ST_Subdivide(geom, 256) AS g FROM areas WHERE id = $1) p
            JOIN street_segments s ON s.geom && p.g AND ST_Intersects(s.geom, p.g)
           WHERE s.retired_at IS NULL
-          GROUP BY s.id) x
+          GROUP BY s.id, s.way_id) x
+         LEFT JOIN street_ways w ON w.way_id = x.way_id
         WHERE inside >= 1`,
       [areaId],
     );

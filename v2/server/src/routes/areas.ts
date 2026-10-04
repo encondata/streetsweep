@@ -32,17 +32,24 @@ const AREA_GEOM = `ST_AsGeoJSON(ST_SimplifyPreserveTopology(a.geom, 0.0001), 6):
 /**
  * How much of an area a team has swept: length driven or marked complete, out of the
  * length not marked excluded. Computed live from the area's street list.
+ *
+ * Streets are counted as people know them: every piece sharing a name is one street
+ * (unnamed ones count by their OpenStreetMap way), done once every piece of it is.
+ * The segment counts stay for older callers; nobody should be shown them.
  */
 const PROGRESS = (area: string, team: string) => `
-  SELECT coalesce(sum(s.inside_m) FILTER (WHERE mk.kind IS DISTINCT FROM 'excluded'), 0)::float AS total_m,
-         coalesce(sum(s.inside_m) FILTER (WHERE mk.kind IS DISTINCT FROM 'excluded'
-                                            AND (c.segment_id IS NOT NULL OR mk.kind = 'complete')), 0)::float AS driven_m,
-         count(*) FILTER (WHERE mk.kind IS DISTINCT FROM 'excluded')::int AS total_segments,
-         count(*) FILTER (WHERE mk.kind IS DISTINCT FROM 'excluded' AND (c.segment_id IS NOT NULL OR mk.kind = 'complete'))::int AS driven_segments
-    FROM area_segments s
-    LEFT JOIN team_coverage c ON c.team_id = ${team} AND c.segment_id = s.segment_id
-    LEFT JOIN segment_marks mk ON mk.team_id = ${team} AND mk.segment_id = s.segment_id
-   WHERE s.area_id = ${area}.id AND ${area}.build_status = 'built'`;
+  SELECT coalesce(sum(m), 0)::float AS total_m, coalesce(sum(dm), 0)::float AS driven_m,
+         coalesce(sum(n), 0)::int AS total_segments, coalesce(sum(dn), 0)::int AS driven_segments,
+         count(*)::int AS total_streets, count(*) FILTER (WHERE dn = n)::int AS driven_streets,
+         count(*) FILTER (WHERE dn > 0 AND dn < n)::int AS started_streets
+    FROM (
+      SELECT sum(s.inside_m) AS m, sum(s.inside_m) FILTER (WHERE c.segment_id IS NOT NULL OR mk.kind = 'complete') AS dm,
+             count(*) AS n, count(*) FILTER (WHERE c.segment_id IS NOT NULL OR mk.kind = 'complete') AS dn
+        FROM area_segments s
+        LEFT JOIN team_coverage c ON c.team_id = ${team} AND c.segment_id = s.segment_id
+        LEFT JOIN segment_marks mk ON mk.team_id = ${team} AND mk.segment_id = s.segment_id
+       WHERE s.area_id = ${area}.id AND ${area}.build_status = 'built' AND mk.kind IS DISTINCT FROM 'excluded'
+       GROUP BY s.street_key) st`;
 
 async function queueBuild(areaId: string) {
   await query(`UPDATE areas SET build_status = 'queued', build_error = NULL WHERE id = $1 AND build_status <> 'building'`, [areaId]);

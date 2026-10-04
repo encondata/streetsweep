@@ -42,6 +42,11 @@ function style(): StyleSpecification {
       "drive-track": { type: "geojson", data: empty() },
       places: { type: "geojson", data: empty(), promoteId: "id" },
       "search-pin": { type: "geojson", data: empty() },
+      // Zoomed out, where the team has swept: cells of covered streets, clustered.
+      "coverage-cells": {
+        type: "geojson", data: empty(), cluster: true, clusterRadius: 45, clusterMaxZoom: STREETS_MIN_ZOOM - 1,
+        clusterProperties: { meters: ["+", ["get", "m"]] },
+      },
     },
     layers: [
       { id: "base-osm", type: "raster", source: "osm", paint: { "raster-saturation": -0.35 } },
@@ -102,6 +107,17 @@ function style(): StyleSpecification {
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 5, 16, 8],
           "circle-color": ["case", ["boolean", ["get", "mine"], false], PLACE_COLOR, "#8e44ad"],
           "circle-stroke-color": "#ffffff", "circle-stroke-width": 2,
+        },
+      },
+      // Dots for driven ground while zoomed too far out for streets: bigger for more miles.
+      {
+        id: "coverage-cells", type: "circle", source: "coverage-cells", maxzoom: STREETS_MIN_ZOOM,
+        paint: {
+          "circle-color": DEFAULT_COLORS.driven.color,
+          "circle-opacity": 0.85,
+          "circle-stroke-color": "#ffffff", "circle-stroke-width": 2,
+          "circle-radius": ["interpolate", ["linear"], ["coalesce", ["get", "meters"], ["get", "m"]],
+            0, 5, 5000, 9, 50000, 15, 500000, 24],
         },
       },
       // An address found with the search box.
@@ -197,6 +213,8 @@ export class MapController {
     this.map.on("mouseleave", "streets", () => this.clearHover());
     this.map.on("mouseenter", "places", () => { if (!this.picking) this.map.getCanvas().style.cursor = "pointer"; });
     this.map.on("mouseleave", "places", () => { if (!this.picking) this.map.getCanvas().style.cursor = ""; });
+    this.map.on("mouseenter", "coverage-cells", () => { if (!this.picking) this.map.getCanvas().style.cursor = "pointer"; });
+    this.map.on("mouseleave", "coverage-cells", () => { if (!this.picking) this.map.getCanvas().style.cursor = ""; });
     // One click handler: a street first (it's on top), then a team area.
     this.map.on("click", (e: MapMouseEvent) => {
       if (this.picking) {
@@ -206,6 +224,17 @@ export class MapController {
         return;
       }
       if (this.busy) return;
+      // A dot of driven ground: zoom in on it (a cluster opens up; a single cell shows its streets).
+      const cell = this.map.queryRenderedFeatures(e.point, { layers: ["coverage-cells"] })[0];
+      if (cell) {
+        const [lon, lat] = (cell.geometry as GeoJSON.Point).coordinates;
+        const clusterId = cell.properties?.cluster_id;
+        if (clusterId != null) {
+          (this.map.getSource("coverage-cells") as GeoJSONSource).getClusterExpansionZoom(clusterId)
+            .then((z) => this.map.easeTo({ center: [lon, lat], zoom: Math.min(z, STREETS_MIN_ZOOM + 1) }), () => {});
+        } else this.map.easeTo({ center: [lon, lat], zoom: STREETS_MIN_ZOOM + 1 });
+        return;
+      }
       const place = this.map.queryRenderedFeatures(e.point, { layers: ["places"] })[0];
       if (place) {
         const [lon, lat] = (place.geometry as GeoJSON.Point).coordinates;
@@ -342,6 +371,14 @@ export class MapController {
     }
   }
 
+  /** Driven ground for the zoomed-out dots: [lon, lat, metres, segments] per cell. */
+  setCoverageCells(cells: [number, number, number, number][]) {
+    this.whenReady(() => (this.map.getSource("coverage-cells") as GeoJSONSource).setData({
+      type: "FeatureCollection",
+      features: cells.map(([lon, lat, m, n]) => ({ type: "Feature", properties: { m, n }, geometry: { type: "Point", coordinates: [lon, lat] } })),
+    }));
+  }
+
   /**
    * Go to an address from the search box and pin it. A place with an outline of its
    * own (a street, a park) is framed; a single address is zoomed to street level.
@@ -375,7 +412,7 @@ export class MapController {
     this.whenReady(() => {
       this.map.setPaintProperty("streets", "line-color", ["case", ["boolean", ["feature-state", "hover"], false], "#3d4b59", "#8b98a6"]);
       this.map.setPaintProperty("streets", "line-opacity", 0.75);
-      for (const id of ["drive-streets", "drive-track"]) this.map.setLayoutProperty(id, "visibility", "none");
+      for (const id of ["drive-streets", "drive-track", "coverage-cells"]) this.map.setLayoutProperty(id, "visibility", "none");
     });
   }
 
@@ -385,6 +422,7 @@ export class MapController {
       this.map.setPaintProperty("streets", "line-color", streetColor(c));
       this.map.setPaintProperty("streets", "line-opacity", streetOpacity(c));
       this.map.setPaintProperty("drive-streets", "line-color", c.driven.color);
+      this.map.setPaintProperty("coverage-cells", "circle-color", c.driven.color);
     });
   }
 

@@ -5,6 +5,7 @@
   import { onMount } from "svelte";
   import AreaPanel from "../components/AreaPanel.svelte";
   import { MapController, type Base } from "../lib/map";
+  import Icon from "../components/Icon.svelte";
   import { router } from "../lib/router.svelte";
   import { mySettings } from "../lib/settings";
 
@@ -13,6 +14,16 @@
   let ctl = $state<MapController | null>(null);
   let panel = $state<ReturnType<typeof AreaPanel>>();
   let base = $state<Base>(readBase());
+
+  // The list tucks away to give the map room; remembered per device. Drawing always shows it.
+  let shown = $state(readShown());
+  function readShown() {
+    try { return localStorage.getItem("streetsweep.areasPanel") !== "hidden"; } catch { return true; }
+  }
+  function setShown(on: boolean) {
+    shown = on;
+    try { localStorage.setItem("streetsweep.areasPanel", on ? "shown" : "hidden"); } catch { /* fine */ }
+  }
 
   function readBase(): Base {
     try {
@@ -69,8 +80,11 @@
 
 <div class="wrap">
   <div class="map" bind:this={box}></div>
-  {#if ctl}<AreaPanel bind:this={panel} {ctl} panelWidth={PANEL_W} />{/if}
+  {#if ctl}<AreaPanel bind:this={panel} {ctl} panelWidth={PANEL_W} {shown} onshow={() => setShown(true)} onhide={() => setShown(false)} />{/if}
   <div class="top">
+    {#if !shown}
+      <button class="tool" onclick={() => setShown(true)} title="Show the areas list"><Icon name="areas" size={16} /> Areas</button>
+    {/if}
     <div class="seg" role="group" aria-label="Basemap">
       {#each BASES as b (b.key)}
         <button class:on={base === b.key} aria-pressed={base === b.key} onclick={() => setBase(b.key)}>{b.label}</button>
@@ -83,6 +97,7 @@
   .wrap { position: relative; height: 100vh; height: 100dvh; }
   .map { position: absolute; inset: 0; }
   .top { position: absolute; top: 14px; right: 14px; display: flex; gap: 8px; }
+  .tool { height: 38px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); gap: 6px; font-size: 13px; }
   .seg { display: flex; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 3px; box-shadow: var(--shadow); }
   .seg button { height: 30px; border: 0; background: none; padding: 0 12px; font-size: 13px; border-radius: 7px; color: var(--ink-soft); }
   .seg button.on { background: var(--accent-soft); color: var(--green-700); }

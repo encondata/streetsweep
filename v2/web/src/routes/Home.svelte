@@ -82,7 +82,7 @@
   const BOARDS: { key: Board; label: string }[] = [{ key: "new", label: "New streets" }, { key: "miles", label: "Miles" }, { key: "drives", label: "Drives" }];
   const PERIODS: { key: Period; label: string }[] = [{ key: "week", label: "This week" }, { key: "month", label: "This month" }, { key: "all", label: "All time" }];
   function score(r: LeaderRow) {
-    if (board === "new") return `${miles(r.value)} · ${r.extra.toLocaleString()} segment${r.extra === 1 ? "" : "s"}`;
+    if (board === "new") return `${miles(r.value)} · ${r.extra.toLocaleString()} street${r.extra === 1 ? "" : "s"}`;
     if (board === "miles") return `${miles(r.value)} · ${r.extra} drive${r.extra === 1 ? "" : "s"}`;
     return `${r.value} drive${r.value === 1 ? "" : "s"} · ${miles(r.extra)}`;
   }
@@ -109,7 +109,7 @@
       <span class="small muted">{stats ? `${miles(stats.month.street_m)} this month` : " "}</span>
     </div>
     <div class="card tile">
-      <span class="muted small">Street segments</span>
+      <span class="muted small">Streets</span>
       <strong>{stats ? stats.total.streets.toLocaleString() : "—"}</strong>
       <span class="small muted">{stats ? `${stats.month.streets.toLocaleString()} this month` : " "}</span>
     </div>
@@ -198,7 +198,7 @@
             </li>
           {/each}
         </ol>
-        {#if board === "new"}<p class="small muted">New streets: segments a member was first in the team to sweep.</p>{/if}
+        {#if board === "new"}<p class="small muted">New streets: ones a member was first in the team to sweep.</p>{/if}
       {:else if rows}
         <p class="muted">Nobody to rank yet.</p>
       {/if}

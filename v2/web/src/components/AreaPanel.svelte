@@ -397,8 +397,8 @@
       </div>
 
       <div class="facts">
-        <div><span class="muted small">Streets</span><strong>{area.build_status === "built" ? miles(area.street_m) : "—"}</strong></div>
-        <div><span class="muted small">Segments</span><strong>{area.segment_count?.toLocaleString() ?? "—"}</strong></div>
+        <div><span class="muted small">Street length</span><strong>{area.build_status === "built" ? miles(area.street_m) : "—"}</strong></div>
+        <div><span class="muted small">Streets</span><strong>{progressOf(area.id)?.total_streets?.toLocaleString() ?? "—"}</strong></div>
         <div><span class="muted small">Size</span><strong>{size(area.km2)}</strong></div>
       </div>
 
@@ -410,7 +410,7 @@
             <span class="muted small">{team?.kind === "personal" ? "by you" : `by ${team?.name}`}</span>
           </div>
           <span class="bar big"><span style:width="{share(p)}%" style:background={colorOf(area)}></span></span>
-          <span class="muted small">{miles(p.driven_m)} of {miles(p.total_m)} · {(p.driven_segments ?? 0).toLocaleString()} of {(p.total_segments ?? 0).toLocaleString()} street segments.
+          <span class="muted small">{miles(p.driven_m)} of {miles(p.total_m)} · {(p.driven_streets ?? 0).toLocaleString()} of {(p.total_streets ?? 0).toLocaleString()} streets done{p.started_streets ? `, ${p.started_streets.toLocaleString()} begun` : ""}.
             Streets marked done count; ones left out don't count against you.</span>
         </div>
       {/if}
