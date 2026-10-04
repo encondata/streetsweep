@@ -1,6 +1,18 @@
 # StreetSweep v2
 
 Ground-up multi-user rebuild. Plan and schema: [docs/PLAN.md](docs/PLAN.md).
+
+## Deploying (and updating) a server
+
+```
+curl -fsSL https://raw.githubusercontent.com/encondata/streetsweep/v2/v2/install.sh | bash
+```
+
+Installs beside v1 (its own folder, data and port 8430; v1 stays on 8420), writes `.env`
+on first run with the first site admin, and starts everything. Run it again to update.
+Then point the reverse proxy for streetsweep.net at port 8430. Until `SMTP_*` is set in
+`.env`, sign-up codes land in Mailpit on port 8025. The repository-root `install.sh` is
+v1's and deploys `main`.
 Image brief: [docs/ASSETS.md](docs/ASSETS.md).
 
 ```
