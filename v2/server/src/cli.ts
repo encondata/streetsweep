@@ -1,13 +1,21 @@
 // Maintenance from the shell:
 //   docker compose exec api node dist/cli.js make-admin you@example.com
 //   docker compose exec api node dist/cli.js reset-password you@example.com
+//   docker compose exec api node dist/cli.js create-user reviewer@example.com "Play Reviewer"
 import { pool, query, tx } from "./db.js";
 import { hashPassword, randomPassword } from "./auth.js";
-import { confirmUser } from "./users.js";
+import { confirmUser, createUser } from "./users.js";
 
 async function main() {
-  const [cmd, email] = process.argv.slice(2);
-  if (!cmd || !email) throw new Error("usage: cli.js make-admin|reset-password <email>");
+  const [cmd, email, name] = process.argv.slice(2);
+  if (!cmd || !email) throw new Error("usage: cli.js make-admin|reset-password|create-user <email> [display name]");
+  if (cmd === "create-user") {
+    // A confirmed account with no emailed code, e.g. for app store review.
+    const pw = randomPassword();
+    await tx((db) => createUser(db, { email, displayName: name || email.split("@")[0], password: pw, verified: true }));
+    console.log(`Created ${email}. Password (shown once): ${pw}`);
+    return;
+  }
   const { rows } = await query<{ id: string }>(`SELECT id FROM users WHERE email = $1`, [email]);
   if (!rows[0]) throw new Error(`No account for ${email}. Sign up first, then run this.`);
   if (cmd === "make-admin") {

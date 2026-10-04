@@ -108,6 +108,10 @@ app.register(fastifyStatic, { root: config.publicDir, prefix: "/", index: false,
 // One page for both: it shows the sign-up form at /signup.
 app.get("/login", (_req, reply) => reply.sendFile("login.html", config.publicDir));
 app.get("/signup", (_req, reply) => reply.sendFile("login.html", config.publicDir));
+// Privacy policy, linked from the Play listing. /policies and /privacy are friendlier spellings.
+for (const p of ["/policys", "/policies", "/privacy"]) {
+  app.get(p, (_req, reply) => reply.sendFile("policys.html", config.publicDir));
+}
 
 const webIndex = path.join(config.webDir, "index.html");
 if (fs.existsSync(webIndex)) {
