@@ -28,7 +28,7 @@ export const avatarUrl = (u: string) =>
 
 export async function meSummary(userId: string) {
   const user = await query(
-    `SELECT id, email, display_name, ${avatarUrl("users")} AS avatar_url, is_site_admin, created_at
+    `SELECT id, email, display_name, ${avatarUrl("users")} AS avatar_url, is_site_admin, created_at, preferences
        FROM users WHERE id = $1`,
     [userId],
   );
@@ -44,6 +44,13 @@ export async function meSummary(userId: string) {
   );
   return { user: user.rows[0], teams: teams.rows };
 }
+
+/** A street colour someone chose: #rrggbb and how opaque, 0.1 to 1. */
+type MapColors = { driven: { color: string; opacity: number }; undriven: { color: string; opacity: number } };
+const COLOR_SPEC = {
+  type: "object", additionalProperties: false, required: ["color", "opacity"],
+  properties: { color: { type: "string", pattern: "^#[0-9a-fA-F]{6}$" }, opacity: { type: "number", minimum: 0.1, maximum: 1 } },
+};
 
 export default async function accountRoutes(app: FastifyInstance) {
   app.post<{ Body: { email: string; displayName: string; password: string; remember?: boolean } }>(
@@ -248,6 +255,22 @@ export default async function accountRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/me", async (req) => meSummary(requireUser(req).id));
+
+  // Your preferences, merged: send only what changes. Unknown keys are refused, so a
+  // typo can't quietly store nothing useful.
+  app.patch<{ Body: { map_colors?: MapColors; onboarded?: boolean } }>(
+    "/api/me/preferences",
+    { schema: { body: { type: "object", additionalProperties: false, properties: {
+        map_colors: { type: "object", additionalProperties: false, required: ["driven", "undriven"], properties: {
+          driven: COLOR_SPEC, undriven: COLOR_SPEC } },
+        onboarded: { type: "boolean" } } } } },
+    async (req) => {
+      const me = requireUser(req);
+      await query(`UPDATE users SET preferences = preferences || $2::jsonb, updated_at = now() WHERE id = $1`,
+        [me.id, JSON.stringify(req.body)]);
+      return meSummary(me.id);
+    },
+  );
 
   app.patch<{ Body: { displayName?: string; email?: string } }>(
     "/api/me",

@@ -14,10 +14,9 @@ export type Base = "map" | "satellite" | "hybrid";
 /** Streets come from the server from this zoom in (a tile further out would hold a city). */
 export const STREETS_MIN_ZOOM = 12;
 
-const STREET_COLOR = "#1a6fd4";
-/** Coverage, when a team is chosen: swept streets turn green, left-out ones go grey. */
-export const DRIVEN_COLOR = "#16a34a";
-export const EXCLUDED_COLOR = "#9aa7b4";
+import { DEFAULT_COLORS, EXCLUDED, myColors, type MapColors } from "./colors";
+/** Left-out streets go grey whatever colours someone picked for driven and not. */
+export const EXCLUDED_COLOR = EXCLUDED;
 export const TRACK_COLOR = "#e2721f";
 /** Your places; ones shared with you by others are purple. */
 export const PLACE_COLOR = "#c2185b";
@@ -72,10 +71,10 @@ function style(): StyleSpecification {
         id: "streets", type: "line", source: "streets", "source-layer": "streets",
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": ["case", ["boolean", ["feature-state", "hover"], false], "#0d4a99",
-            ["match", ["get", "state"], ["done", "complete"], DRIVEN_COLOR, "excluded", EXCLUDED_COLOR, STREET_COLOR]],
+          // Set from the person's preferences (setStreetColors); these are the defaults.
+          "line-color": streetColor(DEFAULT_COLORS),
           "line-width": ["interpolate", ["linear"], ["zoom"], 12, 1.2, 16, 4, 19, 9],
-          "line-opacity": ["match", ["get", "state"], "excluded", 0.7, 1],
+          "line-opacity": streetOpacity(DEFAULT_COLORS),
         },
       },
       {
@@ -89,7 +88,7 @@ function style(): StyleSpecification {
       // One drive, on its own page: the streets it was matched to, under the raw GPS track.
       {
         id: "drive-streets", type: "line", source: "drive-streets", layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": DRIVEN_COLOR, "line-opacity": 0.55,
+        paint: { "line-color": DEFAULT_COLORS.driven.color, "line-opacity": 0.55,
                  "line-width": ["interpolate", ["linear"], ["zoom"], 12, 4, 16, 11, 19, 18] },
       },
       {
@@ -112,6 +111,17 @@ function style(): StyleSpecification {
       },
     ],
   };
+}
+
+/** Street colour by coverage state, hovered streets drawn darker. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- MapLibre's expression types
+function streetColor(c: MapColors): any {
+  return ["case", ["boolean", ["feature-state", "hover"], false], "#0d1b28",
+    ["match", ["get", "state"], ["done", "complete"], c.driven.color, "excluded", EXCLUDED_COLOR, c.undriven.color]];
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function streetOpacity(c: MapColors): any {
+  return ["match", ["get", "state"], ["done", "complete"], c.driven.opacity, "excluded", 0.7, c.undriven.opacity];
 }
 
 export interface StreetHit {
@@ -153,6 +163,8 @@ export class MapController {
     this.map.addControl(new NavigationControl({ showCompass: false }), "bottom-right");
     this.map.addControl(new GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: false }), "bottom-right");
     this.map.addControl(new ScaleControl({ unit: "imperial" }), "bottom-left");
+    // Every map draws streets in the person's own colours.
+    this.setStreetColors(myColors());
 
     this.map.on("mousemove", "streets", (e: MapLayerMouseEvent) => {
       const id = e.features?.[0]?.id as number | undefined;
@@ -300,6 +312,15 @@ export class MapController {
       const xs = coords.map((c) => c[0]), ys = coords.map((c) => c[1]);
       this.fitBounds([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]);
     }
+  }
+
+  /** The person's street colours (Preferences). */
+  setStreetColors(c: MapColors) {
+    this.whenReady(() => {
+      this.map.setPaintProperty("streets", "line-color", streetColor(c));
+      this.map.setPaintProperty("streets", "line-opacity", streetOpacity(c));
+      this.map.setPaintProperty("drive-streets", "line-color", c.driven.color);
+    });
   }
 
   setBase(base: Base) {

@@ -15,6 +15,8 @@
   import Achievements from "./routes/Achievements.svelte";
   import Places from "./routes/Places.svelte";
   import Place from "./routes/Place.svelte";
+  import Me from "./routes/Me.svelte";
+  import Welcome from "./components/Welcome.svelte";
   import { router, match } from "./lib/router.svelte";
   import { session } from "./lib/session.svelte";
   import { errorText } from "./lib/api";
@@ -44,6 +46,8 @@
   <Shell>
     {#if router.path === "/"}
       <Home />
+    {:else if router.path === "/me"}
+      <Me />
     {:else if router.path === "/achievements"}
       <Achievements />
     {:else if router.path === "/places"}
@@ -74,6 +78,7 @@
       <Soon title="Not found" art={undefined}>There's nothing at this address. <a href="/">Go home</a>.</Soon>
     {/if}
   </Shell>
+  {#if !session.me.user.preferences?.onboarded}<Welcome />{/if}
 {/if}
 
 <style>

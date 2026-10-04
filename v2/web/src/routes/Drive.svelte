@@ -8,7 +8,8 @@
   import { router } from "../lib/router.svelte";
   import { session } from "../lib/session.svelte";
   import { ago, duration, miles, span } from "../lib/format";
-  import { MapController, DRIVEN_COLOR, TRACK_COLOR } from "../lib/map";
+  import { MapController, TRACK_COLOR } from "../lib/map";
+  import { myColors } from "../lib/colors";
   import type { DriveDetail, DriveType, PersonRef, Role, Vehicle, VehicleDetail } from "../lib/types";
 
   let { id }: { id: string } = $props();
@@ -140,7 +141,7 @@
       <div class="map" bind:this={box}></div>
       <div class="legend small">
         <span><i style:background={TRACK_COLOR}></i>GPS track</span>
-        <span><i style:background={DRIVEN_COLOR}></i>Streets it counted</span>
+        <span><i style:background={myColors().driven.color}></i>Streets it counted</span>
       </div>
     </div>
 

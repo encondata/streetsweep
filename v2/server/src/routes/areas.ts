@@ -128,6 +128,20 @@ export default async function areaRoutes(app: FastifyInstance) {
         ORDER BY a.source = 'drawn' DESC, lower(a.name)`,
       [team.id],
     );
+    // Which of these areas touch or overlap (within about 100 m), so the map can colour
+    // neighbours differently. A whole state's outline is too big to be worth testing.
+    const ids = rows.filter((r) => r.level !== "state").map((r) => r.id);
+    const pairs = ids.length > 1 ? (await query<{ a: string; b: string }>(
+      `SELECT x.id AS a, y.id AS b FROM areas x JOIN areas y ON x.id < y.id
+        WHERE x.id = ANY($1::uuid[]) AND y.id = ANY($1::uuid[]) AND ST_DWithin(x.geom, y.geom, 0.001)`,
+      [ids],
+    )).rows : [];
+    const neighbors = new Map<string, string[]>();
+    for (const { a, b } of pairs) {
+      neighbors.set(a, [...(neighbors.get(a) ?? []), b]);
+      neighbors.set(b, [...(neighbors.get(b) ?? []), a]);
+    }
+    for (const r of rows) r.neighbors = neighbors.get(r.id) ?? [];
     return { team: { id: team.id, name: team.name, kind: team.kind }, can_edit: isAdminRole(role), areas: rows };
   });
 

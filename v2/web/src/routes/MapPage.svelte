@@ -7,7 +7,8 @@
   import { errorText } from "../lib/api";
   import { syncFrom } from "../lib/forms";
   import type { Place } from "../lib/types";
-  import { MapController, STREETS_MIN_ZOOM, DRIVEN_COLOR, EXCLUDED_COLOR, type Base } from "../lib/map";
+  import { MapController, STREETS_MIN_ZOOM, EXCLUDED_COLOR, type Base } from "../lib/map";
+  import { myColors } from "../lib/colors";
   import { session } from "../lib/session.svelte";
   import { api } from "../lib/api";
   import { date } from "../lib/format";
@@ -205,8 +206,8 @@
       <div class="chip">Zoom in to see streets</div>
     {:else if info?.last_import && coverageTeam}
       <div class="chip quiet legend">
-        <span><i style:background={DRIVEN_COLOR}></i>Driven</span>
-        <span><i style:background="#1a6fd4"></i>Not yet</span>
+        <span><i style:background={myColors().driven.color}></i>Driven</span>
+        <span><i style:background={myColors().undriven.color}></i>Not yet</span>
         <span><i style:background={EXCLUDED_COLOR}></i>Left out</span>
       </div>
     {:else if info?.last_import}

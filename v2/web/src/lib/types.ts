@@ -7,6 +7,8 @@ export interface User {
   avatar_url: string | null;
   is_site_admin: boolean;
   created_at: string;
+  /** Free-form settings: map_colors, onboarded. */
+  preferences?: { map_colors?: import("./colors").MapColors; onboarded?: boolean };
 }
 
 export interface TeamSummary {
@@ -215,9 +217,13 @@ export interface Area {
   driven_m?: number | null;
   total_segments?: number | null;
   driven_segments?: number | null;
+  /** Other areas in the same list that touch or overlap this one (for colouring). */
+  neighbors?: string[];
 }
 
-export const AREA_COLORS = ["#1e8a28", "#1a6fd4", "#8e44ad", "#d35400", "#c0392b", "#16a085", "#b7950b", "#2c3e50"];
+/** Area colours, given out automatically so neighbours differ (lib/areaColors). Bright and
+ * far apart, so an outline reads on satellite imagery as well as on the plain map. */
+export const AREA_COLORS = ["#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4", "#21b8d8", "#f032e6", "#d4a017"];
 
 // ---- drives ----
 

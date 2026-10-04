@@ -8,8 +8,9 @@
   import { OutlineDraw, ringsOf } from "../lib/draw.svelte";
   import { formValues } from "../lib/forms";
   import { miles, percent } from "../lib/format";
-  import { AREA_COLOR, type MapController } from "../lib/map";
+  import type { MapController } from "../lib/map";
   import { AREA_COLORS, LEVEL_LABEL, type Area } from "../lib/types";
+  import { assignAreaColors } from "../lib/areaColors";
 
   let { ctl, panelWidth = 360, onteam }: { ctl: MapController; panelWidth?: number; onteam?: (teamId: string) => void } = $props();
 
@@ -30,7 +31,7 @@
   let area = $state<Area | null>(null);
   let areaCanEdit = $state(false);
   let editing = $state(false);
-  let form = $state({ name: "", color: AREA_COLOR, notes: "", level: "neighborhood" as "neighborhood" | "custom" });
+  let form = $state({ name: "", notes: "", level: "neighborhood" as "neighborhood" | "custom" });
 
   let draw = $state<OutlineDraw | null>(null);
   let redrawing = $state<Area | null>(null);
@@ -44,6 +45,9 @@
   }
 
   let team = $derived(teams.find((t) => t.id === teamId));
+  // Colours are automatic: no area shares one with an area it touches.
+  let colors = $derived(assignAreaColors(areas));
+  const colorOf = (a: Area) => colors.get(a.id) ?? AREA_COLORS[0];
   const followedHere = (a: Area) => areas.some((x) => x.id === a.id);
 
   // ---- the team's areas ----
@@ -54,7 +58,8 @@
       const r = await api<{ areas: Area[]; can_edit: boolean }>(`/api/teams/${teamId}/areas`);
       areas = r.areas;
       canEdit = r.can_edit;
-      ctl.setTeamAreas(r.areas.map((a) => ({ type: "Feature", id: a.id, properties: { id: a.id, color: a.color }, geometry: a.geometry! })));
+      const auto = assignAreaColors(r.areas);
+      ctl.setTeamAreas(r.areas.map((a) => ({ type: "Feature", id: a.id, properties: { id: a.id, color: auto.get(a.id) }, geometry: a.geometry! })));
       // Street lists being built: check back until they're done.
       if (r.areas.some((a) => a.build_status === "queued" || a.build_status === "building")) pollTimer = setTimeout(refresh, 4000);
     } catch (e) {
@@ -157,14 +162,14 @@
   };
 
   function startEdit() {
-    form = { name: area!.name, color: area!.color ?? AREA_COLOR, notes: area!.notes ?? "", level: area!.level === "custom" ? "custom" : "neighborhood" };
+    form = { name: area!.name, notes: area!.notes ?? "", level: area!.level === "custom" ? "custom" : "neighborhood" };
     editing = true;
   }
   function saveEdit(el: HTMLFormElement) {
     const f = formValues(el);
     form.name = f.name ?? form.name;
     form.notes = f.notes ?? form.notes;
-    act(() => api(`/api/areas/${area!.id}`, { method: "PATCH", body: { name: form.name.trim(), color: form.color, notes: form.notes.trim() || null, level: form.level } }),
+    act(() => api(`/api/areas/${area!.id}`, { method: "PATCH", body: { name: form.name.trim(), notes: form.notes.trim() || null, level: form.level } }),
       async () => {
         editing = false;
         await loadAreas();
@@ -183,8 +188,8 @@
   function startDraw(existing: Area | null) {
     redrawing = existing;
     form = existing
-      ? { name: existing.name, color: existing.color ?? AREA_COLOR, notes: existing.notes ?? "", level: existing.level === "custom" ? "custom" : "neighborhood" }
-      : { name: "", color: AREA_COLORS[areas.filter((a) => a.source === "drawn").length % AREA_COLORS.length], notes: "", level: "neighborhood" };
+      ? { name: existing.name, notes: existing.notes ?? "", level: existing.level === "custom" ? "custom" : "neighborhood" }
+      : { name: "", notes: "", level: "neighborhood" };
     const neighbours = areas.filter((a) => a.id !== existing?.id && a.geometry).flatMap((a) => ringsOf(a.geometry!));
     ctl.busy = true;
     ctl.showAreas(false);
@@ -227,10 +232,10 @@
     try {
       let id: string;
       if (redrawing) {
-        await api(`/api/areas/${redrawing.id}`, { method: "PATCH", body: { geometry, name: form.name.trim(), color: form.color, level: form.level } });
+        await api(`/api/areas/${redrawing.id}`, { method: "PATCH", body: { geometry, name: form.name.trim(), level: form.level } });
         id = redrawing.id;
       } else {
-        id = (await api<{ id: string }>(`/api/teams/${teamId}/areas`, { body: { name: form.name.trim(), level: form.level, color: form.color, geometry } })).id;
+        id = (await api<{ id: string }>(`/api/teams/${teamId}/areas`, { body: { name: form.name.trim(), level: form.level, geometry } })).id;
       }
       endDraw();
       redrawing = null;
@@ -302,12 +307,12 @@
       <div class="list">
         {#each areas as a (a.id)}
           <button class="item" onclick={() => open(a.id)}>
-            <span class="swatch" style:background={a.color ?? AREA_COLOR}></span>
+            <span class="swatch" style:background={colorOf(a)}></span>
             <span class="grow">
               <strong>{a.name}</strong>
               <span class="muted small">{a.source === "drawn" ? LEVEL_LABEL[a.level] : kind(a)} · {status(a)}</span>
               {#if progressOf(a.id)}
-                <span class="bar" title="{miles(a.driven_m)} of {miles(a.total_m)} swept"><span style:width="{share(a)}%" style:background={a.color ?? AREA_COLOR}></span></span>
+                <span class="bar" title="{miles(a.driven_m)} of {miles(a.total_m)} swept"><span style:width="{share(a)}%" style:background={colorOf(a)}></span></span>
               {/if}
             </span>
             {#if progressOf(a.id)}<span class="pct">{percent(a.driven_m ?? 0, a.total_m!)}</span>{/if}
@@ -332,7 +337,7 @@
     {#if error}<p class="notice error">{error}</p>{/if}
     <div class="detail">
       <div class="title">
-        <span class="swatch big" class:outline={!followedHere(area) && area.source !== "drawn"} style:background={followedHere(area) || area.source === "drawn" ? (area.color ?? AREA_COLOR) : "none"}></span>
+        <span class="swatch big" class:outline={!followedHere(area) && area.source !== "drawn"} style:background={followedHere(area) || area.source === "drawn" ? colorOf(area) : "none"}></span>
         <div>
           <h2>{area.name}</h2>
           <p class="muted small">{area.source === "drawn" ? `${LEVEL_LABEL[area.level]}${area.parent_name ? ` in ${area.parent_name}` : ""} · ${ownerOf(area)}` : kind(area)}</p>
@@ -352,7 +357,7 @@
             <strong>{percent(p.driven_m ?? 0, p.total_m!)} swept</strong>
             <span class="muted small">{team?.kind === "personal" ? "by you" : `by ${team?.name}`}</span>
           </div>
-          <span class="bar big"><span style:width="{share(p)}%" style:background={area.color ?? AREA_COLOR}></span></span>
+          <span class="bar big"><span style:width="{share(p)}%" style:background={colorOf(area)}></span></span>
           <span class="muted small">{miles(p.driven_m)} of {miles(p.total_m)} · {(p.driven_segments ?? 0).toLocaleString()} of {(p.total_segments ?? 0).toLocaleString()} street segments.
             Streets marked done count; ones left out don't count against you.</span>
         </div>
@@ -385,11 +390,6 @@
             <label class="field">Name <input type="text" name="name" bind:value={form.name} maxlength="120" autocomplete="off" required /></label>
             <label class="field">Kind
               <select bind:value={form.level}><option value="neighborhood">Neighborhood</option><option value="custom">Custom area</option></select></label>
-            <div class="field">Colour
-              <div class="swatches">
-                {#each AREA_COLORS as c}<button type="button" class="sw" class:on={form.color === c} style:background={c} aria-label="Colour {c}" onclick={() => (form.color = c)}></button>{/each}
-              </div>
-            </div>
             <label class="field">Notes <textarea name="notes" bind:value={form.notes} maxlength="2000"></textarea></label>
             <div class="row-btns"><button type="button" class="ghost" onclick={() => (editing = false)}>Cancel</button><button type="submit" class="primary" disabled={busy}>Save</button></div>
           </form>
@@ -423,11 +423,6 @@
       <label class="field">Name <input type="text" name="name" bind:value={form.name} maxlength="120" autocomplete="off" placeholder="e.g. Old Town" required /></label>
       <label class="field">Kind
         <select bind:value={form.level}><option value="neighborhood">Neighborhood</option><option value="custom">Custom area</option></select></label>
-      <div class="field">Colour
-        <div class="swatches">
-          {#each AREA_COLORS as c}<button type="button" class="sw" class:on={form.color === c} style:background={c} aria-label="Colour {c}" onclick={() => (form.color = c)}></button>{/each}
-        </div>
-      </div>
       <div class="row-btns"><button type="button" class="ghost" onclick={cancelDraw}>Cancel</button><button type="submit" class="primary" disabled={busy}>Save area</button></div>
     </form>
   {/if}
@@ -475,9 +470,6 @@
   .progress-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
   .row-btns { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .danger { color: var(--danger); }
-  .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
-  .sw { width: 28px; height: 28px; padding: 0; border-radius: 8px; border: 2px solid transparent; }
-  .sw.on { border-color: var(--ink); box-shadow: inset 0 0 0 2px #fff; }
   @media (max-width: 760px) {
     .panel { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto !important; max-height: 48%; }
   }

@@ -96,6 +96,7 @@
 
   {#snippet footer()}
     <button class="danger" onclick={signOut}>Sign out</button>
+    <a class="btn ghost prefs" href="/me" onclick={() => (open = false)}>Preferences</a>
   {/snippet}
 </Modal>
 
@@ -103,4 +104,5 @@
   .pic { display: flex; align-items: center; gap: 16px; }
   .pic-actions { display: flex; gap: 6px; flex-wrap: wrap; }
   hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
+  .prefs { margin-right: auto; order: -1; }
 </style>

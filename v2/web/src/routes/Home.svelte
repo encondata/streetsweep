@@ -9,7 +9,8 @@
   import { api, errorText } from "../lib/api";
   import { session } from "../lib/session.svelte";
   import { duration, miles, percent } from "../lib/format";
-  import { AREA_COLOR } from "../lib/map";
+  import { assignAreaColors } from "../lib/areaColors";
+  import { AREA_COLORS } from "../lib/types";
   import type { AchievementSet, Area, Badge, Board, Drive, Ladder, LeaderRow, Period, Stats } from "../lib/types";
 
   let teams = $derived(session.me!.teams);
@@ -58,6 +59,9 @@
     rows = null;
     api<{ rows: LeaderRow[] }>(url).then((r) => (rows = r.rows), (e) => (error = errorText(e)));
   });
+
+  // The same automatic colours as the map: neighbours never share one.
+  let areaColors = $derived(assignAreaColors(areas));
 
   // Areas with their streets listed, furthest along first.
   let progressAreas = $derived(
@@ -142,7 +146,7 @@
           {#each progressAreas as { a, pct } (a.id)}
             <div class="area">
               <div class="area-head"><span class="ellipsis"><strong>{a.name}</strong></span><span class="pct">{percent(a.driven_m ?? 0, a.total_m!)}</span></div>
-              <span class="bar"><span style:width="{Math.min(100, pct * 100)}%" style:background={a.color ?? AREA_COLOR}></span></span>
+              <span class="bar"><span style:width="{Math.min(100, pct * 100)}%" style:background={areaColors.get(a.id) ?? AREA_COLORS[0]}></span></span>
               <span class="small muted">{miles(a.driven_m)} of {miles(a.total_m)}</span>
             </div>
           {/each}
