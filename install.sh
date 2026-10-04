@@ -159,7 +159,7 @@ say "StreetSweep server is up."
 cat <<SUMMARY
 
   Direct           $BASE   (plain HTTP, for your reverse proxy)
-  Behind the proxy https://streetsweep.hackspacelabs.com
+  Behind the proxy https://streetsweep.streetsweep.net
 
   Installed in     $DIR
   Data in          $DATA_DIR

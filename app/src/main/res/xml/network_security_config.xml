@@ -10,7 +10,7 @@
 <network-security-config>
     <base-config cleartextTrafficPermitted="true" />
     <domain-config cleartextTrafficPermitted="false">
-        <domain includeSubdomains="true">streetsweep.hackspacelabs.com</domain>
+        <domain includeSubdomains="true">streetsweep.streetsweep.net</domain>
         <domain includeSubdomains="true">tile.openstreetmap.org</domain>
         <domain includeSubdomains="true">overpass-api.de</domain>
         <domain includeSubdomains="true">valhalla1.openstreetmap.de</domain>

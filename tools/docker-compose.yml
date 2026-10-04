@@ -47,7 +47,7 @@ services:
       # Where drives are matched to streets: the Valhalla below, through the reverse proxy.
       # While it is not answering (its first start builds routing tiles for an hour or
       # more) drives go to the public server instead; VALHALLA_FALLBACK_URL=none stops that.
-      VALHALLA_URL: ${VALHALLA_URL:-https://valhalla.hackspacelabs.com}
+      VALHALLA_URL: ${VALHALLA_URL:-https://valhalla.streetsweep.net}
       VALHALLA_FALLBACK_URL: ${VALHALLA_FALLBACK_URL:-}
       # A Geofabrik extract to fill the street store from, once a month, instead of asking
       # Overpass cell by cell, e.g.
@@ -70,7 +70,7 @@ services:
 
   # A Valhalla of your own, built from a Geofabrik extract, so matching drives never
   # touches the public server. Published on port 8002 for the reverse proxy in front
-  # (valhalla.hackspacelabs.com). The first start downloads the extract and builds routing
+  # (valhalla.streetsweep.net). The first start downloads the extract and builds routing
   # tiles — for Texas, about 700 MB to download, several GB of disk and an hour or more;
   # later starts reuse them. Watch it with: docker compose logs -f valhalla
   valhalla:

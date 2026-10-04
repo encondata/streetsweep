@@ -37,7 +37,7 @@ TLS and the public hostname.
 
 | Where | Address |
 |---|---|
-| Behind the proxy | <https://streetsweep.hackspacelabs.com> |
+| Behind the proxy | <https://streetsweep.streetsweep.net> |
 | Straight at the container | `http://<host>:8420` |
 
 Point your proxy at `http://<host>:8420`. If it runs on this same machine, set

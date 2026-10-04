@@ -196,7 +196,7 @@ class PortalClientTest {
 
     @Test
     fun `addresses are normalised the way people type them`() {
-        assertEquals("https://streetsweep.hackspacelabs.com", PortalClient.normalise("https://streetsweep.hackspacelabs.com/"))
+        assertEquals("https://streetsweep.streetsweep.net", PortalClient.normalise("https://streetsweep.streetsweep.net/"))
         assertEquals("http://192.168.1.5:8420", PortalClient.normalise(" 192.168.1.5:8420 "))
         assertEquals(null, PortalClient.normalise(null))
         assertEquals(null, PortalClient.normalise("   "))

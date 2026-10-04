@@ -54,9 +54,9 @@ data class TrackingSettings(
         val BACKUP_DAY_CHOICES = listOf(0, 1, 7)
         val IDLE_STOP_CHOICES = listOf(0, 15, 30, 60)
         /** Our own Valhalla, behind the reverse proxy. Signed in, drives go through the server instead. */
-        const val DEFAULT_VALHALLA_URL = "https://valhalla.hackspacelabs.com"
+        const val DEFAULT_VALHALLA_URL = "https://valhalla.streetsweep.net"
         const val DEFAULT_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
-        const val DEFAULT_PORTAL_URL = "https://streetsweep.hackspacelabs.com"
+        const val DEFAULT_PORTAL_URL = "https://streetsweep.streetsweep.net"
     }
 
     val hasAnyAutoTrigger: Boolean get() = bluetoothTriggerAddress != null || androidAutoTriggerEnabled

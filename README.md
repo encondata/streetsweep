@@ -146,7 +146,7 @@ curl -fsSL https://raw.githubusercontent.com/encondata/streetsweep/main/install.
 
 It clones the repository, generates an access token, pulls the images and starts everything,
 and is safe to re-run to update. The app listens on port 8420 over plain HTTP for a reverse
-proxy to forward to; behind that it answers on <https://streetsweep.hackspacelabs.com>. Every
+proxy to forward to; behind that it answers on <https://streetsweep.streetsweep.net>. Every
 API call needs the token, which the installer prints; see `tools/README.md`.
 
 ## Setup
