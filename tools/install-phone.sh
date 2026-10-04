@@ -12,7 +12,7 @@
 #   ./tools/install-phone.sh --release        # the latest GitHub release
 set -euo pipefail
 export PATH="$HOME/Library/Android/sdk/platform-tools:$PATH"
-PKG=com.example.streetsweep
+PKG=net.streetsweep
 REPO=encondata/streetsweep
 
 # The phone: ANDROID_SERIAL if set, otherwise the first device that is not an emulator.

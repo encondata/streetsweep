@@ -116,7 +116,7 @@
             android:name=".tracking.auto.VehicleTransitionReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.example.streetsweep.action.VEHICLE_TRANSITION" />
+                <action android:name="net.streetsweep.action.VEHICLE_TRANSITION" />
             </intent-filter>
         </receiver>
 

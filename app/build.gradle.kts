@@ -18,13 +18,13 @@ android {
     // The migration test reads the exported schemas, so they have to ship as assets.
     sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
 
-    namespace = "com.example.streetsweep"
+    namespace = "net.streetsweep"
     compileSdk {
         version = release(36)
     }
 
     defaultConfig {
-        applicationId = "com.example.streetsweep"
+        applicationId = "net.streetsweep"
         minSdk = 26
         targetSdk = 36
         versionCode = 2

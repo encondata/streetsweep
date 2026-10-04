@@ -10,7 +10,7 @@ set -uo pipefail
 export PATH="$HOME/Library/Android/sdk/platform-tools:$PATH"
 D="${ANDROID_SERIAL:-$(adb devices | sed 1d | awk 'NF{print $1; exit}')}"
 [ -z "$D" ] && { echo "No phone. Plug it in, or pair wireless debugging."; exit 1; }
-PKG=com.example.streetsweep
+PKG=net.streetsweep
 
 echo "== is the app there, and where did it come from? =="
 adb -s "$D" shell dumpsys package $PKG | grep -E "versionName|installerPackageName|pkgFlags" | sed 's/^/  /'

@@ -190,7 +190,7 @@ requires a declaration for background location use.
 - Build output goes to `~/Library/Caches/StreetSweep-build` instead of `build/` because
   this folder is iCloud-synced and iCloud's "name 2.ext" conflict copies break
   incremental builds.
-- The package name and `applicationId` are `com.example.streetsweep`; change them before
+- The package name and `applicationId` are `net.streetsweep`; change them before
   publishing.
 - Room schema is exported to `app/schemas/` for future migrations. While the app is
   pre-release, schema changes wipe local data instead of migrating.
