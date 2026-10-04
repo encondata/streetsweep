@@ -6,8 +6,10 @@
   import type { StreetHit } from "../lib/map";
   import type { Segment } from "../lib/types";
 
-  let { hit, teamId, teamLabel, onchange }: {
+  let { hit, teamId, teamLabel, onchange, onstretch }: {
     hit: StreetHit; teamId: string | null; teamLabel: string; onchange: () => void;
+    /** "Mark part of it": pick where a stretch of this road ends, on the map. */
+    onstretch?: () => void;
   } = $props();
 
   const KIND: Record<string, string> = {
@@ -135,8 +137,11 @@
           <div class="btns">
             <button class="sm" disabled={busy} onclick={() => ask("complete", true)}>Mark whole street done</button>
             <button class="sm ghost" disabled={busy} onclick={() => ask("excluded", true)}>Leave it all out</button>
+            {#if onstretch}<button class="sm ghost" disabled={busy} onclick={onstretch} title="Click where the stretch ends, then mark it">Mark part of it…</button>{/if}
           </div>
         </div>
+      {:else if onstretch && street && street.pieces > 1}
+        <div class="btns"><button class="sm ghost" disabled={busy} onclick={onstretch} title="Click where the stretch ends, then mark it">Mark part of it…</button></div>
       {/if}
     {/if}
     {#if done}<div class="ok">{done}</div>{/if}

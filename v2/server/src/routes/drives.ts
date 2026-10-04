@@ -214,6 +214,9 @@ export default async function driveRoutes(app: FastifyInstance) {
 
   // ---- a street, as the map's popup shows it for one team -------------------------
 
+  /** A way's route numbers ("TX 6;FM 646" → {TX 6, FM 646}), empty if it has none. */
+  const REFS = (w: string) => `coalesce(string_to_array(regexp_replace(${w}.tags->>'ref', '\\s*;\\s*', ';', 'g'), ';'), '{}')`;
+
   /**
    * The whole street a piece belongs to, as someone looking at the map means it: the
    * pieces with its name that run on from it, gaps of up to ~150 m bridged (a park, a jog
@@ -282,6 +285,139 @@ export default async function driveRoutes(app: FastifyInstance) {
       street = { pieces: r.n, meters: Math.round(r.m), left_m: Math.round(r.left_m), marked_done: r.done_n, left_out: r.out_n };
     }
     return { segment: rows[0], street, can_mark: canDrive(role) || me.is_site_admin };
+  });
+
+  /**
+   * A stretch of a street between two of its pieces (click one, then another): the way
+   * along it from the first to the second, small gaps in the map bridged, plus on a
+   * divided road the other side alongside, and the crossovers between. For marking part
+   * of a long road ("Highway 6, but only through town"). A highway is followed by its
+   * route number as well as its name, since TX 6 is "Highway 6" in one town, "Alvin
+   * Sugarland Road" in the next and unnamed between. Named by the cross streets at its ends.
+   */
+  app.get<{ Params: { a: string; b: string } }>("/api/segments/:a/between/:b", async (req) => {
+    requireUser(req);
+    const [a, b] = [Number(req.params.a), Number(req.params.b)];
+    if (!Number.isInteger(a) || !Number.isInteger(b)) throw badRequest("Two street pieces, by id.");
+    const ends = await query<{ id: string; nm: string | null; name: string | null; refs: string[] | null; x: number; y: number }>(
+      `SELECT s.id, lower(w.name) AS nm, w.name, ${REFS("w")} AS refs, ST_X(ST_Centroid(s.geom)) AS x, ST_Y(ST_Centroid(s.geom)) AS y
+         FROM street_segments s JOIN street_ways w ON w.way_id = s.way_id WHERE s.id = ANY($1::bigint[])`, [[a, b]]);
+    const A = ends.rows.find((r) => Number(r.id) === a), B = ends.rows.find((r) => Number(r.id) === b);
+    if (!A || !B) throw notFound("No such street piece.");
+    // The same road: a route number in common, or failing that the same name.
+    const refs = (A.refs ?? []).filter((r) => (B.refs ?? []).includes(r));
+    const nm = refs.length ? null : A.nm && A.nm === B.nm ? A.nm : null;
+    if (!refs.length && !nm) throw badRequest(`Pick two points on the same road${A.name ? ` (${A.name})` : ""}.`);
+    const SAME = (w: string, nmP: string, refP: string) =>
+      `(coalesce(lower(${w}.name) = ${nmP}, false) OR (${refP}::text[] <> '{}' AND ${REFS(w)} && ${refP}::text[]))`;
+
+    // Same-name pieces in a box around the two, with room for the road to wander.
+    const pad = Math.max(0.02, 0.3 * Math.max(Math.abs(A.x - B.x), Math.abs(A.y - B.y)));
+    const box = [Math.min(A.x, B.x) - pad, Math.min(A.y, B.y) - pad, Math.max(A.x, B.x) + pad, Math.max(A.y, B.y) + pad];
+    const { rows: cand } = await query<{ id: string; f: string; t: string; m: number; x0: number; y0: number; x1: number; y1: number }>(
+      `SELECT s.id, s.from_node AS f, s.to_node AS t, s.length_m AS m,
+              ST_X(ST_StartPoint(s.geom)) AS x0, ST_Y(ST_StartPoint(s.geom)) AS y0,
+              ST_X(ST_EndPoint(s.geom)) AS x1, ST_Y(ST_EndPoint(s.geom)) AS y1
+         FROM street_segments s JOIN street_ways w ON w.way_id = s.way_id
+        WHERE s.retired_at IS NULL AND s.geom && ST_MakeEnvelope($1, $2, $3, $4, 4326) AND ${SAME("w", "$5", "$6")}
+        LIMIT 40000`, [...box, nm, refs]);
+
+    // A graph of its pieces: shared nodes join them, and ends within ~150 m of each other
+    // are bridged (dearer, so real road wins), where the mapped road has a gap.
+    type Edge = { to: string; cost: number; seg: string | null };
+    const adj = new Map<string, Edge[]>();
+    const link = (u: string, v: string, cost: number, seg: string | null) => {
+      if (!adj.has(u)) adj.set(u, []);
+      if (!adj.has(v)) adj.set(v, []);
+      adj.get(u)!.push({ to: v, cost, seg });
+      adj.get(v)!.push({ to: u, cost, seg });
+    };
+    const at = new Map<string, [number, number]>();
+    for (const c of cand) {
+      link(c.f, c.t, c.m, c.id);
+      at.set(c.f, [c.x0, c.y0]);
+      at.set(c.t, [c.x1, c.y1]);
+    }
+    const metres = ([x0, y0]: [number, number], [x1, y1]: [number, number]) => Math.hypot((x1 - x0) * 96_000, (y1 - y0) * 111_000);
+    const cells = new Map<string, string[]>();
+    const CELL = 0.0015;
+    for (const [n, p] of at) {
+      const k = `${Math.floor(p[0] / CELL)},${Math.floor(p[1] / CELL)}`;
+      if (!cells.has(k)) cells.set(k, []);
+      cells.get(k)!.push(n);
+    }
+    for (const [n, p] of at) {
+      if ((adj.get(n)?.length ?? 0) > 1) continue; // only loose ends need bridging
+      const cx = Math.floor(p[0] / CELL), cy = Math.floor(p[1] / CELL);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+        for (const o of cells.get(`${cx + dx},${cy + dy}`) ?? []) {
+          if (o === n) continue;
+          const d = metres(p, at.get(o)!);
+          if (d <= 150) link(n, o, d * 3 + 20, null);
+        }
+      }
+    }
+
+    // Shortest way from either end of the first piece to either end of the second.
+    const byId = new Map(cand.map((c) => [c.id, c]));
+    const ca = byId.get(String(a)), cb = byId.get(String(b));
+    if (!ca || !cb) throw badRequest("Those two points are too far apart along the street to join up.");
+    const dist = new Map<string, number>([[ca.f, 0], [ca.t, 0]]);
+    const prev = new Map<string, Edge & { from: string }>();
+    const heap: [number, string][] = [[0, ca.f], [0, ca.t]];
+    const push = (e: [number, string]) => { heap.push(e); let i = heap.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
+    const pop = () => { const top = heap[0]; const last = heap.pop()!; if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
+    const goal = new Set([cb.f, cb.t]);
+    let reached: string | null = null;
+    while (heap.length) {
+      const [d, u] = pop();
+      if (d > (dist.get(u) ?? Infinity)) continue;
+      if (goal.has(u)) { reached = u; break; }
+      for (const e of adj.get(u) ?? []) {
+        const nd = d + e.cost;
+        if (nd < (dist.get(e.to) ?? Infinity)) { dist.set(e.to, nd); prev.set(e.to, { ...e, from: u }); push([nd, e.to]); }
+      }
+    }
+    if (!reached) throw badRequest("Couldn't follow the street between those two points. Try points closer together.");
+    const path = new Set<string>([String(a), String(b)]);
+    for (let n = reached; prev.has(n); n = prev.get(n)!.from) { const e = prev.get(n)!; if (e.seg) path.add(e.seg); }
+
+    // The other side of a divided road alongside, then crossovers and the median crossings.
+    const { rows } = await query<{ id: string; m: number }>(
+      `WITH p AS (SELECT s.* FROM street_segments s WHERE s.id = ANY($1::bigint[])),
+       line AS (SELECT ST_Collect(geom) AS g FROM p),
+       side AS (
+         SELECT s.id FROM street_segments s JOIN street_ways w ON w.way_id = s.way_id, line
+          WHERE s.retired_at IS NULL AND s.geom && ST_Expand(line.g, 0.001) AND ${SAME("w", "$2", "$3")}
+            AND ST_DWithin(ST_StartPoint(s.geom)::geography, line.g::geography, 60)
+            AND ST_DWithin(ST_EndPoint(s.geom)::geography, line.g::geography, 60)),
+       run AS (SELECT id FROM p UNION SELECT id FROM side),
+       segs AS (SELECT s.* FROM street_segments s WHERE s.id IN (SELECT id FROM run)),
+       nodes AS (SELECT from_node AS n FROM segs UNION SELECT to_node FROM segs),
+       box AS (SELECT ST_Expand(ST_Extent(geom), 0.001) AS b FROM segs),
+       allsegs AS (
+         SELECT id FROM run
+         UNION
+         SELECT s.id FROM box, street_segments s JOIN street_ways w ON w.way_id = s.way_id
+          WHERE s.retired_at IS NULL AND s.geom && box.b AND s.length_m <= 200
+            AND s.from_node IN (SELECT n FROM nodes) AND s.to_node IN (SELECT n FROM nodes)
+            AND (w.name IS NULL OR w.highway LIKE '%\\_link' OR ${SAME("w", "$2", "$3")} OR s.length_m <= 30))
+       SELECT s.id, s.length_m AS m FROM allsegs JOIN street_segments s USING (id)`,
+      [[...path], nm, refs]);
+
+    // What crosses the road at each end, to name the stretch by.
+    const cross = async (segId: number) => (await query<{ name: string }>(
+      `SELECT w.name FROM street_segments me, street_segments s JOIN street_ways w ON w.way_id = s.way_id
+        WHERE me.id = $1 AND s.retired_at IS NULL AND s.geom && ST_Expand(me.geom, 0.003) AND w.name IS NOT NULL
+          AND NOT ${SAME("w", "$2", "$3")}
+        ORDER BY ST_Distance(s.geom, ST_Centroid(me.geom)) LIMIT 1`, [segId, nm, refs])).rows[0]?.name ?? null;
+    return {
+      name: refs.length ? (A.name ?? refs[0]) : A.name,
+      ref: refs[0] ?? null,
+      from: await cross(a), to: await cross(b),
+      segments: rows.map((r) => [Number(r.id), Math.round(r.m)]),
+      meters: Math.round(rows.reduce((t, r) => t + r.m, 0)),
+    };
   });
 
   // Mark a street for a team: done by hand ("complete"), or left out ("excluded").

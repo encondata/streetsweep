@@ -211,6 +211,8 @@
 
   /** An area clicked on the map: how far along it is, and where to manage it. */
   function showArea(id: string, at?: [number, number]) {
+    // Picking where a stretch ends: only streets answer.
+    if (stretchFrom) return;
     // Looking at another area: the highlight of the last one goes.
     if (missingFor && missingFor.id !== id) missingFor = null;
     const a = teamAreas.find((x) => x.id === id);
@@ -247,7 +249,36 @@
   }
   function clearPicked() {
     picked = new Map();
+    pickLabel = null;
     ctl?.setSelectedStreets([]);
+  }
+
+  // ---- part of a road: "from here to there" ----
+  // A street's popup starts it ("Mark part of it…"); the next street clicked is where the
+  // stretch ends. The server follows the road between the two (by route number for a
+  // highway) and the stretch becomes the selection, to mark like any other.
+  let stretchFrom = $state<StreetHit | null>(null);
+  let stretchError = $state<string | null>(null);
+  let pickLabel = $state<string | null>(null);
+  async function stretchTo(hit: StreetHit) {
+    const from = stretchFrom!;
+    pickBusy = true;
+    pickNote = null;
+    stretchError = null;
+    try {
+      const r = await api<{ name: string | null; from: string | null; to: string | null; segments: [number, number][]; meters: number }>(
+        `/api/segments/${from.id}/between/${hit.id}`);
+      stretchFrom = null;
+      picked = new Map(r.segments.map(([id, m]) => [id, { id, name: r.name, highway: "", length_m: m, state: null }]));
+      ctl?.setSelectedStreets(picked.keys());
+      const ends = r.from && r.to && r.from !== r.to ? ` from ${r.from} to ${r.to}` : "";
+      pickLabel = `${r.name ?? "This road"}${ends}`;
+    } catch (e) {
+      // Still picking: say what was wrong and let them click again.
+      stretchError = errorText(e);
+    } finally {
+      pickBusy = false;
+    }
   }
   async function markPicked(kind: "complete" | "excluded" | "clear") {
     if (!picked.size) return;
@@ -272,7 +303,11 @@
   // Another team's coverage: a fresh start. Esc lets go of the lot.
   $effect(() => { void coverageTeam; untrack(() => { if (picked.size) clearPicked(); }); });
   onMount(() => {
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape" && picked.size) clearPicked(); };
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (stretchFrom) stretchFrom = null;
+      else if (picked.size) clearPicked();
+    };
     addEventListener("keydown", esc);
     return () => removeEventListener("keydown", esc);
   });
@@ -328,13 +363,19 @@
     ctl.onPlaceClick = showPlace;
     loadPlaces();
     // The popup is a live component: it loads the street's coverage and can mark it.
-    ctl.onStreetShiftClick = (hit) => togglePick(hit);
+    ctl.onStreetShiftClick = (hit) => (stretchFrom ? stretchTo(hit) : togglePick(hit));
     ctl.onStreetClick = (hit, at) => {
+      // Picking where a stretch ends: this click is that, not a popup.
+      if (stretchFrom) return stretchTo(hit);
       const el = document.createElement("div");
       const team = ctl!.coverageTeam;
       const comp = mount(StreetPopup, {
         target: el,
-        props: { hit, teamId: team, teamLabel: teamLabel(team), onchange: () => { ctl?.refreshCoverage(); loadAreas(); loadCells(); missingPanel?.refresh(); } },
+        props: {
+          hit, teamId: team, teamLabel: teamLabel(team),
+          onchange: () => { ctl?.refreshCoverage(); loadAreas(); loadCells(); missingPanel?.refresh(); },
+          onstretch: () => { ctl?.closePopup(); clearPicked(); stretchFrom = hit; pickNote = null; stretchError = null; },
+        },
       });
       ctl!.showPopupEl(at, el, () => unmount(comp));
     };
@@ -450,10 +491,16 @@
   {/if}
 
   <div class="bottom">
-    {#if picked.size}
+    {#if stretchFrom}
+      <div class="chip picking" role="status">
+        <span class="sel-dot" aria-hidden="true"></span>
+        <span>{pickBusy ? "Following the road…" : stretchError ? stretchError : `Click where the stretch of ${stretchFrom.name ?? "this road"} ends`}</span>
+        <button class="sm ghost" onclick={() => (stretchFrom = null)}>Cancel</button>
+      </div>
+    {:else if picked.size}
       <div class="chip picking" role="toolbar" aria-label="Selected streets">
         <span class="sel-dot" aria-hidden="true"></span>
-        <span><strong>{pickedNames} street{pickedNames === 1 ? "" : "s"}</strong> · {miles(pickedM)}</span>
+        <span>{#if pickLabel}<strong>{pickLabel}</strong>{:else}<strong>{pickedNames} street{pickedNames === 1 ? "" : "s"}</strong>{/if} · {miles(pickedM)}</span>
         <button class="sm primary" disabled={pickBusy} onclick={() => markPicked("complete")}>Mark done</button>
         <button class="sm" disabled={pickBusy} onclick={() => markPicked("excluded")}>Leave out</button>
         <button class="sm ghost" disabled={pickBusy} onclick={() => markPicked("clear")} title="Take marks off these streets">Unmark</button>

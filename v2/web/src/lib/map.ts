@@ -273,7 +273,10 @@ export class MapController {
         return;
       }
       const hits = this.map.queryRenderedFeatures(e.point, { layers: ["streets", "team-areas-fill"] });
-      const street = hits.find((f) => f.layer.id === "streets");
+      // Streets are thin: a few pixels either side still count as clicking one.
+      const T = 5;
+      const street = hits.find((f) => f.layer.id === "streets")
+        ?? this.map.queryRenderedFeatures([[e.point.x - T, e.point.y - T], [e.point.x + T, e.point.y + T]], { layers: ["streets"] })[0];
       if (street) {
         const p = street.properties as { highway: string; name?: string; length_m: number; state?: StreetHit["state"] };
         const hit: StreetHit = { id: street.id as number, name: p.name ?? null, highway: p.highway, length_m: p.length_m, state: p.state ?? null };
