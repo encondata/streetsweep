@@ -1,6 +1,8 @@
 // Team coverage: which streets each team has swept. A drive counts for a team when the
-// driver was a member at the time and the team counts that drive type. A drive with no
-// known driver counts for the team that manages the vehicle (if that team counts it).
+// driver was a member at the time and the team counts that drive type. A personal team
+// is its person, so it counts all of their drives, whenever driven (drives recorded
+// before the account existed included). A drive with no known driver counts for the
+// team that manages the vehicle (if that team counts it).
 import type pg from "pg";
 import { pool } from "../db.js";
 
@@ -11,8 +13,10 @@ export const COUNTS_FOR = (team: string) => `
   coalesce((SELECT counts FROM team_drive_types tdt WHERE tdt.team_id = ${team} AND tdt.drive_type_key = d.drive_type_key), true)
   AND (
     (d.user_id IS NOT NULL AND EXISTS (
-       SELECT 1 FROM team_members m WHERE m.team_id = ${team} AND m.user_id = d.user_id
-          AND m.joined_at <= d.started_at AND (m.left_at IS NULL OR m.left_at > d.started_at)))
+       SELECT 1 FROM team_members m JOIN teams mt ON mt.id = m.team_id
+        WHERE m.team_id = ${team} AND m.user_id = d.user_id
+          AND CASE WHEN mt.kind = 'personal' THEN m.left_at IS NULL
+                   ELSE m.joined_at <= d.started_at AND (m.left_at IS NULL OR m.left_at > d.started_at) END))
     OR (d.user_id IS NULL AND EXISTS (
        SELECT 1 FROM vehicles v WHERE v.id = d.vehicle_id AND v.managed_by_team_id = ${team})))`;
 
@@ -34,7 +38,7 @@ export async function addDrive(db: Db, driveId: string): Promise<string[]> {
       `INSERT INTO team_coverage AS c (team_id, segment_id, first_driven_at, first_drive_id, passes)
        SELECT $1, segment_id, driven_at, drive_id, 1 FROM segment_passes WHERE drive_id = $2
        ON CONFLICT (team_id, segment_id) DO UPDATE
-         SET passes = c.passes + 1,
+         SET passes = c.passes + 1, updated_at = now(),
              first_drive_id = CASE WHEN EXCLUDED.first_driven_at < c.first_driven_at THEN EXCLUDED.first_drive_id ELSE c.first_drive_id END,
              first_driven_at = least(c.first_driven_at, EXCLUDED.first_driven_at)`,
       [team, driveId],
@@ -49,6 +53,8 @@ export async function rebuildTeam(teamId: string): Promise<void> {
   try {
     await client.query("BEGIN");
     await client.query(`DELETE FROM team_coverage WHERE team_id = $1`, [teamId]);
+    // Phones refetch a recounted team's coverage in full (rows may have gone).
+    await client.query(`UPDATE teams SET coverage_reset_at = now() WHERE id = $1`, [teamId]);
     await client.query(
       `INSERT INTO team_coverage (team_id, segment_id, first_driven_at, first_drive_id, passes)
        SELECT $1, p.segment_id, min(p.driven_at), (array_agg(p.drive_id ORDER BY p.driven_at))[1], count(*)

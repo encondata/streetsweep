@@ -281,6 +281,23 @@ audit_log       (id, at, user_id, team_id, action, entity, entity_id, data jsonb
     - **Home:** a new Home page (stats, area progress, recent drives, achievements,
       with a team switcher) replaces Teams as the landing page.
 
+13. **Apps (stage 6), decided 2026-10-03.** The Android app moves onto v2 entirely. The
+    server does all OSM, Overpass and Valhalla work; the phone stops calling them.
+    - **Live coverage:** while driving, the phone marks streets near its raw track as
+      *provisionally driven* from its downloaded segments (works offline). The
+      server's match replaces that once the drive uploads.
+    - **Old phone drives:** a one-time upload of every v1 drive's raw points as v2
+      drives, so the server matches them. Old exclusions and completions become marks
+      for the personal team.
+    - **Vehicle and drive type:** smart defaults. A Bluetooth car can be linked to a
+      vehicle; otherwise the open checkout, else the only permanent car. The type
+      defaults to the last used. Both can be changed from the drive notification, the
+      app or the car screen, or fixed later on the web.
+    - **Server address:** the app defaults to `https://streetsweep.net` (editable in
+      Settings). Development uses the local stack.
+    - **Personal teams count all of their person's drives,** whenever driven. Other
+      teams count only drives from while the driver was a member.
+
 ## Still open
 
 - **Changing your email** in the account window doesn't ask for a code yet. It should

@@ -8,7 +8,7 @@ import { pool, query, tx } from "../db.js";
 import { config } from "../config.js";
 import { requireUser, type SessionUser } from "../auth.js";
 import { audit } from "../audit.js";
-import { badRequest, forbidden, notFound } from "../http.js";
+import { HttpError, badRequest, conflict, forbidden, notFound } from "../http.js";
 import { avatarUrl } from "./account.js";
 
 const PHOTO_DIR = () => path.join(config.dataDir, "places");
@@ -63,8 +63,10 @@ async function checkTeams(ids: string[], me: SessionUser) {
   if (rows[0].n !== new Set(ids).size) throw badRequest("You can only share with teams you're in.");
 }
 
-type Body = { name?: string; note?: string | null; lon?: number; lat?: number; drive_id?: string | null; team_ids?: string[] };
+type Body = { id?: string; name?: string; note?: string | null; lon?: number; lat?: number; drive_id?: string | null; team_ids?: string[] };
 const fields = {
+  // A phone makes its own id, so a retried upload is the same place.
+  id: { type: "string", format: "uuid" },
   name: { type: "string", minLength: 1, maxLength: 120 },
   note: { type: ["string", "null"], maxLength: 2000 },
   lon: { type: "number" }, lat: { type: "number" },
@@ -90,6 +92,14 @@ export default async function placeRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const me = requireUser(req);
       const b = req.body;
+      if (b.id) {
+        const had = await query<{ user_id: string; deleted_at: Date | null }>(`SELECT user_id, deleted_at FROM places WHERE id = $1`, [b.id]);
+        if (had.rows[0]) {
+          if (had.rows[0].user_id !== me.id) throw conflict("A different place already has that id.");
+          if (had.rows[0].deleted_at) throw new HttpError(410, "That place was deleted.", "deleted");
+          return reply.code(200).send({ place: await loadPlace(b.id, me), duplicate: true });
+        }
+      }
       const [lon, lat] = point(b.lon, b.lat);
       const teams = [...new Set(b.team_ids ?? [])];
       await checkTeams(teams, me);
@@ -99,8 +109,9 @@ export default async function placeRoutes(app: FastifyInstance) {
       }
       const id = await tx(async (db) => {
         const { rows } = await db.query<{ id: string }>(
-          `INSERT INTO places (user_id, name, note, geom, drive_id) VALUES ($1, $2, $3, ST_SetSRID(ST_MakePoint($4, $5), 4326), $6) RETURNING id`,
-          [me.id, b.name!.trim(), b.note?.trim() || null, lon, lat, b.drive_id ?? null],
+          `INSERT INTO places (id, user_id, name, note, geom, drive_id)
+           VALUES (coalesce($7::uuid, gen_random_uuid()), $1, $2, $3, ST_SetSRID(ST_MakePoint($4, $5), 4326), $6) RETURNING id`,
+          [me.id, b.name!.trim(), b.note?.trim() || null, lon, lat, b.drive_id ?? null, b.id ?? null],
         );
         for (const t of teams) await db.query(`INSERT INTO place_shares (place_id, team_id) VALUES ($1, $2)`, [rows[0].id, t]);
         await audit(db, { userId: me.id, action: "place.created", entity: "place", entityId: rows[0].id });

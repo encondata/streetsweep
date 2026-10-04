@@ -97,7 +97,7 @@ async function main() {
         throw err;
       }
       console.error(`drive-match ${driveId} failed:`, err);
-      await pool.query(`UPDATE drives SET status = 'failed', match_error = $2 WHERE id = $1`, [driveId, String((err as Error).message).slice(0, 500)]);
+      await pool.query(`UPDATE drives SET status = 'failed', match_error = $2, updated_at = now() WHERE id = $1`, [driveId, String((err as Error).message).slice(0, 500)]);
     }
   });
 

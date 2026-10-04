@@ -1,3 +1,4 @@
+import zlib from "node:zlib";
 // The api: REST for web, phones and loggers, plus the built web app and login page.
 // It never calls an outside service — anything slow or external is a job for the worker.
 import Fastify from "fastify";
@@ -23,12 +24,23 @@ import driveRoutes from "./routes/drives.js";
 import loggerBatchRoutes from "./routes/loggerBatches.js";
 import insightRoutes from "./routes/insights.js";
 import placeRoutes from "./routes/places.js";
+import syncRoutes from "./routes/sync.js";
+import packageRoutes from "./routes/packages.js";
 import { stopJobs } from "./jobs.js";
 
 const app = Fastify({ logger: { level: "info" }, trustProxy: true });
 
 // Pictures arrive as raw bytes (the browser has already cropped them).
 app.addContentTypeParser(["image/png", "image/jpeg", "image/webp"], { parseAs: "buffer" }, (_req, body, done) => done(null, body));
+// Phones gzip big uploads (drives): unpack before parsing. Body limits count unpacked bytes.
+app.addHook("preParsing", async (req, _reply, payload) => {
+  if (String(req.headers["content-encoding"] ?? "").toLowerCase() !== "gzip") return payload;
+  // Fastify checks Content-Length against the bytes that arrived (still packed).
+  const gunzip = Object.assign(zlib.createGunzip(), { receivedEncodedLength: 0 });
+  payload.on("data", (chunk: Buffer) => (gunzip.receivedEncodedLength += chunk.length));
+  payload.pipe(gunzip);
+  return gunzip;
+});
 
 // Cookies are SameSite=Lax; on top of that, writes must not be something a plain HTML
 // form on another site could send, which rules out cross-site form posts entirely.
@@ -70,6 +82,8 @@ app.register(driveRoutes);
 app.register(loggerBatchRoutes);
 app.register(insightRoutes);
 app.register(placeRoutes);
+app.register(syncRoutes);
+app.register(packageRoutes);
 
 app.get("/api/health", async (_req, reply) => {
   try {

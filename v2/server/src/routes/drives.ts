@@ -194,7 +194,7 @@ export default async function driveRoutes(app: FastifyInstance) {
     const d = await loadDrive(req.params.id);
     if (!(await access(d, me)).edit) throw notFound("That drive doesn't exist.");
     const teams = await teamsForDrive(pool, d.id);
-    await query(`UPDATE drives SET deleted_at = now() WHERE id = $1`, [d.id]);
+    await query(`UPDATE drives SET deleted_at = now(), updated_at = now() WHERE id = $1`, [d.id]);
     await audit(pool, { userId: me.id, action: "drive.deleted", entity: "drive", entityId: d.id });
     await rebuild(teams);
     return { ok: true };
@@ -205,7 +205,7 @@ export default async function driveRoutes(app: FastifyInstance) {
     const me = requireUser(req);
     const d = await loadDrive(req.params.id);
     if (!(await access(d, me)).edit) throw notFound("That drive doesn't exist.");
-    await query(`UPDATE drives SET status = 'received', match_error = NULL WHERE id = $1`, [d.id]);
+    await query(`UPDATE drives SET status = 'received', match_error = NULL, updated_at = now() WHERE id = $1`, [d.id]);
     await sendJob("drive-match", { driveId: d.id });
     return reply.code(202).send({ ok: true });
   });
@@ -262,6 +262,7 @@ export default async function driveRoutes(app: FastifyInstance) {
     if (!canDrive(await roleIn(team.id, me.id)) && !me.is_site_admin) throw forbidden("Viewers can't mark streets.");
     const { rowCount } = await query(`DELETE FROM segment_marks WHERE team_id = $1 AND segment_id = $2`, [team.id, req.params.segmentId]);
     if (!rowCount) throw notFound("That street isn't marked.");
+    await query(`INSERT INTO deletions (kind, team_id, key) VALUES ('mark', $1, $2)`, [team.id, req.params.segmentId]);
     return { ok: true };
   });
 }
