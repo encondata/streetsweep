@@ -11,6 +11,10 @@
   import MapPage from "./routes/MapPage.svelte";
   import Drives from "./routes/Drives.svelte";
   import Drive from "./routes/Drive.svelte";
+  import Home from "./routes/Home.svelte";
+  import Achievements from "./routes/Achievements.svelte";
+  import Places from "./routes/Places.svelte";
+  import Place from "./routes/Place.svelte";
   import { router, match } from "./lib/router.svelte";
   import { session } from "./lib/session.svelte";
   import { errorText } from "./lib/api";
@@ -18,9 +22,7 @@
   let failed = $state<string | null>(null);
   session.load().catch((e) => (failed = errorText(e)));
 
-  // Until the map arrives (stage 3), Teams is home.
   $effect(() => {
-    if (router.path === "/") router.go("/teams", true);
     if (router.path === "/fleet") router.go("/fleet/vehicles", true);
   });
 
@@ -28,6 +30,7 @@
   let joinParams = $derived(match("/join/:code", router.path));
   let vehicleParams = $derived(match("/fleet/vehicles/:id", router.path));
   let driveParams = $derived(match("/drives/:id", router.path));
+  let placeParams = $derived(match("/places/:id", router.path));
   let loggerParams = $derived(match("/fleet/loggers/:id", router.path));
   let fleetParams = $derived(match("/fleet/:tab", router.path));
   let adminParams = $derived(router.path === "/admin" ? { tab: "users" } : match("/admin/:tab", router.path));
@@ -39,7 +42,15 @@
   <div class="boot"><img src="/login-mark.png" alt="" width="64" /></div>
 {:else}
   <Shell>
-    {#if router.path === "/teams"}
+    {#if router.path === "/"}
+      <Home />
+    {:else if router.path === "/achievements"}
+      <Achievements />
+    {:else if router.path === "/places"}
+      <Places />
+    {:else if placeParams}
+      {#key placeParams.id}<Place id={placeParams.id} />{/key}
+    {:else if router.path === "/teams"}
       <Teams />
     {:else if teamParams}
       {#key teamParams.id}<Team id={teamParams.id} tab={teamParams.tab ?? "members"} />{/key}
@@ -60,7 +71,7 @@
     {:else if fleetParams}
       <Fleet tab={fleetParams.tab} />
     {:else}
-      <Soon title="Not found" art={undefined}>There's nothing at this address. <a href="/teams">Go to Teams</a>.</Soon>
+      <Soon title="Not found" art={undefined}>There's nothing at this address. <a href="/">Go home</a>.</Soon>
     {/if}
   </Shell>
 {/if}

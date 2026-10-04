@@ -11,18 +11,22 @@
   let user = $derived(session.me!.user);
 
   let nav = $derived([
+    { href: "/", label: "Home", icon: "home" },
     { href: "/map", label: "Map", icon: "map" },
     { href: "/drives", label: "Drives", icon: "drives" },
+    { href: "/places", label: "Places", icon: "pin" },
     { href: "/fleet", label: "Fleet", icon: "fleet" },
     { href: "/teams", label: "Teams", icon: "teams", count: session.pendingForMe },
     ...(user.is_site_admin ? [{ href: "/admin", label: "Admin", icon: "admin" }] : []),
   ]);
-  const on = (href: string) => router.path === href || router.path.startsWith(href + "/");
+  // Home is only "/" itself (every path starts with "/"); Achievements hangs off Home.
+  const on = (href: string) =>
+    href === "/" ? router.path === "/" || router.path === "/achievements" : router.path === href || router.path.startsWith(href + "/");
 </script>
 
 <div class="shell">
   <nav class="side" aria-label="Main">
-    <a class="brand" href="/teams" aria-label="StreetSweep home">
+    <a class="brand" href="/" aria-label="StreetSweep home">
       <img class="mark" src="/login-mark.png" alt="" />
       <img class="word" src="/wordmark.png" srcset="/wordmark@2x.png 2x" alt="StreetSweep" />
     </a>

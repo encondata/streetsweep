@@ -68,3 +68,34 @@ All 256², icon-like, simple enough to read at 24 px:
 | `empty-places.png` | 800×600 | A map pin with a small camera beside it. |
 | `marker-place.png` | 128² | A map pin, navy with a green center dot. |
 | `marker-car.png` | 128² | A top-down car arrow for live position, green with a white outline. |
+
+## Stage 5 — team achievements
+
+The people's badges are v1's (`ach-*.webp`, already in `public/`). Team achievements are
+new; until their art lands they show their tier's medal (`ach-tier_<tier>.webp`). Same
+style as v1's badges: a hexagonal emblem with one bold symbol, square.
+
+| File | Size | Prompt (after the house style) |
+|---|---|---|
+| `ach-team_off_the_line.webp` | 512² | Hexagonal bronze badge: two small cars side by side at a starting line. |
+| `ach-team_street_crew.webp` | 512² | Silver hexagon badge: three hard hats in a row over a street grid. |
+| `ach-team_sweep_squad.webp` | 512² | Purple hexagon badge: three crossed street brooms. |
+| `ach-team_road_gang.webp` | 512² | Gold hexagon badge: a convoy of three vans on a winding road. |
+| `ach-team_city_cleaners.webp` | 512² | Gold hexagon badge: a city skyline with every street glowing green. |
+| `ach-team_ten_together.webp` | 512² | Bronze hexagon badge: an odometer reading 10 with two hands high-fiving. |
+| `ach-team_hundred_club.webp` | 512² | Silver hexagon badge: "100" made of road, no other text. |
+| `ach-team_long_road.webp` | 512² | Purple hexagon badge: a long road vanishing to the horizon with three route pins. |
+| `ach-team_highway_crew.webp` | 512² | Gold hexagon badge: a highway shield shape with a team of three silhouettes. |
+| `ach-team_ten_thousand.webp` | 512² | Gold hexagon badge: a globe wrapped in a green route line. |
+| `ach-team_flag_planted.webp` | 512² | Silver hexagon badge: a green flag planted in a map area outline. |
+| `ach-team_hat_trick.webp` | 512² | Purple hexagon badge: three map outlines stacked, each with a check mark. |
+| `ach-team_ten_down.webp` | 512² | Gold hexagon badge: a grid of ten small map tiles, all ticked. |
+| `ach-team_empire.webp` | 512² | Gold hexagon badge: a crown over a mosaic of map areas. |
+| `ach-team_halfway.webp` | 512² | Silver hexagon badge: a map area half filled green, two cars at the line. |
+| `ach-team_nearly.webp` | 512² | Purple hexagon badge: a map area almost all green with one dashed street left. |
+| `ach-team_relay.webp` | 512² | Silver hexagon badge: a relay baton being passed between two car windows. |
+| `ach-team_full_crew.webp` | 512² | Purple hexagon badge: three cars on parallel streets under a weekly calendar. |
+| `ach-team_all_hands.webp` | 512² | Purple hexagon badge: a circle of raised hands around a map pin. |
+| `ach-team_big_week.webp` | 512² | Purple hexagon badge: a calendar week with a lightning bolt across it. |
+| `ach-team_on_a_roll.webp` | 512² | Silver hexagon badge: four calendar pages in a row, each with a green tick. |
+| `ach-team_season.webp` | 512² | Gold hexagon badge: a ring of twelve weekly ticks around a sun and snowflake. |

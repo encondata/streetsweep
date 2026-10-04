@@ -80,4 +80,61 @@ for (const p of plan) {
   const r = await call("POST", "/api/drives", { id: uuid, drive_type: p.type, points: coords.map(([lon, lat], i) => [t0 + i, lat, lon, 5, 9]) });
   console.log(`${p.street}: ${r.status}${r.data.duplicate ? " (already there)" : ""}`);
 }
-console.log(`sign in as ${DEMO_EMAIL}`);
+// A crew to see team pages with: the demo driver runs it; Sam drives for it too.
+const SAM_EMAIL = "sam@streetsweep.test";
+const demoCookie = cookie;
+cookie = "";
+let sam = await call("POST", "/api/auth/login", { email: SAM_EMAIL, password: DEMO_PASSWORD });
+if (sam.status !== 200) {
+  const started = Date.now() - 1000;
+  await call("POST", "/api/auth/signup", { email: SAM_EMAIL, displayName: "Sam Sweeper", password: DEMO_PASSWORD });
+  const mail = await latestCode(SAM_EMAIL, { after: started });
+  sam = await call("POST", "/api/auth/verify", { email: SAM_EMAIL, code: mail?.code });
+}
+const samId = sam.data.user.id;
+const samCookie = cookie;
+cookie = demoCookie;
+let crew = (await call("GET", "/api/me")).data.teams.find((t) => t.name === "Demo Crew");
+if (!crew) {
+  crew = (await call("POST", "/api/teams", { name: "Demo Crew" })).data.team;
+  cookie = samCookie;
+  await call("POST", `/api/teams/${crew.id}/join-requests`, {});
+  cookie = demoCookie;
+  const rq = (await call("GET", `/api/teams/${crew.id}`)).data.requests.find((r) => r.user_id === samId);
+  if (rq) await call("POST", `/api/join-requests/${rq.id}/approve`, { role: "driver" });
+  await call("POST", `/api/teams/${crew.id}/follows`, { area_id: (await call("GET", `/api/teams/${personal}/areas`)).data.areas[0]?.id }).catch(() => {});
+}
+await sql(`UPDATE team_members SET joined_at = least(joined_at, now() - interval '30 days') WHERE user_id = ANY($1::uuid[])`, [[userId, samId]]);
+// Backdating the membership doesn't recount the crew: flicking a drive type off and on does.
+cookie = demoCookie;
+for (const counts of [false, true]) await call("PUT", `/api/teams/${crew.id}/drive-types/personal`, { counts });
+// Hyde Park is the demo driver's own drawing; the crew draws its own copy.
+cookie = demoCookie;
+const crewAreas = (await call("GET", `/api/teams/${crew.id}/areas`)).data.areas;
+if (!crewAreas.length) {
+  await call("POST", `/api/teams/${crew.id}/areas`, {
+    name: "Hyde Park (crew)", level: "neighborhood", color: "#8e44ad",
+    geometry: { type: "Polygon", coordinates: [[[-97.735, 30.300], [-97.720, 30.300], [-97.720, 30.316], [-97.735, 30.316], [-97.735, 30.300]]] },
+  });
+}
+// Sam's drives, and a place Sam shares with the crew.
+cookie = samCookie;
+for (const p of [{ street: "Avenue H", daysAgo: 2 }, { street: "Avenue G", daysAgo: 0 }]) {
+  const coords = await routeAlong(p.street);
+  if (!coords) continue;
+  const t0 = Math.floor(Date.now() / 1000) - p.daysAgo * 86400 - 5400 - coords.length;
+  const h = crypto.createHash("sha1").update(`${samId}:${p.street}:${p.daysAgo}:${new Date(t0 * 1000).toDateString()}`).digest("hex");
+  const uuid = `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
+  const r = await call("POST", "/api/drives", { id: uuid, points: coords.map(([lon, lat], i) => [t0 + i, lat, lon, 5, 9]) });
+  console.log(`Sam, ${p.street}: ${r.status}`);
+}
+const samPlaces = (await call("GET", "/api/places")).data.places.filter((p) => p.mine);
+if (!samPlaces.length) {
+  await call("POST", "/api/places", { name: "Gate code 4412", note: "Alley behind 45th, code for the rolling gate.", lon: -97.7262, lat: 30.3061, team_ids: [crew.id] });
+}
+cookie = demoCookie;
+const mine = (await call("GET", "/api/places")).data.places.filter((p) => p.mine);
+if (!mine.length) {
+  await call("POST", "/api/places", { name: "Deep pothole", note: "Northbound lane, swerve left.", lon: -97.7289, lat: 30.3098 });
+}
+console.log(`sign in as ${DEMO_EMAIL} (or ${SAM_EMAIL}); same password`);

@@ -1,6 +1,6 @@
 # StreetSweep v2 — plan
 
-Status: **agreed 2026-10-03**. Stages 0–4 done. Stage 5 (insights) next.
+Status: **agreed 2026-10-03**. Stages 0–5 done. Stage 6 (apps) next, with its own go-ahead.
 
 v2 is a ground-up, multi-user rebuild. v1 (`tools/`) keeps running untouched beside it
 until v2 replaces it. v2 starts with an empty database — no v1 import.
@@ -208,7 +208,7 @@ audit_log       (id, at, user_id, team_id, action, entity, entity_id, data jsonb
    builds as jobs, cached tiles, area packages.
 4. ✅ **Drives.** Phone + logger upload, attribution, Valhalla matching, passes, team
    coverage, marks, drive editing (fix driver/vehicle).
-5. **Insights.** Progress, drives list, places/photos, achievements, leaderboard
+5. ✅ **Insights.** Progress, drives list, places/photos, achievements, leaderboard
    (per team).
 6. **Apps.** Sync API hardened, then the Android app moved onto v2 (separate go-ahead).
 7. **Logger firmware.** Reference ESP32 sketch for Wi-Fi upload, and BLE after that.

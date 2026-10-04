@@ -19,6 +19,8 @@ const STREET_COLOR = "#1a6fd4";
 export const DRIVEN_COLOR = "#16a34a";
 export const EXCLUDED_COLOR = "#9aa7b4";
 export const TRACK_COLOR = "#e2721f";
+/** Your places; ones shared with you by others are purple. */
+export const PLACE_COLOR = "#c2185b";
 export const AREA_COLOR = "#1e8a28";
 const empty = (): GeoJSON.FeatureCollection => ({ type: "FeatureCollection", features: [] });
 
@@ -39,6 +41,7 @@ function style(): StyleSpecification {
       preview: { type: "geojson", data: empty() },
       "drive-streets": { type: "geojson", data: empty() },
       "drive-track": { type: "geojson", data: empty() },
+      places: { type: "geojson", data: empty(), promoteId: "id" },
     },
     layers: [
       { id: "base-osm", type: "raster", source: "osm", paint: { "raster-saturation": -0.35 } },
@@ -93,6 +96,16 @@ function style(): StyleSpecification {
         id: "drive-track", type: "line", source: "drive-track", layout: { "line-cap": "round", "line-join": "round" },
         paint: { "line-color": TRACK_COLOR, "line-width": ["interpolate", ["linear"], ["zoom"], 12, 2, 16, 3.5, 19, 5] },
       },
+      // Places: a dot, pink for yours, purple for ones shared with you (names show on click;
+      // the style has no font glyphs for map labels).
+      {
+        id: "places", type: "circle", source: "places",
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 5, 16, 8],
+          "circle-color": ["case", ["boolean", ["get", "mine"], false], PLACE_COLOR, "#8e44ad"],
+          "circle-stroke-color": "#ffffff", "circle-stroke-width": 2,
+        },
+      },
       {
         id: "preview-line", type: "line", source: "preview", layout: { "line-join": "round" },
         paint: { "line-color": "#e2721f", "line-width": 3, "line-dasharray": [2, 1.5] },
@@ -114,6 +127,9 @@ export class MapController {
   map: MlMap;
   onStreetClick: ((s: StreetHit, at: [number, number]) => void) | null = null;
   onAreaClick: ((id: string) => void) | null = null;
+  onPlaceClick: ((id: string, at: [number, number]) => void) | null = null;
+  /** While set, the next click on the map is a spot being picked (a new place). */
+  private picking: ((at: [number, number]) => void) | null = null;
   /** While drawing, clicks belong to the drawing, not to areas and streets. */
   busy = false;
   private hovered: number | null = null;
@@ -147,9 +163,23 @@ export class MapController {
       this.map.getCanvas().style.cursor = "pointer";
     });
     this.map.on("mouseleave", "streets", () => this.clearHover());
+    this.map.on("mouseenter", "places", () => { if (!this.picking) this.map.getCanvas().style.cursor = "pointer"; });
+    this.map.on("mouseleave", "places", () => { if (!this.picking) this.map.getCanvas().style.cursor = ""; });
     // One click handler: a street first (it's on top), then a team area.
     this.map.on("click", (e: MapMouseEvent) => {
+      if (this.picking) {
+        const done = this.picking;
+        this.pick(null);
+        done([e.lngLat.lng, e.lngLat.lat]);
+        return;
+      }
       if (this.busy) return;
+      const place = this.map.queryRenderedFeatures(e.point, { layers: ["places"] })[0];
+      if (place) {
+        const [lon, lat] = (place.geometry as GeoJSON.Point).coordinates;
+        this.onPlaceClick?.(String(place.properties.id), [lon, lat]);
+        return;
+      }
       const hits = this.map.queryRenderedFeatures(e.point, { layers: ["streets", "team-areas-fill"] });
       const street = hits.find((f) => f.layer.id === "streets");
       if (street) {
@@ -163,10 +193,29 @@ export class MapController {
     });
   }
 
+  /** Wait for a click on the map, crosshair cursor meanwhile; null cancels. */
+  pick(then: ((at: [number, number]) => void) | null) {
+    this.picking = then;
+    this.map.getCanvas().style.cursor = then ? "crosshair" : "";
+  }
+
+  setPlaces(places: { id: string; name: string; lon: number; lat: number; mine: boolean }[]) {
+    this.whenReady(() => (this.map.getSource("places") as GeoJSONSource).setData({
+      type: "FeatureCollection",
+      features: places.map((p) => ({ type: "Feature", properties: { id: p.id, name: p.name, mine: p.mine }, geometry: { type: "Point", coordinates: [p.lon, p.lat] } })),
+    }));
+  }
+
+  showPlaces(on: boolean) {
+    this.whenReady(() => {
+      for (const id of ["places"]) this.map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
+    });
+  }
+
   private clearHover() {
     if (this.hovered !== null) this.map.setFeatureState({ source: "streets", sourceLayer: "streets", id: this.hovered }, { hover: false });
     this.hovered = null;
-    this.map.getCanvas().style.cursor = "";
+    if (!this.picking) this.map.getCanvas().style.cursor = "";
   }
 
   /**

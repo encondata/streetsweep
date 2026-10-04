@@ -273,3 +273,50 @@ export interface Segment {
   marked_by: string | null;
   marked_at: string | null;
 }
+
+// ---- insights ----
+
+export interface Figures { drives: number; drive_m: number; streets: number; street_m: number }
+export interface Stats {
+  total: Figures;
+  month: Figures;
+  weeks: { week: string; street_m: number; drive_m: number }[];
+  month_drivers?: number;
+  members?: number;
+}
+
+export type Tier = "common" | "uncommon" | "rare" | "legendary";
+export interface LadderStep { level: number; name: string; art: string; tier: Tier; need: number; earned: boolean; earned_at: string | null; rarity: number }
+export interface Ladder {
+  kind: "ladder"; code: string; name: string; icon: string; blurb: string; unit: string; category: string;
+  level: number; top: number; value: number; next: number | null; progress: number; earned_at: string | null;
+  steps: LadderStep[];
+}
+export interface Badge {
+  kind: "badge"; code: string; name: string; icon: string; blurb: string; category: string; art: string; tier: Tier;
+  earned: boolean; earned_at: string | null; progress: { value: number; need: number } | null; rarity: number;
+}
+export interface AchievementSet { ladders: Ladder[]; badges: Badge[]; earned_count: number; total: number; eligible: number }
+
+export type Board = "new" | "miles" | "drives";
+export type Period = "week" | "month" | "all";
+export interface LeaderRow { user_id: string; display_name: string; avatar_url: string | null; value: number; extra: number; rank: number }
+
+export interface Place {
+  id: string;
+  name: string;
+  note: string | null;
+  lon: number;
+  lat: number;
+  drive_id: string | null;
+  created_at: string;
+  updated_at: string;
+  user_id: string;
+  user_name: string;
+  user_avatar_url: string | null;
+  mine: boolean;
+  shared_with: { id: string; name: string; kind: "personal" | "shared" }[];
+  photos: { id: string; width: number | null; height: number | null }[];
+}
+
+export const TIER_LABEL: Record<Tier, string> = { common: "Common", uncommon: "Uncommon", rare: "Rare", legendary: "Legendary" };

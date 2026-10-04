@@ -55,16 +55,16 @@ button, .btn {
 }
 button:hover:not([disabled]) { background: var(--surface-2); }
 button[disabled] { opacity: .55; cursor: not-allowed; }
-button.primary {
+button.primary, .btn.primary {
   background: linear-gradient(135deg, #2fb83a 0%, #1e8a28 100%); border-color: transparent; color: #fff;
   box-shadow: 0 3px 10px rgba(30, 138, 40, .28);
 }
-button.primary:hover:not([disabled]) { filter: brightness(1.06); background: linear-gradient(135deg, #2fb83a 0%, #1e8a28 100%); }
+button.primary:hover:not([disabled]), .btn.primary:hover { filter: brightness(1.06); background: linear-gradient(135deg, #2fb83a 0%, #1e8a28 100%); }
 button.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--line)); }
 button.danger:hover:not([disabled]) { background: var(--danger-soft); }
 button.ghost { background: none; border-color: transparent; }
 button.ghost:hover:not([disabled]) { background: var(--surface-2); }
-button.sm { height: 30px; padding: 0 10px; font-size: 13px; }
+button.sm, .btn.sm { height: 30px; padding: 0 10px; font-size: 13px; }
 button.icon { width: 34px; padding: 0; }
 
 input[type=text], input[type=email], input[type=password], input[type=search], input[type=number], select, textarea {
@@ -74,8 +74,8 @@ input[type=text], input[type=email], input[type=password], input[type=search], i
 textarea { padding: 10px 12px; height: auto; min-height: 76px; resize: vertical; }
 select { padding-right: 28px; }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(30, 138, 40, .18); }
-label.field { display: grid; gap: 6px; font-weight: 600; font-size: 13px; }
-label.field > span.help { font-weight: 400; color: var(--ink-soft); font-size: 12.5px; }
+label.field, div.field { display: grid; gap: 6px; font-weight: 600; font-size: 13px; }
+.field > span.help { font-weight: 400; color: var(--ink-soft); font-size: 12.5px; }
 
 /* switch */
 .switch { position: relative; display: inline-block; vertical-align: middle; width: 40px; height: 24px; flex: none; }
