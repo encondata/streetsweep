@@ -92,11 +92,7 @@ class HomeViewModel(private val container: AppContainer, private val context: Co
      * the notification picks the new words up at the next fix.
      */
     fun setDriveDetails(type: String, vehicleId: String?) = viewModelScope.launch {
-        val id = (TrackingStateHolder.status.value as? TrackingStatus.Recording)?.sessionId ?: return@launch
-        container.trackRepository.setDriveDetails(id, type, vehicleId)
-        container.settings.setLastDriveType(type)
-        val label = com.example.streetsweep.data.server.DriveDefaults.label(container.database, type, vehicleId)
-        TrackingStateHolder.updateRecording { it.copy(driveLabel = label) }
+        com.example.streetsweep.tracking.DriveChoice.set(container, type, vehicleId)
     }
 
     val carConnected: StateFlow<Boolean> = CarConnection(context).type.asFlow()

@@ -93,6 +93,10 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
     private var guidanceFrom: LatLngPoint? = null
     /** True while the action strip is showing the three guidance choices. */
     private var pickingGuidance = false
+    /** Choosing the drive type (from the Guide menu): which page of types is showing, or null. */
+    private var typePage: Int? = null
+    private var typeChoices: List<Pair<String, String>> = emptyList()
+    private var currentType: String? = null
     private var guidanceMode: GuidanceMode = GuidanceMode.OFF
     private var guidanceJob: Job? = null
 
@@ -261,11 +265,35 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
 
             // Three choices and a way out: the same two-step the Gate button uses, so
             // there is nothing new to learn while driving.
+            // The drive types, three to a strip with More to page on, then Cancel. A strip
+            // holds four actions, and there are usually more types than that.
+            typePage != null -> {
+                val page = typePage!!
+                val rest = typeChoices.drop(page * TYPES_PER_PAGE)
+                val shown = rest.take(TYPES_PER_PAGE)
+                ActionStrip.Builder().apply {
+                    shown.forEach { (key, label) -> addAction(typeChoice(key, label)) }
+                    if (rest.size > TYPES_PER_PAGE) {
+                        addAction(Action.Builder().setTitle("More").setOnClickListener { typePage = page + 1; invalidate() }.build())
+                    } else {
+                        addAction(Action.Builder().setIcon(icon(R.drawable.ic_car_close)).setOnClickListener { typePage = null; invalidate() }.build())
+                    }
+                }.build()
+            }
+
+            // Three guidance choices and the drive type. The mode in force has a tick, and
+            // tapping it is the way out without changing anything; a fifth action (Cancel)
+            // won't fit in a strip.
             pickingGuidance -> ActionStrip.Builder()
                 .addAction(guidanceChoice("Off", GuidanceMode.OFF))
                 .addAction(guidanceChoice("Nearest", GuidanceMode.NEAREST))
                 .addAction(guidanceChoice("Route", GuidanceMode.ROUTE))
-                .addAction(cancel)
+                .addAction(
+                    Action.Builder()
+                        .setTitle(typeChoices.firstOrNull { it.first == currentType }?.second ?: "Type")
+                        .setOnClickListener { openTypes() }
+                        .build(),
+                )
                 .build()
 
             else -> {
@@ -322,7 +350,7 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
                                             else R.drawable.ic_car_guide,
                                         ),
                                     )
-                                    .setOnClickListener { pickingGuidance = true; invalidate() }
+                                    .setOnClickListener { pickingGuidance = true; loadTypes(); invalidate() }
                                     .build(),
                             )
                         }
@@ -522,6 +550,39 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
     private fun toastCar(text: String) =
         carContext.getCarService(AppManager::class.java).showToast(text, CarToast.LENGTH_LONG)
 
+    private fun typeChoice(key: String, label: String): Action =
+        Action.Builder()
+            .setTitle(if (key == currentType) "$label ✓" else label)
+            .setOnClickListener { chooseType(key, label) }
+            .build()
+
+    private fun openTypes() {
+        pickingGuidance = false
+        typePage = 0
+        invalidate()
+    }
+
+    /** Recording: this drive's type. Not: the next drive's. Said either way, briefly. */
+    private fun chooseType(key: String, label: String) {
+        typePage = null
+        lifecycleScope.launch {
+            com.example.streetsweep.tracking.DriveChoice.setType(container, key)
+            currentType = key
+            toast(if (TrackingStateHolder.isRecording) "This drive: $label" else "Next drive: $label")
+            invalidate()
+        }
+    }
+
+    /** The types and the one in force, read when the Guide menu opens. */
+    private fun loadTypes() {
+        lifecycleScope.launch {
+            val types = container.database.serverDao().getDriveTypes()
+            typeChoices = types.map { it.key to it.label }.ifEmpty { listOf("personal" to "Personal") }
+            currentType = com.example.streetsweep.tracking.DriveChoice.currentType(container)
+            invalidate()
+        }
+    }
+
     private fun guidanceChoice(title: String, mode: GuidanceMode): Action =
         Action.Builder()
             .setTitle(if (mode == guidanceMode) "$title ✓" else title)
@@ -666,6 +727,8 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
 
     companion object {
         private const val TAG = "CoverageMapScreen"
+        /** Drive types per strip: a fourth slot is left for More or Cancel. */
+        private const val TYPES_PER_PAGE = 3
         private const val LOCK_RETRY_MS = 500L
         private const val MAX_LOCK_FAILURES = 8
         const val GUIDANCE_MOVE_METERS = 40.0
