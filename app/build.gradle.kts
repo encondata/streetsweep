@@ -33,8 +33,28 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    /**
+     * Signing for Play. The keystore and its passwords live outside the repository, in
+     * ~/.streetsweep and ~/.gradle/gradle.properties, so there is nothing secret here to
+     * leak. Absent them — anyone else's clone, or CI — the config simply is not created
+     * and a release build falls back to unsigned, rather than failing to configure.
+     */
+    val uploadStore = (findProperty("STREETSWEEP_STORE_FILE") as String?)?.let(::File)
+    signingConfigs {
+        if (uploadStore?.exists() == true) {
+            create("upload") {
+                storeFile = uploadStore
+                storePassword = findProperty("STREETSWEEP_STORE_PASSWORD") as String?
+                keyAlias = findProperty("STREETSWEEP_KEY_ALIAS") as String?
+                keyPassword = findProperty("STREETSWEEP_KEY_PASSWORD") as String?
+                storeType = (findProperty("STREETSWEEP_STORE_TYPE") as String?) ?: "PKCS12"
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("upload")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

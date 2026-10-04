@@ -34,3 +34,6 @@ tools/web/node_modules
 tools/web/node_modules.nosync
 tools/web/dist
 /v2/data/
+*.jks
+*.keystore
+keystore.properties
