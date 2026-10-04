@@ -1,0 +1,530 @@
+import MapLibre
+import SwiftUI
+import UIKit
+
+enum Basemap: String, CaseIterable, Identifiable {
+    case map, satellite, hybrid
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+}
+
+/// The map, and everything drawn on it: the server's basemaps and plain streets, the team's
+/// areas, and an outline being drawn. Fingers always move the map; while drawing, the
+/// Apple Pencil draws (and a finger too, if "Draw with finger" is on).
+@MainActor
+final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestureRecognizerDelegate, UIPencilInteractionDelegate {
+    private(set) weak var view: MLNMapView?
+    private var styleReady = false
+    private let overlay = DrawingOverlay()
+
+    var base: Basemap = .map { didSet { applyBase() } }
+    /// Tapped an area on the map (not while drawing).
+    var onAreaTap: ((String) -> Void)?
+    /// The map stopped moving: what's in view now.
+    var onSettle: ((MapFrame) -> Void)?
+    /// Room the sidebar takes on the left, so fitting an area doesn't hide it underneath.
+    var leftInset: CGFloat = 0
+
+    private var areas: [Area] = []
+    private var colors: [String: String] = [:]
+    private var selectedArea: String?
+    private var searchPin: CLLocationCoordinate2D?
+
+    private(set) var session: DrawingSession?
+    var fingerDraws = false { didSet { configureGestures() } }
+
+    // MARK: - Making the view
+
+    func makeView(server: URL) -> MLNMapView {
+        let view = MLNMapView(frame: .zero, styleURL: Self.writeStyle(server: server))
+        view.delegate = self
+        view.logoView.isHidden = true
+        view.compassViewPosition = .bottomRight
+        view.attributionButtonPosition = .bottomLeft
+        let saved = Camera.load()
+        view.setCenter(saved.center, zoomLevel: saved.zoom, animated: false)
+
+        overlay.frame = view.bounds
+        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        overlay.isUserInteractionEnabled = false
+        view.addSubview(overlay)
+
+        let tap = UITapGestureRecognizer(target: self, action: #selector(tapped(_:)))
+        tap.delegate = self
+        for r in view.gestureRecognizers ?? [] where (r as? UITapGestureRecognizer)?.numberOfTapsRequired == 2 {
+            tap.require(toFail: r)
+        }
+        view.addGestureRecognizer(tap)
+
+        pencil.addTarget(self, action: #selector(pencilMoved(_:)))
+        pencil.delegate = self
+        view.addGestureRecognizer(pencil)
+
+        twoFingerTap.numberOfTouchesRequired = 2
+        twoFingerTap.addTarget(self, action: #selector(undoTap))
+        threeFingerTap.numberOfTouchesRequired = 3
+        threeFingerTap.addTarget(self, action: #selector(redoTap))
+        for r in [twoFingerTap, threeFingerTap] {
+            r.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+            r.delegate = self
+            view.addGestureRecognizer(r)
+        }
+
+        let hover = UIHoverGestureRecognizer(target: self, action: #selector(hovered(_:)))
+        view.addGestureRecognizer(hover)
+        view.addInteraction(UIPencilInteraction(delegate: self))
+
+        self.view = view
+        configureGestures()
+        return view
+    }
+
+    /// Every tile request carries the device token: the server's tiles are for signed-in people.
+    static func authorize(_ token: String) {
+        let c = URLSessionConfiguration.default
+        c.httpAdditionalHeaders = ["Authorization": "Bearer \(token)"]
+        MLNNetworkConfiguration.sharedManager.sessionConfiguration = c
+    }
+
+    private static func writeStyle(server: URL) -> URL {
+        var root = server.absoluteString
+        while root.hasSuffix("/") { root.removeLast() }
+        func raster(_ layer: String, _ attribution: String?) -> [String: Any] {
+            var s: [String: Any] = ["type": "raster", "tiles": ["\(root)/api/tiles/\(layer)/{z}/{x}/{y}"], "tileSize": 256, "maxzoom": 19]
+            if let attribution { s["attribution"] = attribution }
+            return s
+        }
+        let style: [String: Any] = [
+            "version": 8,
+            "sources": [
+                "osm": raster("osm", "© OpenStreetMap contributors"),
+                "sat": raster("sat", "Imagery © Esri"),
+                "ref": raster("ref", nil),
+                "streets": ["type": "vector", "tiles": ["\(root)/api/tiles/streets/{z}/{x}/{y}"], "minzoom": 12, "maxzoom": 16],
+            ],
+            "layers": [
+                ["id": "background", "type": "background", "paint": ["background-color": "#eef1f4"]],
+                ["id": "base-osm", "type": "raster", "source": "osm", "paint": ["raster-saturation": -0.35]],
+                ["id": "base-sat", "type": "raster", "source": "sat", "layout": ["visibility": "none"]],
+                ["id": "base-ref", "type": "raster", "source": "ref", "layout": ["visibility": "none"]],
+                // Plain streets, as on the web's Areas page: no coverage while planning areas.
+                ["id": "streets", "type": "line", "source": "streets", "source-layer": "streets",
+                 "layout": ["line-cap": "round", "line-join": "round"],
+                 "paint": ["line-color": "#8b98a6", "line-opacity": 0.75,
+                           "line-width": ["interpolate", ["linear"], ["zoom"], 12, 1.2, 16, 4, 19, 9]]],
+            ],
+        ]
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("streetsweep-style.json")
+        try? JSONSerialization.data(withJSONObject: style).write(to: url)
+        return url
+    }
+
+    // MARK: - Style
+
+    func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
+        addLayers(style)
+        styleReady = true
+        applyBase()
+        renderAreas()
+        renderDrawing()
+    }
+
+    private func addLayers(_ style: MLNStyle) {
+        func source(_ id: String) -> MLNShapeSource {
+            let s = MLNShapeSource(identifier: id, shape: nil, options: nil)
+            style.addSource(s)
+            return s
+        }
+        let color = NSExpression(mglJSONObject: ["to-color", ["coalesce", ["get", "color"], "#1e8a28"]])
+
+        let areas = source("areas")
+        let fill = MLNFillStyleLayer(identifier: "areas-fill", source: areas)
+        fill.fillColor = NSExpression(mglJSONObject: ["case", ["get", "complete"], "#39ff14", ["to-color", ["get", "color"]]])
+        fill.fillOpacity = NSExpression(mglJSONObject: ["case", ["get", "selected"], 0.18, ["get", "complete"], 0.12, 0.06])
+        style.addLayer(fill)
+        let line = MLNLineStyleLayer(identifier: "areas-line", source: areas)
+        line.lineColor = color
+        line.lineWidth = NSExpression(mglJSONObject: ["case", ["get", "selected"], 4.5, 2.2])
+        line.lineOpacity = NSExpression(mglJSONObject: ["case", ["get", "faded"], 0.45, 1])
+        line.lineJoin = NSExpression(forConstantValue: "round")
+        style.addLayer(line)
+
+        let pin = MLNCircleStyleLayer(identifier: "search-pin", source: source("search-pin"))
+        pin.circleRadius = NSExpression(forConstantValue: 8)
+        pin.circleColor = NSExpression(forConstantValue: UIColor(red: 0.886, green: 0.447, blue: 0.122, alpha: 1))
+        pin.circleStrokeColor = NSExpression(forConstantValue: UIColor.white)
+        pin.circleStrokeWidth = NSExpression(forConstantValue: 3)
+        style.addLayer(pin)
+
+        // The outline being drawn: orange, the selected piece purple.
+        let orange = "#e2721f", purple = "#7c3aed"
+        let pieces = source("draw-pieces")
+        let pf = MLNFillStyleLayer(identifier: "draw-fill", source: pieces)
+        pf.fillColor = NSExpression(mglJSONObject: ["case", ["get", "selected"], purple, orange])
+        pf.fillOpacity = NSExpression(forConstantValue: 0.14)
+        style.addLayer(pf)
+        let pl = MLNLineStyleLayer(identifier: "draw-line", source: pieces)
+        pl.lineColor = NSExpression(mglJSONObject: ["case", ["get", "selected"], purple, orange])
+        pl.lineWidth = NSExpression(forConstantValue: 3)
+        pl.lineJoin = NSExpression(forConstantValue: "round")
+        style.addLayer(pl)
+
+        let progress = source("draw-progress")
+        let gl = MLNLineStyleLayer(identifier: "draw-progress-line", source: progress)
+        gl.lineColor = NSExpression(forConstantValue: UIColor(red: 0.886, green: 0.447, blue: 0.122, alpha: 1))
+        gl.lineWidth = NSExpression(forConstantValue: 3)
+        gl.lineDashPattern = NSExpression(forConstantValue: [2, 1.5])
+        style.addLayer(gl)
+
+        let handles = source("draw-handles")
+        let hc = MLNCircleStyleLayer(identifier: "draw-handles", source: handles)
+        hc.circleRadius = NSExpression(mglJSONObject: ["match", ["get", "kind"], "mid", 5, "first", 9, 7])
+        hc.circleColor = NSExpression(mglJSONObject: ["match", ["get", "kind"], "mid", "#ffffff", ["case", ["get", "selected"], purple, orange]])
+        hc.circleStrokeColor = NSExpression(mglJSONObject: ["match", ["get", "kind"], "mid", ["case", ["get", "selected"], purple, orange], "#ffffff"])
+        hc.circleStrokeWidth = NSExpression(forConstantValue: 2.5)
+        style.addLayer(hc)
+    }
+
+    private func applyBase() {
+        guard styleReady, let style = view?.style else { return }
+        style.layer(withIdentifier: "base-osm")?.isVisible = base == .map
+        style.layer(withIdentifier: "base-sat")?.isVisible = base != .map
+        style.layer(withIdentifier: "base-ref")?.isVisible = base == .hybrid
+    }
+
+    // MARK: - Areas
+
+    func setAreas(_ areas: [Area], colors: [String: String], selected: String?) {
+        self.areas = areas
+        self.colors = colors
+        selectedArea = selected
+        renderAreas()
+    }
+
+    private func renderAreas() {
+        guard styleReady, let src = view?.style?.source(withIdentifier: "areas") as? MLNShapeSource else { return }
+        let hidden = session?.area?.id
+        let features: [[String: Any]] = areas.compactMap { a in
+            guard let g = a.geometry, a.id != hidden else { return nil }
+            return ["type": "Feature",
+                    "properties": ["id": a.id, "color": colors[a.id] ?? "#1e8a28", "complete": a.isComplete && session == nil,
+                                   "selected": a.id == selectedArea && session == nil, "faded": session != nil],
+                    "geometry": ["type": "MultiPolygon", "coordinates": g.geoJSONCoordinates]]
+        }
+        src.shape = Self.shape(features)
+    }
+
+    func fit(_ outline: Outline?, bbox: [Double]? = nil, animated: Bool = true) {
+        guard let view else { return }
+        var sw: CLLocationCoordinate2D, ne: CLLocationCoordinate2D
+        if let b = outline?.bounds { (sw, ne) = (b.sw, b.ne) }
+        else if let bbox, bbox.count == 4 {
+            sw = CLLocationCoordinate2D(latitude: bbox[1], longitude: bbox[0])
+            ne = CLLocationCoordinate2D(latitude: bbox[3], longitude: bbox[2])
+        } else { return }
+        let pad = UIEdgeInsets(top: 90, left: leftInset + 60, bottom: 120, right: 60)
+        view.setVisibleCoordinateBounds(MLNCoordinateBounds(sw: sw, ne: ne), edgePadding: pad, animated: animated, completionHandler: nil)
+    }
+
+    func setSearchPin(_ c: CLLocationCoordinate2D?) {
+        searchPin = c
+        guard styleReady, let src = view?.style?.source(withIdentifier: "search-pin") as? MLNShapeSource else { return }
+        src.shape = Self.shape(c.map { [["type": "Feature", "properties": [:], "geometry": ["type": "Point", "coordinates": [$0.longitude, $0.latitude]]]] } ?? [])
+    }
+
+    @objc private func tapped(_ r: UITapGestureRecognizer) {
+        guard session == nil, let view else { return }
+        let p = r.location(in: view)
+        let hits = view.visibleFeatures(at: p, styleLayerIdentifiers: ["areas-fill"])
+        // Smallest first: tapping inside a neighbourhood that sits inside a city means the neighbourhood.
+        let ids = hits.compactMap { $0.attribute(forKey: "id") as? String }
+        let pick = ids.compactMap { id in areas.first { $0.id == id } }.min { ($0.km2 ?? .infinity) < ($1.km2 ?? .infinity) }
+        if let pick { onAreaTap?(pick.id) }
+    }
+
+    // MARK: - Drawing
+
+    func startDrawing(_ s: DrawingSession) {
+        session = s
+        s.onChange = { [weak self] in self?.renderDrawing() }
+        configureGestures()
+        renderAreas()
+        renderDrawing()
+    }
+
+    func stopDrawing() {
+        session?.onChange = nil
+        session = nil
+        configureGestures()
+        renderAreas()
+        renderDrawing()
+    }
+
+    /// The map right now, for the drawing to turn screen points into ground and back.
+    func frame() -> MapFrame? {
+        guard let view else { return nil }
+        let b = view.visibleCoordinateBounds
+        return MapFrame(
+            projection: Projection(toPoint: { [weak view] c in view?.convert(c, toPointTo: view) ?? .zero },
+                                   toCoord: { [weak view] p in view?.convert(p, toCoordinateFrom: view) ?? kCLLocationCoordinate2DInvalid }),
+            view: (b.sw.latitude, b.sw.longitude, b.ne.latitude, b.ne.longitude))
+    }
+
+    private func renderDrawing() {
+        overlay.render(session, view: view)
+        guard styleReady, let style = view?.style else { return }
+        let s = session
+        let pieces: [[String: Any]] = (s?.pieces ?? []).map { p in
+            ["type": "Feature", "properties": ["selected": p.id == s?.selected],
+             "geometry": ["type": "Polygon", "coordinates": [(p.ring + p.ring.prefix(1)).map { [$0.longitude, $0.latitude] }]]]
+        }
+        (style.source(withIdentifier: "draw-pieces") as? MLNShapeSource)?.shape = Self.shape(pieces)
+
+        var handles: [[String: Any]] = []
+        func point(_ c: CLLocationCoordinate2D, _ kind: String, _ selected: Bool) {
+            handles.append(["type": "Feature", "properties": ["kind": kind, "selected": selected],
+                            "geometry": ["type": "Point", "coordinates": [c.longitude, c.latitude]]])
+        }
+        if let s, s.tool == .edit || s.tool == .eraser {
+            for p in s.pieces {
+                let sel = p.id == s.selected
+                for c in p.ring { point(c, "corner", sel) }
+                if s.tool == .edit {
+                    for i in p.ring.indices {
+                        let a = p.ring[i], b = p.ring[(i + 1) % p.ring.count]
+                        point(CLLocationCoordinate2D(latitude: (a.latitude + b.latitude) / 2, longitude: (a.longitude + b.longitude) / 2), "mid", sel)
+                    }
+                }
+            }
+        }
+        if let s, !s.inProgress.isEmpty {
+            for (i, c) in s.inProgress.enumerated() { point(c, i == 0 && s.inProgress.count >= 3 ? "first" : "corner", false) }
+        }
+        (style.source(withIdentifier: "draw-handles") as? MLNShapeSource)?.shape = Self.shape(handles)
+
+        var progress: [[String: Any]] = []
+        if let s, s.inProgress.count >= 2 {
+            progress.append(["type": "Feature", "properties": [:],
+                             "geometry": ["type": "LineString", "coordinates": s.inProgress.map { [$0.longitude, $0.latitude] }]])
+        }
+        (style.source(withIdentifier: "draw-progress") as? MLNShapeSource)?.shape = Self.shape(progress)
+    }
+
+    // MARK: - Pencil, fingers, and gestures
+
+    private let pencil = PencilRecognizer()
+    private let twoFingerTap = UITapGestureRecognizer()
+    private let threeFingerTap = UITapGestureRecognizer()
+    private var mapPinchAndPan: [UIGestureRecognizer] = []
+
+    /// While drawing, the map's own gestures take only fingers (and a trackpad), so the Pencil
+    /// never pans it; ours take only the Pencil. With "Draw with finger", one finger draws
+    /// and the map needs two fingers to move.
+    private func configureGestures() {
+        guard let view else { return }
+        let drawing = session != nil
+        let ours: Set<UIGestureRecognizer> = [pencil, twoFingerTap, threeFingerTap]
+        let fingers = [UITouch.TouchType.direct, .indirectPointer].map { NSNumber(value: $0.rawValue) }
+        let all = [UITouch.TouchType.direct, .indirect, .pencil, .indirectPointer].map { NSNumber(value: $0.rawValue) }
+        for r in view.gestureRecognizers ?? [] where !ours.contains(r) && !(r is UIHoverGestureRecognizer) {
+            r.allowedTouchTypes = drawing ? fingers : all
+            if let pan = r as? UIPanGestureRecognizer, !(r is UIScreenEdgePanGestureRecognizer) {
+                pan.minimumNumberOfTouches = drawing && fingerDraws ? 2 : 1
+            }
+            // MapLibre's two-finger tap zooms out; while drawing, it's undo.
+            if let tap = r as? UITapGestureRecognizer, tap.numberOfTouchesRequired == 2, tap !== twoFingerTap {
+                tap.isEnabled = !drawing
+            }
+        }
+        pencil.isEnabled = drawing
+        pencil.allowedTouchTypes = ([.pencil] + (fingerDraws ? [.direct] : [UITouch.TouchType]())).map { NSNumber(value: $0.rawValue) }
+        twoFingerTap.isEnabled = drawing
+        threeFingerTap.isEnabled = drawing
+    }
+
+    @objc private func pencilMoved(_ r: PencilRecognizer) {
+        guard let s = session, let f = frame() else { return }
+        switch r.state {
+        case .began: s.began(r.points.first ?? r.location(in: view), f); s.moved(Array(r.points.dropFirst()), f)
+        case .changed: s.moved(r.points, f)
+        case .ended: s.moved(r.points, f); s.ended(r.location(in: view), f)
+        case .cancelled, .failed: s.cancelled()
+        default: break
+        }
+        r.points.removeAll()
+    }
+
+    @objc private func undoTap() { session?.undo() }
+    @objc private func redoTap() { session?.redo() }
+
+    @objc private func hovered(_ r: UIHoverGestureRecognizer) {
+        guard let s = session, let f = frame() else { return }
+        // A Pencil hovering above the screen (it reports a height); a trackpad pointer doesn't.
+        let isPencil = r.zOffset > 0
+        switch r.state {
+        case .began, .changed: s.hovering(isPencil ? r.location(in: view) : nil, f)
+        default: s.hovering(nil, f)
+        }
+    }
+
+    func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveTap tap: UIPencilInteraction.Tap) {
+        guard UIPencilInteraction.preferredTapAction != .ignore else { return }
+        session?.swapTool()
+    }
+
+    func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveSqueeze squeeze: UIPencilInteraction.Squeeze) {
+        guard squeeze.phase == .ended, UIPencilInteraction.preferredSqueezeAction != .ignore else { return }
+        session?.swapTool()
+    }
+
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        true
+    }
+
+    // MARK: - Camera
+
+    func mapView(_ mapView: MLNMapView, regionIsChangingWith reason: MLNCameraChangeReason) {
+        overlay.render(session, view: view)
+    }
+
+    func mapView(_ mapView: MLNMapView, regionDidChangeAnimated animated: Bool) {
+        Camera.save(center: mapView.centerCoordinate, zoom: mapView.zoomLevel)
+        overlay.render(session, view: view)
+        if let f = frame() { onSettle?(f) }
+    }
+
+    private static func shape(_ features: [[String: Any]]) -> MLNShape? {
+        let fc: [String: Any] = ["type": "FeatureCollection", "features": features]
+        guard let data = try? JSONSerialization.data(withJSONObject: fc) else { return nil }
+        return try? MLNShape(data: data, encoding: String.Encoding.utf8.rawValue)
+    }
+}
+
+/// Follows one Pencil (or finger, if allowed) from touch-down to lift, collecting every
+/// point it passed through, coalesced ones included, so fast strokes stay smooth.
+final class PencilRecognizer: UIGestureRecognizer {
+    var points: [CGPoint] = []
+    private var tracked: UITouch?
+
+    override init(target: Any?, action: Selector?) {
+        super.init(target: target, action: action)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+    }
+    convenience init() { self.init(target: nil, action: nil) }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        if tracked != nil {
+            // A second finger while drawing with a finger: that's the map being moved, not drawing.
+            if touches.contains(where: { $0.type == .direct }) && tracked?.type == .direct { state = .cancelled }
+            return
+        }
+        guard let t = touches.first else { return }
+        tracked = t
+        points = [t.location(in: view)]
+        state = .began
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let t = tracked, touches.contains(t) else { return }
+        points += (event.coalescedTouches(for: t) ?? [t]).map { $0.location(in: view) }
+        state = .changed
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let t = tracked, touches.contains(t) else { return }
+        points += (event.coalescedTouches(for: t) ?? []).map { $0.location(in: view) }
+        state = .ended
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let t = tracked, touches.contains(t) else { return }
+        state = .cancelled
+    }
+
+    override func reset() {
+        super.reset()
+        tracked = nil
+        points = []
+    }
+}
+
+/// The live stroke (lasso or eraser) and the hover dot: drawn in screen space for speed,
+/// re-placed from their coordinates whenever the map moves.
+final class DrawingOverlay: UIView {
+    private let strokeLayer = CAShapeLayer()
+    private let hoverLayer = CAShapeLayer()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        strokeLayer.fillColor = UIColor.clear.cgColor
+        strokeLayer.lineWidth = 3
+        strokeLayer.lineCap = .round
+        strokeLayer.lineJoin = .round
+        hoverLayer.lineWidth = 2
+        layer.addSublayer(strokeLayer)
+        layer.addSublayer(hoverLayer)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    @MainActor func render(_ s: DrawingSession?, view: MLNMapView?) {
+        guard let view else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let orange = UIColor(red: 0.886, green: 0.447, blue: 0.122, alpha: 1)
+        let path = UIBezierPath()
+        if let s, s.stroke.count >= 2 {
+            path.move(to: view.convert(s.stroke[0], toPointTo: self))
+            for c in s.stroke.dropFirst() { path.addLine(to: view.convert(c, toPointTo: self)) }
+            if s.tool == .lasso { path.close() }
+        }
+        strokeLayer.path = path.cgPath
+        strokeLayer.strokeColor = (s?.tool == .eraser ? UIColor.systemRed.withAlphaComponent(0.5) : orange.withAlphaComponent(0.9)).cgColor
+        strokeLayer.lineWidth = s?.tool == .eraser ? 2 * DrawingSession.snapRadius : 3
+
+        if let h = s?.hover {
+            let p = view.convert(h.coord, toPointTo: self)
+            let color = h.snapped ? UIColor(red: 0.486, green: 0.227, blue: 0.929, alpha: 1) : orange
+            hoverLayer.path = UIBezierPath(ovalIn: CGRect(x: p.x - 7, y: p.y - 7, width: 14, height: 14)).cgPath
+            hoverLayer.fillColor = color.withAlphaComponent(0.3).cgColor
+            hoverLayer.strokeColor = color.cgColor
+        } else {
+            hoverLayer.path = nil
+        }
+        CATransaction.commit()
+    }
+}
+
+/// Where the map was left, so it opens there next time.
+enum Camera {
+    static func load() -> (center: CLLocationCoordinate2D, zoom: Double) {
+        let d = UserDefaults.standard
+        guard d.object(forKey: "map.lat") != nil else {
+            return (CLLocationCoordinate2D(latitude: 30.2672, longitude: -97.7431), 11) // Austin
+        }
+        return (CLLocationCoordinate2D(latitude: d.double(forKey: "map.lat"), longitude: d.double(forKey: "map.lon")), d.double(forKey: "map.zoom"))
+    }
+
+    static func save(center: CLLocationCoordinate2D, zoom: Double) {
+        let d = UserDefaults.standard
+        d.set(center.latitude, forKey: "map.lat")
+        d.set(center.longitude, forKey: "map.lon")
+        d.set(zoom, forKey: "map.zoom")
+    }
+}
+
+/// SwiftUI's handle on the map: the controller does the work.
+struct MapView: UIViewRepresentable {
+    let controller: MapController
+    let server: URL
+    let token: String
+
+    func makeUIView(context: Context) -> MLNMapView {
+        MapController.authorize(token)
+        return controller.makeView(server: server)
+    }
+
+    func updateUIView(_ view: MLNMapView, context: Context) {}
+}
