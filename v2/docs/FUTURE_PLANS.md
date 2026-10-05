@@ -114,6 +114,9 @@ Google's outlines come from licensed and in-house data, so OSM alone won't match
 
 ## Tidy outline and Snap on the web
 
+**Done 2026-10-04 (commit e4e2de2)**: both are on the web's Areas page, with the bottom
+drawing palette. The notes below are kept for reference.
+
 The iPad app already has both (2026-10-04). The server side is built and shared, so
 the website only needs the buttons. Add them to the drawing panel on the Areas page
 (`web/src/components/AreaPanel.svelte`, drawing in `web/src/lib/draw.svelte.ts`).
