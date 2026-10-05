@@ -161,6 +161,7 @@ struct AreasScreen: View {
     @AppStorage("draw.finger") private var fingerDraws = false
     @AppStorage("areas.panel") private var panelShown = true
     @AppStorage("draw.snap") private var snap = false
+    @AppStorage("draw.others") private var showOthers = true
     private let panelWidth: CGFloat = 390
 
     var body: some View {
@@ -203,7 +204,7 @@ struct AreasScreen: View {
         }
         .overlay(alignment: .bottom) {
             if let s = ws.session {
-                ToolPalette(session: s, snap: $snap)
+                ToolPalette(session: s, snap: $snap, showOthers: $showOthers)
                     .padding(.bottom, 16)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -215,8 +216,10 @@ struct AreasScreen: View {
             ws.map.fingerDraws = fingerDraws
             ws.map.leftInset = panelShown ? panelWidth + 16 : 0
             ws.setSnapping(snap)
+            ws.setShowOthers(showOthers)
         }
         .onChange(of: snap) { _, on in ws.setSnapping(on) }
+        .onChange(of: showOthers) { _, on in ws.setShowOthers(on) }
         .onChange(of: base) { _, b in ws.map.base = b }
         .onChange(of: fingerDraws) { _, on in ws.map.fingerDraws = on }
         .onChange(of: panelShown) { _, on in ws.map.leftInset = on ? panelWidth + 16 : 0 }

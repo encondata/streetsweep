@@ -104,6 +104,7 @@ struct DrawPanel: View {
 struct ToolPalette: View {
     @Bindable var session: DrawingSession
     @Binding var snap: Bool
+    @Binding var showOthers: Bool
 
     var body: some View {
         HStack(spacing: 6) {
@@ -121,6 +122,18 @@ struct ToolPalette: View {
                 .accessibilityAddTraits(session.tool == tool ? .isSelected : [])
             }
             Divider().frame(height: 40).padding(.horizontal, 4)
+            Button { showOthers.toggle() } label: {
+                VStack(spacing: 3) {
+                    Image(systemName: "square.on.square").font(.system(size: 22, weight: .medium))
+                    Text("Areas").font(.caption2.weight(.semibold))
+                }
+                .frame(width: 60, height: 56)
+                .foregroundStyle(showOthers ? Color.white : Color.primary)
+                .background(showOthers ? Color(red: 0.263, green: 0.388, blue: 0.847) : Color.clear, in: RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Show the team's other \(session.level == .section ? "sections" : "neighbourhoods") and snap to them")
+            .accessibilityAddTraits(showOthers ? .isSelected : [])
             Button { snap.toggle() } label: {
                 VStack(spacing: 3) {
                     Image(systemName: "scope").font(.system(size: 22, weight: .medium))

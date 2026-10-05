@@ -63,12 +63,24 @@ final class DrawingSession {
     let area: Area?
     let teamId: String
     var name: String { didSet { if name != oldValue { dirty = true; schedulePersist() } } }
-    var level: AreaLevel { didSet { if level != oldValue { dirty = true; schedulePersist() } } }
+    var level: AreaLevel { didSet { if level != oldValue { dirty = true; schedulePersist(); onChange?() } } }
     /// Changed since the drawing began: worth keeping, and worth asking before dropping.
     private(set) var dirty = false
 
     // ---- snapping ----
-    private var neighbours: [SnapLine]
+    /// The team's other drawn areas, by kind; those of the kind being drawn are shown and
+    /// snapped to while "Areas" is on.
+    private let others: [(id: String, level: AreaLevel, rings: [Ring])]
+    var showOthers = true { didSet { if showOthers != oldValue { onChange?() } } }
+    private var neighbours: [SnapLine] {
+        visibleOthers.flatMap { o in o.rings.map { SnapLine($0, closed: true) } }
+    }
+    /// Neighbourhoods and custom areas go together; sections with sections.
+    static func sameKind(_ a: AreaLevel, _ b: AreaLevel) -> Bool { (a == .section) == (b == .section) }
+    var visibleOthers: [(id: String, level: AreaLevel, rings: [Ring])] {
+        showOthers ? others.filter { Self.sameKind($0.level, level) } : []
+    }
+    var visibleOtherIds: Set<String> { Set(visibleOthers.map(\.id)) }
     var shores: [SnapLine] = []
     /// Snap: also onto streets (intersections first) and state, county and city lines, with
     /// lasso strokes straightened and right angles squared. Neighbours and shores always snap.
@@ -90,10 +102,12 @@ final class DrawingSession {
     static let lassoTolerance: CGFloat = 3
     private static let maxUndo = 80
 
-    init(teamId: String, area: Area?, neighbours: [Ring], draft: Draft? = nil) {
+    init(teamId: String, area: Area?, others: [Area], draft: Draft? = nil) {
         self.teamId = teamId
         self.area = area
-        self.neighbours = neighbours.map { SnapLine($0, closed: true) }
+        self.others = others.filter { $0.id != area?.id && $0.isDrawn }.compactMap { a in
+            a.geometry.map { (a.id, a.level, $0.pieces) }
+        }
         if let draft {
             name = draft.name
             level = draft.level

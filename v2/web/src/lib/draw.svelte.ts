@@ -136,6 +136,11 @@ export class OutlineDraw {
     this.shores = lines;
   }
 
+  /** The existing areas corners snap onto (the panel decides which: same kind, when shown). */
+  setNeighbours(rings: Ring[]) {
+    this.neighbours = rings;
+  }
+
   /** Streets and boundary lines in view, snapped to while Snap is on. */
   setSnapLines(streets: Ring[] | null, boundaries: Ring[] | null) {
     if (streets) this.streets = streets;

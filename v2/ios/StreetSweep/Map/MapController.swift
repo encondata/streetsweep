@@ -375,12 +375,13 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
 
     private func renderAreas() {
         guard styleReady, let src = view?.style?.source(withIdentifier: "areas") as? MLNShapeSource else { return }
-        let hidden = session?.area?.id
+        // While drawing: only the areas of the kind being drawn (with "Areas" on), to snap to.
+        let drawingShows = session?.visibleOtherIds
         let features: [[String: Any]] = areas.compactMap { a in
-            guard let g = a.geometry, a.id != hidden else { return nil }
+            guard let g = a.geometry, drawingShows?.contains(a.id) ?? true else { return nil }
             return ["type": "Feature",
                     "properties": ["id": a.id, "color": colors[a.id] ?? "#1e8a28", "complete": a.isComplete && session == nil,
-                                   "selected": a.id == selectedArea && session == nil, "faded": session != nil],
+                                   "selected": a.id == selectedArea && session == nil, "faded": false],
                     "geometry": ["type": "MultiPolygon", "coordinates": g.geoJSONCoordinates]]
         }
         src.shape = Self.shape(features)
@@ -434,7 +435,10 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
     func startInk(_ target: PencilTarget) {
         ink?.onChange = nil
         ink = target
-        target.onChange = { [weak self] in self?.renderDrawing() }
+        target.onChange = { [weak self] in
+            self?.renderDrawing()
+            if self?.session != nil { self?.renderAreas() }
+        }
         configureGestures()
     }
 

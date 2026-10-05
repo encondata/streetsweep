@@ -357,6 +357,29 @@
   }
   const onMoveEnd = () => { clearTimeout(shoreTimer); shoreTimer = setTimeout(() => { loadShores(); loadSnapLines(); }, 250); };
 
+  // ---- Existing areas of the same kind: shown while drawing, and snapped to ----
+  let showOthers = $state(readOthers());
+  function readOthers() {
+    try { return localStorage.getItem("streetsweep.drawOthers") !== "off"; } catch { return true; }
+  }
+  function setOthers(on: boolean) {
+    showOthers = on;
+    try { localStorage.setItem("streetsweep.drawOthers", on ? "on" : "off"); } catch { /* fine */ }
+  }
+  /** Neighbourhoods and custom areas go together; sections with sections. */
+  const kindOf = (level: string) => (level === "section" ? "section" : "neighborhood");
+  const sameKind = (a: string, b: string) => kindOf(a) === kindOf(b);
+  let others = $derived(mode === "draw" && showOthers
+    ? areas.filter((a) => a.geometry && a.id !== redrawing?.id && a.source === "drawn" && sameKind(a.level, form.level))
+    : []);
+  $effect(() => {
+    const list = others;
+    untrack(() => {
+      draw?.setNeighbours(list.flatMap((a) => ringsOf(a.geometry!)));
+      ctl.setDrawReference(list.map((a) => ({ type: "Feature", properties: { color: colorOf(a) }, geometry: a.geometry! })));
+    });
+  });
+
   // ---- Snap: streets and boundary lines in view, when it's on ----
   let snap = $state(readSnap());
   let streetsTooFar = $state(false);
@@ -454,7 +477,8 @@
       : existing
         ? { name: existing.name, notes: existing.notes ?? "", level: drawnLevel(existing.level) }
         : { name: "", notes: "", level: "neighborhood" };
-    const neighbours = areas.filter((a) => a.id !== existing?.id && a.geometry).flatMap((a) => ringsOf(a.geometry!));
+    // Which existing areas to snap to is kept up to date by the "Areas" toggle (see `others`).
+    const neighbours: Ring[] = [];
     // Opened the page and went straight to drawing: the map has to be ready first.
     await ctl.ready();
     ctl.busy = true;
@@ -484,6 +508,7 @@
     ctl.map.off("moveend", onMoveEnd);
     snapAbort?.abort();
     ctl.setSnapLines([]);
+    ctl.setDrawReference([]);
     dirty = false;
     draw?.stop();
     draw = null;
@@ -799,6 +824,11 @@
       <span>Edit</span>
     </button>
     <span class="pdiv" aria-hidden="true"></span>
+    <button class="tool others" class:on={showOthers} aria-pressed={showOthers} onclick={() => setOthers(!showOthers)}
+      title="Show the team's other {form.level === 'section' ? 'sections' : 'neighbourhoods'} and snap to their edges">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M3 5h8v7H3zM13 5h8v14h-8zM3 14h8v5H3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" /></svg>
+      <span>Areas</span>
+    </button>
     <button class="tool snap" class:on={snap} aria-pressed={snap} onclick={() => setSnap(!snap)} title="Snap to streets, intersections and city, county and state lines">
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="M12 2v5M12 17v5M2 12h5M17 12h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><circle cx="12" cy="12" r="1.8" fill="currentColor" /></svg>
       <span>Snap</span>
@@ -890,6 +920,8 @@
   .tool.on { background: var(--green-600); color: #fff; }
   .tool.on:hover:not([disabled]) { background: var(--green-700); }
   .tool.snap.on { background: #f08a24; }
+  .tool.others.on { background: #4363d8; }
+  .tool.others.on:hover:not([disabled]) { background: #3552c4; }
   .tool.snap.on:hover:not([disabled]) { background: #e07a14; }
   .tool svg { margin-top: 6px; }
   .pdiv { width: 1px; height: 40px; background: var(--line); margin: 0 4px; }

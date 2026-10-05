@@ -19,6 +19,14 @@ final class Workspace {
     private(set) var view: GeoBounds?
     /// Snap drawings to streets and boundary lines too (the palette's magnet).
     private(set) var snapping = false
+    /// While drawing, show the team's areas of the same kind, and snap to them.
+    private(set) var showOthers = true
+
+    func setShowOthers(_ on: Bool) {
+        showOthers = on
+        session?.showOthers = on
+    }
+
     /// Zoomed too far out to fetch the streets to snap to.
     private(set) var streetsTooFar = false
 
@@ -155,9 +163,9 @@ final class Workspace {
     func startDrawing(_ area: Area?, from draft: DrawingSession.Draft? = nil) {
         guard let teamId = draft?.teamId ?? teamId else { return }
         if draft == nil { DrawingSession.Draft.clear(); self.draft = nil }
-        let neighbours = store.areas.filter { $0.id != area?.id }.flatMap { $0.geometry?.pieces ?? [] }
-        let s = DrawingSession(teamId: teamId, area: area, neighbours: neighbours, draft: draft)
+        let s = DrawingSession(teamId: teamId, area: area, others: store.areas, draft: draft)
         s.snapping = snapping
+        s.showOthers = showOthers
         session = s
         map.startDrawing(s)
         if draft != nil, let o = s.outline { map.fit(o) }

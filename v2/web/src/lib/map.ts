@@ -44,6 +44,8 @@ function style(): StyleSpecification {
       "search-pin": { type: "geojson", data: empty() },
       // While drawing with Snap on: the state, county and city lines it snaps to.
       "snap-lines": { type: "geojson", data: empty() },
+      // While drawing: the team's areas of the same kind, to see and snap to.
+      "draw-ref": { type: "geojson", data: empty() },
       // An area's streets still to sweep, when asked for ("Highlight what's left").
       "missing": { type: "geojson", data: empty() },
       // Zoomed out, where the team has swept: cells of covered streets, clustered.
@@ -144,6 +146,10 @@ function style(): StyleSpecification {
         paint: { "line-color": "#ffd60a", "line-width": ["interpolate", ["linear"], ["zoom"], 10, 3, 16, 7] } },
       { id: "missing-dot", type: "circle", source: "missing", filter: ["==", ["geometry-type"], "Point"],
         paint: { "circle-radius": 7, "circle-color": "#ffd60a", "circle-stroke-color": "#111827", "circle-stroke-width": 2.5 } },
+      {
+        id: "draw-ref", type: "line", source: "draw-ref", layout: { "line-join": "round" },
+        paint: { "line-color": ["coalesce", ["get", "color"], AREA_COLOR], "line-width": 2.5, "line-opacity": 0.9 },
+      },
       {
         id: "snap-lines", type: "line", source: "snap-lines",
         paint: { "line-color": "#7c3aed", "line-width": 2, "line-opacity": 0.55, "line-dasharray": [3, 2] },
@@ -566,6 +572,11 @@ export class MapController {
     const p = new Popup({ closeButton: true, maxWidth: "280px", offset: 8 }).setLngLat(at).setDOMContent(el);
     if (onClose) p.on("close", onClose);
     this.popup = p.addTo(this.map);
+  }
+
+  /** While drawing: the areas shown to snap to (their own colours, outline only); none to clear. */
+  setDrawReference(features: GeoJSON.Feature[]) {
+    this.whenReady(() => (this.map.getSource("draw-ref") as GeoJSONSource).setData({ type: "FeatureCollection", features }));
   }
 
   /** The boundary lines a drawing snaps to, shown dashed; none to clear. */
