@@ -389,9 +389,9 @@ export default async function areaRoutes(app: FastifyInstance) {
     if (!/^[0-9a-f-]{36}$/i.test(teamId)) throw badRequest("Say whose coverage: ?team=<team id>.");
     await requireTeamMember(teamId, me);
     const LIMIT = 4000;
-    const { rows } = await query<{ name: string | null; highway: string; m: number; n: number; geom: string; at: [number, number]; total: number }>(
+    const { rows } = await query<{ name: string | null; highway: string; m: number; n: number; ids: string[]; geom: string; at: [number, number]; total: number }>(
       `WITH miss AS (
-         SELECT s.inside_m, s.street_key, seg.way_id, seg.geom
+         SELECT s.segment_id, s.inside_m, s.street_key, seg.way_id, seg.geom
            FROM areas a JOIN area_segments s ON s.area_id = a.id
            JOIN street_segments seg ON seg.id = s.segment_id
            LEFT JOIN team_coverage c ON c.team_id = $2 AND c.segment_id = s.segment_id
@@ -401,18 +401,19 @@ export default async function areaRoutes(app: FastifyInstance) {
           ORDER BY s.inside_m DESC LIMIT ${LIMIT}),
        parts AS (SELECT ST_Subdivide(geom, 256) AS g FROM areas WHERE id = $1),
        clipped AS (
-         SELECT m.street_key, m.way_id, m.inside_m,
+         SELECT m.segment_id, m.street_key, m.way_id, m.inside_m,
                 CASE WHEN EXISTS (SELECT 1 FROM parts p WHERE ST_CoveredBy(m.geom, p.g)) THEN m.geom
                      ELSE (SELECT ST_CollectionExtract(ST_Union(ST_Intersection(m.geom, p.g)), 2)
                              FROM parts p WHERE p.g && m.geom AND ST_Intersects(m.geom, p.g)) END AS g
            FROM miss m),
        streets AS (
          SELECT max(w.name) AS name, mode() WITHIN GROUP (ORDER BY w.highway) AS highway,
-                sum(c.inside_m)::float AS m, count(*)::int AS n, ST_Collect(c.g) AS g
+                sum(c.inside_m)::float AS m, count(*)::int AS n, ST_Collect(c.g) AS g,
+                array_agg(c.segment_id) AS ids
            FROM clipped c LEFT JOIN street_ways w ON w.way_id = c.way_id
           WHERE c.g IS NOT NULL AND NOT ST_IsEmpty(c.g)
           GROUP BY c.street_key)
-       SELECT name, highway, m, n, ST_AsGeoJSON(g, 6) AS geom,
+       SELECT name, highway, m, n, ids, ST_AsGeoJSON(g, 6) AS geom,
               ARRAY[round(ST_X(ST_PointOnSurface(g))::numeric, 6), round(ST_Y(ST_PointOnSurface(g))::numeric, 6)]::float[] AS at,
               (SELECT count(*) FROM miss)::int AS total
          FROM streets ORDER BY m DESC`,
@@ -423,6 +424,8 @@ export default async function areaRoutes(app: FastifyInstance) {
       truncated: rows[0]?.total === LIMIT,
       streets: rows.map((r) => ({
         name: r.name, highway: r.highway, meters: Math.round(r.m), pieces: r.n, at: r.at, geometry: JSON.parse(r.geom),
+        // The street's pieces still to sweep, for marking them all at once (marks/bulk).
+        segment_ids: r.ids.map(Number),
       })),
     };
   });

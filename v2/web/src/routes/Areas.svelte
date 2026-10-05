@@ -89,7 +89,7 @@
   {#if ctl && missingFor}
     {#key missingFor.id + missingFor.team}
       <MissingPanel ctl={ctl} areaId={missingFor.id} areaName={missingFor.name} teamId={missingFor.team}
-        left={shown ? PANEL_W : 0} onclose={() => (missingFor = null)} />
+        left={shown ? PANEL_W : 0} onclose={() => (missingFor = null)} onmarked={() => panel?.refresh()} />
     {/key}
   {/if}
   <div class="top">

@@ -486,7 +486,8 @@
 
   {#if ctl && missingFor}
     {#key missingFor.id + missingFor.team}
-      <MissingPanel bind:this={missingPanel} ctl={ctl} areaId={missingFor.id} areaName={missingFor.name} teamId={missingFor.team} onclose={() => (missingFor = null)} />
+      <MissingPanel bind:this={missingPanel} ctl={ctl} areaId={missingFor.id} areaName={missingFor.name} teamId={missingFor.team} onclose={() => (missingFor = null)}
+        onmarked={() => { ctl?.refreshCoverage(); loadAreas(); loadCells(); }} />
     {/key}
   {/if}
 
