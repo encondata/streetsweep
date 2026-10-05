@@ -37,6 +37,20 @@ struct DrawPanel: View {
 
             Section {
                 Button {
+                    Task { await ws.tidy() }
+                } label: {
+                    HStack {
+                        Label("Tidy round the streets", systemImage: "wand.and.stars")
+                        if ws.busy { Spacer(); ProgressView() }
+                    }
+                }
+                .disabled(ws.busy || session.pieces.isEmpty && session.inProgress.count < 3)
+            } footer: {
+                Text("Draw roughly round a neighbourhood, then tidy: the outline wraps the streets inside 10 m out, or halfway to the next street outside where that's closer, so neighbours meet on one line.")
+            }
+
+            Section {
+                Button {
                     Task { await ws.trimWater() }
                 } label: {
                     HStack {

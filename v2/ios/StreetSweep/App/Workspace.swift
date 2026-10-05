@@ -243,6 +243,27 @@ final class Workspace {
         }
     }
 
+    /// Tidy: the streets inside wrapped 10 m out (or halfway to the next street out, if
+    /// that's closer), worked out by the server. One undoable change.
+    func tidy() async {
+        guard let s = session, let api else { return }
+        s.closeInProgress()
+        guard let outline = s.outline else {
+            error = "Draw a rough outline round the streets first, then tidy it."
+            return
+        }
+        busy = true
+        defer { busy = false }
+        do {
+            let r: Tidied = try await api.post("/api/areas/tidy", ["geometry": outline])
+            s.replaceAll(r.geometry.pieces)
+            if let f = map.frame() { s.snapCornersToNeighbours(f) }
+            s.note = "Tidied round \(r.pieces) street piece\(r.pieces == 1 ? "" : "s"): 10 m out, or halfway to the next street. Undo puts your drawing back."
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
     // MARK: - Shorelines, for snapping while drawing
 
     private var shoreTask: Task<Void, Never>?
@@ -359,6 +380,7 @@ private struct AreaPatchNoNotes: Encodable {
 private struct Created: Decodable { let id: String }
 private struct Trimmed: Decodable { let geometry: Outline?; let removedM2: Double; let note: String? }
 private struct Shores: Decodable { let lines: [[[Double]]] }
+private struct Tidied: Decodable { let geometry: Outline; let pieces: Int }
 
 extension Area {
     /// A single area's details, keeping the progress figures the team's list had.

@@ -9,6 +9,13 @@ import { isAdminRole, loadTeam, roleIn } from "../teams.js";
 
 // Drawn outlines larger than this are refused: they'd be a county or more, and those
 // exist as boundaries to follow (whose builds are worth sharing between teams).
+/** Tidy: how far out from the streets, how far to look for the next street out, and limits. */
+const TIDY_BUFFER_M = 10;
+const TIDY_LOOK_M = 400;
+/** How tight the hull round the streets is: 0 hugs them, 1 is the convex hull. */
+const TIDY_HULL = 0.2;
+const TIDY_MAX_KM2 = 50;
+const TIDY_MAX_PIECES = 5000;
 const MAX_DRAWN_KM2 = 5000;
 
 const color = { type: ["string", "null"], pattern: "^#[0-9a-fA-F]{6}$" } as const;
@@ -131,6 +138,71 @@ export default async function areaRoutes(app: FastifyInstance) {
     );
     return { areas: rows };
   });
+
+  // Tidy a rough outline (the iPad's Tidy button): the streets whose middle is inside it,
+  // wrapped 10 m out, or halfway to the nearest street outside where that's closer. The
+  // halfway line is the Voronoi split between points along the streets inside and those
+  // outside, so two neighbourhoods tidied side by side meet on one line. Worked in metres
+  // (the local UTM zone), returned as GeoJSON.
+  app.post<{ Body: { geometry: unknown } }>(
+    "/api/areas/tidy",
+    { schema: { body: { type: "object", required: ["geometry"], properties: { geometry: { type: "object" } } } } },
+    async (req) => {
+      requireUser(req);
+      const json = JSON.stringify(req.body.geometry);
+      const check = await query<{ ok: boolean; km2: number; lon: number; lat: number }>(
+        `WITH g AS (SELECT ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326)), 3)) AS g)
+         SELECT NOT ST_IsEmpty(g) AS ok, coalesce(ST_Area(g::geography) / 1e6, 0) AS km2,
+                ST_X(ST_Centroid(g)) AS lon, ST_Y(ST_Centroid(g)) AS lat FROM g`, [json],
+      ).catch(() => { throw badRequest("That outline isn't a shape we can use. Try drawing it again."); });
+      const c = check.rows[0];
+      if (!c?.ok) throw badRequest("That outline isn't a shape we can use. Try drawing it again.");
+      if (c.km2 > TIDY_MAX_KM2) throw badRequest(`Tidy works on up to ${TIDY_MAX_KM2} km² at a time. Draw a smaller outline.`);
+      const utm = (c.lat >= 0 ? 32600 : 32700) + Math.floor((c.lon + 180) / 6) + 1;
+      const { rows } = await query<{ geom: string | null; pieces: number }>(
+        `WITH g AS (SELECT ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326)), 3)) AS g),
+         inside AS (
+           SELECT s.id, ST_Transform(s.geom, $2::int) AS gm FROM g, street_segments s
+            WHERE s.retired_at IS NULL AND s.geom && g.g AND ST_Intersects(g.g, ST_LineInterpolatePoint(s.geom, 0.5))),
+         box AS (SELECT ST_Expand(ST_Extent(gm)::geometry, ${TIDY_LOOK_M}) AS b FROM inside),
+         outside AS (
+           SELECT ST_Transform(s.geom, $2::int) AS gm FROM box, street_segments s
+            WHERE s.retired_at IS NULL AND s.geom && ST_Transform(ST_SetSRID(box.b, $2::int), 4326)
+              AND s.id NOT IN (SELECT id FROM inside)),
+         pts AS (
+           SELECT (ST_DumpPoints(ST_Segmentize(gm, 12))).geom AS p, true AS mine FROM inside
+           UNION ALL
+           SELECT (ST_DumpPoints(ST_Segmentize(gm, 12))).geom, false FROM outside),
+         cells AS (
+           SELECT (ST_Dump(ST_VoronoiPolygons(ST_Collect(p), 0.5, (SELECT ST_SetSRID(b, $2::int) FROM box)))).geom AS cell FROM pts),
+         halfway AS (
+           SELECT ST_Union(DISTINCT c.cell) AS h FROM cells c JOIN pts ON pts.mine AND c.cell && pts.p AND ST_Intersects(c.cell, pts.p)),
+         band AS (SELECT ST_Union(ST_Buffer(gm, ${TIDY_BUFFER_M}, 'quad_segs=4')) AS b FROM inside),
+         -- The ground the streets span, not just the streets: a tight hull round them (so
+         -- the gardens between cul-de-sacs count too), 10 m out, with the band round every
+         -- street and any blocks between them filled in.
+         hull AS (SELECT ST_Buffer(ST_ConcaveHull(ST_Collect(p), ${TIDY_HULL}), ${TIDY_BUFFER_M}, 'quad_segs=4') AS h FROM pts WHERE mine),
+         filled AS (SELECT ST_Union(ST_MakePolygon(ST_ExteriorRing(d.geom))) AS f
+                      FROM band, hull, ST_Dump(ST_Union(band.b, hull.h)) d),
+         tidy AS (
+           SELECT ST_Union(ST_MakePolygon(ST_ExteriorRing(d.geom))) AS t
+             FROM filled, halfway, ST_Dump(ST_CollectionExtract(ST_MakeValid(ST_Union(
+                    ST_Intersection(filled.f, halfway.h),
+                    -- Never cuts a street: each stays inside, whatever the simplifying trims.
+                    (SELECT ST_Buffer(ST_Union(gm), 3, 'quad_segs=2') FROM inside))), 3)) d
+            WHERE ST_Area(d.geom) > 200)
+         SELECT ST_AsGeoJSON(ST_Transform(ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_SimplifyPreserveTopology(t, 2)), 3)), 4326), 7) AS geom,
+                (SELECT count(*)::int FROM inside) AS pieces
+           FROM tidy`,
+        [json, utm],
+      );
+      const r = rows[0];
+      if (!r?.pieces) throw badRequest("There are no streets inside that outline to tidy round.");
+      if (r.pieces > TIDY_MAX_PIECES) throw badRequest(`That's more than ${TIDY_MAX_PIECES.toLocaleString()} street pieces. Tidy a smaller outline.`);
+      if (!r.geom) throw badRequest("Couldn't tidy that outline. Try drawing it again.");
+      return { geometry: JSON.parse(r.geom), pieces: r.pieces };
+    },
+  );
 
   // The state, county and city lines in a box, for a drawing to snap to (the iPad's Snap
   // option), clipped to the box like the shorelines.

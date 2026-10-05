@@ -111,3 +111,38 @@ Google's outlines come from licensed and in-house data, so OSM alone won't match
   signed image URL. The logger updates while parked on Wi-Fi.
 - **Always-on BLE relay.** Keep BLE advertising while driving so the phone can carry
   batches when there's no Wi-Fi.
+
+## Tidy outline and Snap on the web
+
+The iPad app already has both (2026-10-04). The server side is built and shared, so
+the website only needs the buttons. Add them to the drawing panel on the Areas page
+(`web/src/components/AreaPanel.svelte`, drawing in `web/src/lib/draw.svelte.ts`).
+
+**Tidy round the streets.** It takes a rough outline and returns a clean one.
+- Call `POST /api/areas/tidy` with `{ geometry }` (GeoJSON Polygon or MultiPolygon). It
+  answers `{ geometry (MultiPolygon), pieces }`, or a 400 with a message to show as is.
+- What the server does: it takes the street pieces whose middle is inside the outline.
+  It wraps the ground they span (a concave hull, plus a 10 m band round every street) and
+  limits each edge to 10 m beyond the outer streets, or halfway to the nearest street
+  outside where that's closer. The halfway line is a Voronoi split, so two neighbourhoods
+  tidied side by side meet on one line. Every inside street stays fully inside. Limits:
+  50 km² and 5,000 pieces.
+- Web: a "Tidy round the streets" button beside "Trim to shoreline". Put the result in
+  with `OutlineDraw.replaceAll(ringsOf(geometry))`, so it's one undoable change. Then nudge
+  corners within a few pixels of a neighbouring area onto it; `OutlineDraw.snap` already
+  does that per point.
+
+**Snap.** A toggle in the drawing panel, remembered per browser.
+- Snap targets:
+  - Boundary lines: `GET /api/areas/lines?bbox=w,s,e,n` (state, county and city outlines
+    clipped to the box; empty past 0.4°).
+  - Streets: `GET /api/segments?bbox=…` (gzip, packed: the last item of each row is a
+    polyline6). Load them only when zoomed in (0.2° at most each way). Only a street's
+    two ends count as corners to snap onto, since those are the intersections.
+- With Snap on:
+  - Clicked corners snap to intersections, streets and boundary lines, as well as to
+    neighbours and shores as now.
+  - Show the boundary lines dashed while drawing.
+- The iPad also straightens a freehand lasso before snapping its corners (see
+  `ios/StreetSweep/Drawing/Geometry.swift`, `snappedLasso`). The web draws by clicking
+  corners, so it doesn't need that step.

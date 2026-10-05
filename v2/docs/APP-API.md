@@ -67,6 +67,11 @@ doesn't show them yet. Sync's coverage can still list highway segment ids; skip 
   those pieces, for highlighting). Otherwise `{ streets, pieces, meters, segment_ids }`;
   undo by posting those ids to `marks/bulk` with `kind: "clear"`. At most 50 km² and 5,000
   pieces at once. The iPad app's "Mark by outline" uses this.
+- `POST /api/areas/tidy` `{ geometry }` → `{ geometry (MultiPolygon), pieces }`: a rough
+  outline tidied round the streets whose middle is inside it, 10 m out or halfway to the
+  next street outside, whichever is closer. Changes nothing on the server.
+- `GET /api/areas/lines?bbox=w,s,e,n` → `{ lines }`: state, county and city outlines
+  clipped to the box, for drawings to snap to (empty past 0.4°).
 - `POST /api/places` `{ id (uuid from the phone), name, note?, lon, lat, drive_id?, team_ids? }`
   answers 201, or 200 `duplicate`. `PATCH /api/places/:id` edits (and `team_ids`
   replaces the sharing), `DELETE` removes. Photos: `POST /api/places/:id/photos?w=&h=`

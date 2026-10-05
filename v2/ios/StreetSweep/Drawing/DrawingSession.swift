@@ -155,6 +155,25 @@ final class DrawingSession {
         changed()
     }
 
+    /// Pull corners that land within a few points of a neighbouring area or a boundary line
+    /// exactly onto it, so tidied outlines share edges instead of nearly meeting.
+    func snapCornersToNeighbours(_ map: MapFrame) {
+        let lines = neighbours + boundaries
+        guard !lines.isEmpty else { return }
+        var moved = false
+        for i in pieces.indices {
+            for k in pieces[i].ring.indices {
+                let p = map.projection.toPoint(pieces[i].ring[k])
+                if let s = Geometry.snap(p, lines: lines, radius: 8, view: map.view, project: map.projection), s.coord != pieces[i].ring[k] {
+                    pieces[i].ring[k] = s.coord
+                    moved = true
+                }
+            }
+            pieces[i].ring = Geometry.dedupe(pieces[i].ring)
+        }
+        if moved { changed() }
+    }
+
     /// Close the Corners tool's piece, if it has three corners.
     func closeInProgress(force: Bool = true) {
         guard !inProgress.isEmpty else { return }
