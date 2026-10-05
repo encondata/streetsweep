@@ -66,7 +66,9 @@ doesn't show them yet. Sync's coverage can still list highway segment ids; skip 
   changes: it answers `{ streets, pieces, meters, lines }` (`lines` is a MultiLineString of
   those pieces, for highlighting). Otherwise `{ streets, pieces, meters, segment_ids }`;
   undo by posting those ids to `marks/bulk` with `kind: "clear"`. At most 50 km² and 5,000
-  pieces at once. The iPad app's "Mark by outline" uses this.
+  pieces at once. The iPad app's "Mark by outline" uses this. With `along_m` (1–200), `geometry`
+  is scribble strokes instead (LineString/MultiLineString), widened by that many metres each
+  side, and a piece counts when they cover at least half its length (the iPad's Scribble).
 - `POST /api/areas/tidy` `{ geometry }` → `{ geometry (MultiPolygon), pieces }`: a rough
   outline tidied round the streets whose middle is inside it, 10 m out or halfway to the
   next street outside, whichever is closer. Changes nothing on the server.

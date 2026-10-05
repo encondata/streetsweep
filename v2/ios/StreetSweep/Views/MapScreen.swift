@@ -8,6 +8,7 @@ struct MapScreen: View {
     @Environment(CoverageWorkspace.self) private var cw
     @AppStorage("map.base") private var base: Basemap = .map
     @AppStorage("draw.finger") private var fingerDraws = false
+    @AppStorage("mark.mode") private var markMode: MarkSession.Mode = .scribble
 
     var body: some View {
         @Bindable var model = model
@@ -47,8 +48,8 @@ struct MapScreen: View {
         }
         .overlay(alignment: .bottomTrailing) {
             if cw.mark == nil && cw.canMark {
-                Button { cw.startMarking() } label: {
-                    Label("Mark by outline", systemImage: "lasso")
+                Button { cw.startMarking(markMode) } label: {
+                    Label("Mark streets", systemImage: markMode == .scribble ? "scribble" : "lasso")
                         .font(.headline)
                         .padding(.horizontal, 18)
                         .frame(height: 50)
@@ -63,7 +64,7 @@ struct MapScreen: View {
         }
         .overlay(alignment: .bottom) {
             if let s = cw.mark {
-                MarkPanel(session: s, fingerDraws: $fingerDraws)
+                MarkPanel(session: s, fingerDraws: $fingerDraws, mode: $markMode)
                     .padding(.bottom, 20)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             } else if let m = cw.lastMarked {
@@ -97,14 +98,18 @@ struct MapScreen: View {
 struct MarkPanel: View {
     let session: MarkSession
     @Binding var fingerDraws: Bool
+    @Binding var mode: MarkSession.Mode
     @Environment(CoverageWorkspace.self) private var cw
 
     var body: some View {
         HStack(spacing: 16) {
-            Image(systemName: "lasso")
-                .font(.system(size: 26, weight: .medium))
-                .foregroundStyle(Color(red: 1, green: 0.478, blue: 0))
-                .frame(width: 44)
+            Picker("How", selection: $mode) {
+                Label("Scribble", systemImage: "scribble").tag(MarkSession.Mode.scribble)
+                Label("Lasso", systemImage: "lasso").tag(MarkSession.Mode.lasso)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 200)
+            .onChange(of: mode) { _, m in session.mode = m }
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.headline)
                 Text(detail).font(.subheadline).foregroundStyle(session.error != nil ? .red : .secondary)
@@ -119,8 +124,14 @@ struct MarkPanel: View {
                 .toggleStyle(.button)
                 .accessibilityLabel("Draw with finger")
                 .help("Draw with finger")
-            if session.outline != nil {
-                Button("Redraw") { session.clear() }
+            if session.mode == .scribble && session.scribbles.count > 0 {
+                Button { session.undo() } label: { Image(systemName: "arrow.uturn.backward") }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .accessibilityLabel("Undo the last scribble")
+            }
+            if session.hasDrawing {
+                Button(session.mode == .scribble ? "Clear" : "Redraw") { session.clear() }
                     .buttonStyle(.bordered)
                     .controlSize(.large)
             }
@@ -150,8 +161,8 @@ struct MarkPanel: View {
             if p.pieces == 0 { return "Nothing to mark here" }
             return "\(p.streets) street\(p.streets == 1 ? "" : "s") · \(Format.miles(Double(p.meters)))"
         }
-        if session.outline != nil { return "Finding the streets inside…" }
-        return "Mark by outline"
+        if session.hasDrawing { return "Finding the streets…" }
+        return session.mode == .scribble ? "Scribble over streets" : "Draw round streets"
     }
 
     private var detail: String {
@@ -159,10 +170,14 @@ struct MarkPanel: View {
         if let p = session.preview {
             return p.pieces == 0
                 ? "Every street inside is already driven or marked. Draw somewhere else, or cancel."
-                : "Flashing streets will be marked done. Streets already driven or marked stay as they are."
+                : session.mode == .scribble
+                    ? "Flashing streets will be marked done. Keep scribbling to add more; two-finger tap undoes the last stroke."
+                    : "Flashing streets will be marked done. Streets already driven or marked stay as they are."
         }
-        if session.outline != nil { return " " }
-        return "Draw round the streets with the Pencil and lift to finish. Fingers move the map."
+        if session.hasDrawing { return " " }
+        return session.mode == .scribble
+            ? "Scribble along or back and forth over streets with the Pencil, as many strokes as you like. Fingers move the map."
+            : "Draw round the streets with the Pencil and lift to finish. Fingers move the map."
     }
 }
 

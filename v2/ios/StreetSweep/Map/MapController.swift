@@ -211,6 +211,14 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
         mol.lineWidth = NSExpression(forConstantValue: 2.5)
         mol.lineDashPattern = NSExpression(forConstantValue: [2, 1.5])
         style.addLayer(mol)
+        // Scribbles so far: wide and faint, so the flashing streets read through them.
+        let ms = MLNLineStyleLayer(identifier: "mark-scribble", source: source("mark-scribble"))
+        ms.lineColor = NSExpression(forConstantValue: UIColor(red: 1, green: 0.478, blue: 0, alpha: 1))
+        ms.lineOpacity = NSExpression(forConstantValue: 0.22)
+        ms.lineWidth = NSExpression(forConstantValue: 20)
+        ms.lineCap = NSExpression(forConstantValue: "round")
+        ms.lineJoin = NSExpression(forConstantValue: "round")
+        style.addLayer(ms)
         let mp = MLNLineStyleLayer(identifier: "mark-preview", source: source("mark-preview"))
         mp.lineColor = NSExpression(forConstantValue: UIColor(red: 1, green: 0.478, blue: 0, alpha: 1))
         mp.lineCap = NSExpression(forConstantValue: "round")
@@ -323,8 +331,11 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
     private var pulseStart: CFTimeInterval = 0
 
     /// The outline drawn to mark streets, and the streets it would mark (flashing), or nothing.
-    func setMarkPreview(outline: Ring?, lines: [[CLLocationCoordinate2D]]) {
+    func setMarkPreview(outline: Ring?, lines: [[CLLocationCoordinate2D]], scribbles: [[CLLocationCoordinate2D]] = []) {
         guard styleReady, let style = view?.style else { return }
+        (style.source(withIdentifier: "mark-scribble") as? MLNShapeSource)?.shape = Self.shape(scribbles.isEmpty ? [] : [
+            ["type": "Feature", "properties": [:], "geometry": ["type": "MultiLineString", "coordinates": scribbles.map { $0.map { [$0.longitude, $0.latitude] } }]],
+        ])
         (style.source(withIdentifier: "mark-outline") as? MLNShapeSource)?.shape = Self.shape(outline.map { r in
             [["type": "Feature", "properties": [:], "geometry": ["type": "Polygon", "coordinates": [(r + r.prefix(1)).map { [$0.longitude, $0.latitude] }]]]]
         } ?? [])
@@ -676,8 +687,17 @@ final class DrawingOverlay: UIView {
             if s.strokeStyle == .lasso { path.close() }
         }
         strokeLayer.path = path.cgPath
-        strokeLayer.strokeColor = (s?.strokeStyle == .eraser ? UIColor.systemRed.withAlphaComponent(0.5) : orange.withAlphaComponent(0.9)).cgColor
-        strokeLayer.lineWidth = s?.strokeStyle == .eraser ? 2 * DrawingSession.snapRadius : 3
+        switch s?.strokeStyle {
+        case .eraser?:
+            strokeLayer.strokeColor = UIColor.systemRed.withAlphaComponent(0.5).cgColor
+            strokeLayer.lineWidth = 2 * DrawingSession.snapRadius
+        case .scribble?:
+            strokeLayer.strokeColor = orange.withAlphaComponent(0.35).cgColor
+            strokeLayer.lineWidth = 20
+        default:
+            strokeLayer.strokeColor = orange.withAlphaComponent(0.9).cgColor
+            strokeLayer.lineWidth = 3
+        }
 
         if let band = s?.rubberBand {
             let p = UIBezierPath()

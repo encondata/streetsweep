@@ -3,9 +3,12 @@ import CoreLocation
 import Foundation
 import Observation
 
-/// Marking streets done by drawing round them: draw an outline with the Pencil, see the
-/// streets it would mark flashing (the server works out which: those whose middle is inside
-/// and that aren't driven or marked yet), then mark them, or redraw.
+/// Marking streets done by drawing with the Pencil, two ways:
+/// - Lasso: draw round them; the streets whose middle is inside count.
+/// - Scribble: scribble along or back and forth over them, in as many strokes as you like;
+///   a street counts once the scribbles cover at least half of it.
+/// The streets it would mark flash (the server works out which, never ones already driven
+/// or marked), then mark them, or redraw.
 @MainActor @Observable
 final class MarkSession: PencilTarget {
     struct Preview: Equatable {
@@ -23,11 +26,22 @@ final class MarkSession: PencilTarget {
         let segmentIds: [Int]
     }
 
+    enum Mode: String, CaseIterable, Identifiable {
+        case lasso, scribble
+        var id: String { rawValue }
+        var label: String { rawValue.capitalized }
+    }
+
     let teamId: String
     private let api: API
+    var mode: Mode = .scribble { didSet { if mode != oldValue { clear() } } }
+    /// Scribble strokes so far, and how far each side of them counts (metres, from the zoom
+    /// when they were drawn: about a fingertip's width on screen).
+    private(set) var scribbles: [[CLLocationCoordinate2D]] = []
+    private var scribbleWidth: Double = 12
 
     private(set) var stroke: [CLLocationCoordinate2D] = []
-    var strokeStyle: StrokeStyle { .lasso }
+    var strokeStyle: StrokeStyle { mode == .lasso ? .lasso : .scribble }
     var hover: (coord: CLLocationCoordinate2D, snapped: Bool)? { nil }
     var rubberBand: (from: CLLocationCoordinate2D, to: CLLocationCoordinate2D)? { nil }
     var onChange: (() -> Void)?
@@ -66,6 +80,18 @@ final class MarkSession: PencilTarget {
     func ended(_ p: CGPoint, _ map: MapFrame) {
         points.append(p)
         defer { points = []; stroke = []; onChange?() }
+        if mode == .scribble {
+            guard points.count >= 2 else { return }
+            let line = Geometry.simplify(points, tolerance: 1.5).map { map.projection.toCoord(points[$0]) }
+            guard line.count >= 2 else { return }
+            scribbles.append(line)
+            // 10 points on screen, in metres at this zoom.
+            let a = map.projection.toCoord(p), b = map.projection.toCoord(CGPoint(x: p.x + 10, y: p.y))
+            scribbleWidth = max(4, min(60, CLLocation(latitude: a.latitude, longitude: a.longitude)
+                .distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude))))
+            fetchPreview()
+            return
+        }
         var length: CGFloat = 0
         for i in 1..<max(1, points.count) { length += Geometry.distance(points[i], points[i - 1]) }
         guard points.count >= 6, length >= 40 else {
@@ -75,7 +101,7 @@ final class MarkSession: PencilTarget {
         let ring = Geometry.dedupe(Geometry.simplify(points, tolerance: 2).map { map.projection.toCoord(points[$0]) })
         guard ring.count >= 3 else { return }
         outline = ring
-        fetchPreview(ring)
+        fetchPreview()
     }
 
     func cancelled() {
@@ -86,14 +112,20 @@ final class MarkSession: PencilTarget {
 
     func hovering(_ p: CGPoint?, _ map: MapFrame) {}
 
-    /// Undo (two-finger tap): take the outline away to draw again.
-    func undo() { clear() }
+    /// Undo (two-finger tap): the last scribble, or the outline, to draw again.
+    func undo() {
+        guard mode == .scribble, !scribbles.isEmpty else { clear(); return }
+        scribbles.removeLast()
+        if scribbles.isEmpty { clear() } else { fetchPreview() }
+        onChange?()
+    }
     func redo() {}
     func swapTool() {}
 
     func clear() {
         request?.cancel()
         outline = nil
+        scribbles = []
         preview = nil
         error = nil
         loading = false
@@ -102,15 +134,29 @@ final class MarkSession: PencilTarget {
 
     // MARK: - The server
 
-    private func fetchPreview(_ ring: Ring) {
+    /// What's been drawn, as the server takes it: the outline, or the scribbles and their width.
+    private var body: WithinBody? {
+        if mode == .scribble, !scribbles.isEmpty {
+            return WithinBody(geometry: .lines(scribbles), kind: "complete", preview: true, alongM: scribbleWidth)
+        }
+        if mode == .lasso, let ring = outline {
+            return WithinBody(geometry: .outline(Outline(pieces: [ring])), kind: "complete", preview: true, alongM: nil)
+        }
+        return nil
+    }
+
+    /// Something's been drawn to mark.
+    var hasDrawing: Bool { outline != nil || !scribbles.isEmpty }
+
+    private func fetchPreview() {
+        guard let body else { return }
         request?.cancel()
         loading = true
         error = nil
         request = Task {
             defer { if !Task.isCancelled { loading = false } }
             do {
-                let r: WithinPreview = try await api.post("/api/teams/\(teamId)/marks/within",
-                                                          WithinBody(geometry: Outline(pieces: [ring]), kind: "complete", preview: true))
+                let r: WithinPreview = try await api.post("/api/teams/\(teamId)/marks/within", body)
                 guard !Task.isCancelled else { return }
                 let lines = (r.lines?.coordinates ?? []).map { $0.map { CLLocationCoordinate2D(latitude: $0[1], longitude: $0[0]) } }
                 preview = Preview(streets: r.streets, pieces: r.pieces, meters: r.meters, lines: lines)
@@ -125,12 +171,12 @@ final class MarkSession: PencilTarget {
     /// Mark the previewed streets done. The server works it out again from the outline, so
     /// what's marked is always what's true now.
     func confirm() async -> Marked? {
-        guard let ring = outline else { return nil }
+        guard var b = body else { return nil }
+        b.preview = nil
         loading = true
         defer { loading = false }
         do {
-            let r: WithinMarked = try await api.post("/api/teams/\(teamId)/marks/within",
-                                                     WithinBody(geometry: Outline(pieces: [ring]), kind: "complete", preview: nil))
+            let r: WithinMarked = try await api.post("/api/teams/\(teamId)/marks/within", b)
             clear()
             return Marked(streets: r.streets, meters: r.meters, segmentIds: r.segmentIds)
         } catch {
@@ -149,9 +195,25 @@ final class MarkSession: PencilTarget {
 }
 
 private struct WithinBody: Encodable {
-    let geometry: Outline
+    enum Shape { case outline(Outline), lines([[CLLocationCoordinate2D]]) }
+    let geometry: Shape
     let kind: String
-    let preview: Bool?
+    var preview: Bool?
+    let alongM: Double?
+
+    enum CodingKeys: String, CodingKey { case geometry, kind, preview, alongM = "along_m" }
+    private struct Lines: Encodable { let type = "MultiLineString"; let coordinates: [[[Double]]] }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch geometry {
+        case .outline(let o): try c.encode(o, forKey: .geometry)
+        case .lines(let ls): try c.encode(Lines(coordinates: ls.map { $0.map { [$0.longitude, $0.latitude] } }), forKey: .geometry)
+        }
+        try c.encode(kind, forKey: .kind)
+        try c.encodeIfPresent(preview, forKey: .preview)
+        try c.encodeIfPresent(alongM, forKey: .alongM)
+    }
 }
 
 private struct BulkBody: Encodable {

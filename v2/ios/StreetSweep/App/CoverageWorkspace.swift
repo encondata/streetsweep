@@ -35,13 +35,14 @@ final class CoverageWorkspace {
 
     // MARK: - Marking by outline
 
-    func startMarking() {
+    func startMarking(_ mode: MarkSession.Mode) {
         guard let api, let teamId else { return }
         lastMarked = nil
         let s = MarkSession(teamId: teamId, api: api)
+        s.mode = mode
         let render = { [weak self, weak s] in
             guard let self, let s else { return }
-            self.map.setMarkPreview(outline: s.outline, lines: s.preview?.lines ?? [])
+            self.map.setMarkPreview(outline: s.outline, lines: s.preview?.lines ?? [], scribbles: s.scribbles)
         }
         mark = s
         map.startInk(s)

@@ -32,6 +32,8 @@ enum StrokeStyle {
     case lasso
     /// A wide, faint red band.
     case eraser
+    /// A wide, faint orange band, open (not closed into a loop).
+    case scribble
 }
 
 extension DrawingSession: PencilTarget {

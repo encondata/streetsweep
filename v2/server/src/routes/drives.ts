@@ -536,18 +536,27 @@ export default async function driveRoutes(app: FastifyInstance) {
   // whose middle is inside, by the same rules as several streets at once (never what's
   // driven or already marked either way). With `preview`, nothing changes: it says what
   // would be marked and sends those pieces' lines, for the map to highlight first.
-  app.post<{ Params: { id: string }; Body: { geometry: unknown; kind: "complete" | "excluded"; preview?: boolean; note?: string | null } }>(
+  //
+  // Scribbled instead (`along_m`): `geometry` is the strokes (LineString/MultiLineString),
+  // widened by along_m metres each side, and a piece counts when that covers at least half
+  // its length: scribbling along or back and forth over a street picks it, crossing it doesn't.
+  app.post<{ Params: { id: string }; Body: { geometry: unknown; kind: "complete" | "excluded"; preview?: boolean; note?: string | null; along_m?: number } }>(
     "/api/teams/:id/marks/within",
     { schema: { body: { type: "object", required: ["geometry", "kind"], properties: {
         geometry: { type: "object" }, kind: { type: "string", enum: ["complete", "excluded"] },
-        preview: { type: "boolean" }, note: { type: ["string", "null"], maxLength: 500 } } } } },
+        preview: { type: "boolean" }, note: { type: ["string", "null"], maxLength: 500 },
+        along_m: { type: "number", minimum: 1, maximum: 200 } } } } },
     async (req) => {
       const me = requireUser(req);
       const team = await loadTeam(req.params.id);
       if (!canDrive(await roleIn(team.id, me.id)) && !me.is_site_admin) throw forbidden("Viewers can't mark streets.");
       const b = req.body;
+      // The ground picked: the outline as drawn, or the scribbles widened.
+      const SHAPE = b.along_m
+        ? `ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_Buffer(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326)::geography, ${Number(b.along_m)}, 'quad_segs=2')::geometry), 3))`
+        : `ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326)), 3))`;
       const outline = await query<{ ok: boolean; km2: number }>(
-        `WITH g AS (SELECT ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326)), 3)) AS g)
+        `WITH g AS (SELECT ${SHAPE} AS g)
          SELECT NOT ST_IsEmpty(g) AS ok, coalesce(ST_Area(g::geography) / 1e6, 0) AS km2 FROM g`,
         [JSON.stringify(b.geometry)],
       ).catch(() => { throw badRequest("That outline isn't a shape we can use. Try drawing it again."); });
@@ -556,9 +565,12 @@ export default async function driveRoutes(app: FastifyInstance) {
         throw badRequest(`That outline covers ${Math.round(outline.rows[0].km2).toLocaleString()} km². Mark at most ${MARK_WITHIN_MAX_KM2} km² at a time.`);
       }
       // The pieces to mark: middle inside, not driven, not marked either way.
-      const pick = `WITH g AS (SELECT ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326)), 3)) AS g)
+      const covers = b.along_m
+        ? `ST_Length(ST_Intersection(s.geom, g.g)::geography) >= 0.5 * s.length_m`
+        : `ST_Intersects(g.g, ST_LineInterpolatePoint(s.geom, 0.5))`;
+      const pick = `WITH g AS (SELECT ${SHAPE} AS g)
         SELECT s.id, s.length_m, s.geom, s.way_id FROM g, street_segments s
-         WHERE s.retired_at IS NULL AND s.geom && g.g AND ST_Intersects(g.g, ST_LineInterpolatePoint(s.geom, 0.5))
+         WHERE s.retired_at IS NULL AND s.geom && g.g AND ${covers}
            AND NOT EXISTS (SELECT 1 FROM segment_marks mk WHERE mk.team_id = $2 AND mk.segment_id = s.id)
            AND ($3 <> 'complete' OR NOT EXISTS (SELECT 1 FROM team_coverage tc WHERE tc.team_id = $2 AND tc.segment_id = s.id))`;
       // Streets, not pieces: one name is one street (an unnamed way counts on its own).
