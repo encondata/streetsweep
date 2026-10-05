@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The app's sections, as on the website. Areas is built; the rest arrive in later stages.
+/// The app's sections, as on the website.
 enum AppSection: String, CaseIterable, Identifiable {
     case home, map, areas, drives, places, fleet, teams, admin
     var id: String { rawValue }
@@ -44,18 +44,24 @@ struct MainView: View {
             MapScreen()
                 .opacity(section == .map ? 1 : 0)
                 .allowsHitTesting(section == .map)
-            if section != .areas && section != .map {
-                SoonView(section: section)
-                    .transition(.opacity)
+            switch section {
+            case .home: HomeView()
+            case .drives: DrivesView()
+            case .places: PlacesView()
+            case .fleet: FleetView()
+            case .teams: TeamsView()
+            case .admin: AdminView()
+            case .areas, .map: EmptyView()
             }
-            // Drawing or marking: the tools take the bottom of the screen instead.
-            if ws.session == nil && cw.mark == nil {
+            // Drawing, marking or adding a place: the tools take the bottom of the screen instead.
+            if ws.session == nil && cw.mark == nil && !cw.addingPlace {
                 NavBar(sections: sections, selection: $section) { showAccount = true }
                     .padding(.bottom, 14)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(.spring(duration: 0.3), value: ws.session == nil && cw.mark == nil)
+        .animation(.spring(duration: 0.3), value: ws.session == nil && cw.mark == nil && !cw.addingPlace)
+        .environment(\.goToSection, { section = $0 })
         .animation(.easeInOut(duration: 0.15), value: section)
         .environment(ws)
         .environment(cw)
@@ -106,7 +112,7 @@ struct NavBar: View {
             }
             Divider().frame(height: 30).padding(.horizontal, 4)
             Button(action: onAccount) {
-                Avatar(name: model.user?.displayName ?? "?")
+                PersonAvatar(id: model.user?.id ?? "", name: model.user?.displayName ?? "?", url: model.user?.avatarUrl, size: 32)
                     .frame(width: 58, height: 48)
             }
             .buttonStyle(.plain)
@@ -115,40 +121,6 @@ struct NavBar: View {
         .padding(6)
         .background(.regularMaterial, in: Capsule())
         .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
-    }
-}
-
-/// Initials in a circle, until the app shows photos.
-struct Avatar: View {
-    let name: String
-    var body: some View {
-        let initials = name.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined()
-        Text(initials.isEmpty ? "?" : initials.uppercased())
-            .font(.system(size: 13, weight: .bold))
-            .foregroundStyle(.white)
-            .frame(width: 32, height: 32)
-            .background(Color.brand, in: Circle())
-    }
-}
-
-/// A section the app doesn't have yet: say so, and offer the website's page.
-struct SoonView: View {
-    let section: AppSection
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        ContentUnavailableView {
-            Label(section.label, systemImage: section.symbol)
-        } description: {
-            Text("\(section.label) comes to the iPad app in a later stage. It's on the website now.")
-        } actions: {
-            if let server = model.server, let url = URL(string: section.webPath, relativeTo: server) {
-                Link("Open \(section.label) on the website", destination: url)
-                    .buttonStyle(.borderedProminent)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemGroupedBackground))
     }
 }
 

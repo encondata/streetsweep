@@ -74,8 +74,29 @@ to mark it.
 **i4 (as planned).** Driven and undriven streets in your personal colours, finished-area
 shading, and marks, matching the web's Map page.
 
-**Later.** The rest of the portal, one screen at a time: Home, Drives, Places, Teams,
-Fleet, Achievements and your page.
+**i5. The rest of the portal (built 2026-10-05).** Every section in the bottom bar now
+works in the app:
+- **Home**: figures for you or a team, the last twelve weeks, area progress, recent
+  drives, achievements (with their art; "See all"), and leaderboards for shared teams.
+- **Drives**: yours, or a team's for its admins, grouped by day with paging. A drive
+  opens to its track and matched streets on a map, its figures, the teams it counts
+  for, and (if you can edit it) its type, Match again and Delete.
+- **Places**: yours and those shared with you, with search. **Add place** (from the
+  Map tab or Places' +): a pin fixed in the middle of the map, a name, a note, which
+  teams to share with, and photos. A place opens to its map, photos (add, view, delete),
+  note, sharing and Delete. Places show as pins on the Map tab; tap one to open it.
+- **Fleet**: vehicles you can drive (check out, return, history), your signed-in phones
+  and tablets (sign one out), and your loggers. Adding vehicles and setting up loggers
+  stay on the website and the phone app.
+- **Teams**: your teams, requests to join, finding a team, joining with a code, and
+  starting one. A team opens to its members (admins change roles or remove people),
+  join requests (approve or decline), drive types that count, its join code (share the
+  link) and Leave.
+- **Admin** (site admins): users (search, make admin, disable, reset password) and all
+  teams. Drive types and deletion requests stay on the website.
+
+Still website-only: your page (/me: account, preferences, settings), creating vehicles,
+setting up loggers, drive-type management.
 
 ## Open questions
 

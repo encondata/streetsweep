@@ -38,6 +38,10 @@ struct API: Sendable {
         try await send("POST", path, body: body)
     }
 
+    func put<T: Decodable, B: Encodable>(_ path: String, _ body: B, as: T.Type = T.self) async throws -> T {
+        try await send("PUT", path, body: body)
+    }
+
     func patch<T: Decodable, B: Encodable>(_ path: String, _ body: B, as: T.Type = T.self) async throws -> T {
         try await send("PATCH", path, body: body)
     }
@@ -53,6 +57,25 @@ struct API: Sendable {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else { throw APIError(status: status, message: "The server answered \(status).", code: nil) }
         return data
+    }
+
+    /// Send a file as the body (a photo), answering JSON.
+    func upload<T: Decodable>(_ path: String, data: Data, contentType: String, method: String = "POST", as: T.Type = T.self) async throws -> T {
+        guard let url = URL(string: path, relativeTo: server) else {
+            throw APIError(status: 0, message: "That server address doesn't look right.", code: nil)
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        let (body, response) = try await Self.session.upload(for: req, from: data)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            let said = try? Self.decoder.decode(ServerError.self, from: body)
+            throw APIError(status: status, message: said?.error ?? "The server answered \(status).", code: said?.code)
+        }
+        return try Self.decoder.decode(T.self, from: body)
     }
 
     func delete(_ path: String) async throws {

@@ -38,6 +38,11 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
     var base: Basemap = .map { didSet { applyBase() } }
     /// Tapped an area on the map (not while drawing).
     var onAreaTap: ((String) -> Void)?
+    /// Tapped a place's pin (the coverage map shows them).
+    var onPlaceTap: ((String) -> Void)?
+
+    /// The middle of the map, where a place being added goes.
+    var centerCoordinate: CLLocationCoordinate2D? { view?.centerCoordinate }
     /// The map stopped moving: what's in view now.
     var onSettle: ((MapFrame) -> Void)?
     /// Room the sidebar takes on the left, so fitting an area doesn't hide it underneath.
@@ -109,7 +114,7 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
         MLNNetworkConfiguration.sharedManager.sessionConfiguration = c
     }
 
-    private static func writeStyle(server: URL) -> URL {
+    static func writeStyle(server: URL) -> URL {
         var root = server.absoluteString
         while root.hasSuffix("/") { root.removeLast() }
         func raster(_ layer: String, _ attribution: String?) -> [String: Any] {
@@ -144,6 +149,7 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
         applyBase()
         renderAreas()
         renderDrawing()
+        renderPlaces()
     }
 
     private func addLayers(_ style: MLNStyle) {
@@ -164,6 +170,14 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
         line.lineOpacity = NSExpression(mglJSONObject: ["case", ["get", "faded"], 0.45, 1])
         line.lineJoin = NSExpression(forConstantValue: "round")
         style.addLayer(line)
+
+        // Places: yours magenta, others' purple, as on the website.
+        let places = MLNCircleStyleLayer(identifier: "places", source: source("places"))
+        places.circleRadius = NSExpression(forConstantValue: 8)
+        places.circleColor = NSExpression(mglJSONObject: ["case", ["get", "mine"], "#c2185b", "#7c3aed"])
+        places.circleStrokeColor = NSExpression(forConstantValue: UIColor.white)
+        places.circleStrokeWidth = NSExpression(forConstantValue: 2.5)
+        style.addLayer(places)
 
         let pin = MLNCircleStyleLayer(identifier: "search-pin", source: source("search-pin"))
         pin.circleRadius = NSExpression(forConstantValue: 8)
@@ -416,9 +430,28 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
         src.shape = Self.shape(c.map { [["type": "Feature", "properties": [:], "geometry": ["type": "Point", "coordinates": [$0.longitude, $0.latitude]]]] } ?? [])
     }
 
+    private var placeList: [Place] = []
+
+    func setPlaces(_ list: [Place]) {
+        placeList = list
+        renderPlaces()
+    }
+
+    private func renderPlaces() {
+        guard styleReady, let src = view?.style?.source(withIdentifier: "places") as? MLNShapeSource else { return }
+        src.shape = Self.shape(placeList.map { p in
+            ["type": "Feature", "properties": ["id": p.id, "mine": p.mine], "geometry": ["type": "Point", "coordinates": [p.lon, p.lat]]]
+        })
+    }
+
     @objc private func tapped(_ r: UITapGestureRecognizer) {
         guard ink == nil, let view else { return }
         let p = r.location(in: view)
+        let near = CGRect(x: p.x - 14, y: p.y - 14, width: 28, height: 28)
+        if let id = view.visibleFeatures(in: near, styleLayerIdentifiers: ["places"]).first?.attribute(forKey: "id") as? String {
+            onPlaceTap?(id)
+            return
+        }
         let hits = view.visibleFeatures(at: p, styleLayerIdentifiers: ["areas-fill"])
         // Smallest first: tapping inside a neighbourhood that sits inside a city means the neighbourhood.
         let ids = hits.compactMap { $0.attribute(forKey: "id") as? String }

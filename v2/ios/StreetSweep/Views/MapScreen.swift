@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The Map tab: the team's streets in your colours (driven, still to do, left out), its
-/// areas with finished ones shaded, and "Mark by outline": draw round streets with the
-/// Pencil to mark them done.
+/// areas with finished ones shaded, your places, and two things to do with the Pencil:
+/// mark streets done (scribble over them or lasso them), and add a place.
 struct MapScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(CoverageWorkspace.self) private var cw
@@ -46,18 +46,25 @@ struct MapScreen: View {
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
             .padding(16)
         }
+        // Adding a place: the pin stays in the middle; the map moves under it.
+        .overlay {
+            if cw.addingPlace {
+                Image(systemName: "mappin")
+                    .font(.system(size: 40, weight: .bold))
+                    .foregroundStyle(Color(red: 0.761, green: 0.094, blue: 0.357))
+                    .shadow(color: .black.opacity(0.3), radius: 3, y: 2)
+                    .offset(y: -20)
+                    .allowsHitTesting(false)
+            }
+        }
         .overlay(alignment: .bottomTrailing) {
-            if cw.mark == nil && cw.canMark {
-                Button { cw.startMarking(markMode) } label: {
-                    Label("Mark streets", systemImage: markMode == .scribble ? "scribble" : "lasso")
-                        .font(.headline)
-                        .padding(.horizontal, 18)
-                        .frame(height: 50)
-                        .background(Color.brand, in: Capsule())
-                        .foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.2), radius: 8, y: 3)
+            if cw.mark == nil && !cw.addingPlace {
+                VStack(alignment: .trailing, spacing: 10) {
+                    pill("Add place", "mappin.and.ellipse", prominent: false) { cw.startAddingPlace() }
+                    if cw.canMark {
+                        pill("Mark streets", markMode == .scribble ? "scribble" : "lasso", prominent: true) { cw.startMarking(markMode) }
+                    }
                 }
-                .buttonStyle(.plain)
                 .padding(.trailing, 20)
                 .padding(.bottom, 92)
             }
@@ -67,13 +74,25 @@ struct MapScreen: View {
                 MarkPanel(session: s, fingerDraws: $fingerDraws, mode: $markMode)
                     .padding(.bottom, 20)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if cw.addingPlace {
+                AddPlaceCard()
+                    .padding(.bottom, 20)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             } else if let m = cw.lastMarked {
                 UndoToast(marked: m)
                     .padding(.bottom, 92)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .sheet(item: Binding(get: { cw.openPlace.map(PlaceID.init) }, set: { cw.openPlace = $0?.id })) { p in
+            NavigationStack {
+                PlaceDetailView(placeId: p.id) { Task { await cw.reloadPlaces() } }
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { cw.openPlace = nil } } }
+            }
+            .presentationSizing(.page)
+        }
         .animation(.spring(duration: 0.3), value: cw.mark == nil)
+        .animation(.spring(duration: 0.3), value: cw.addingPlace)
         .animation(.spring(duration: 0.3), value: cw.lastMarked)
         .onAppear {
             cw.map.base = base
@@ -86,6 +105,19 @@ struct MapScreen: View {
 
     private var colors: MapColors { model.user?.preferences?.mapColors ?? .standard }
 
+    private func pill(_ title: String, _ symbol: String, prominent: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.headline)
+                .padding(.horizontal, 18)
+                .frame(height: 50)
+                .foregroundStyle(prominent ? Color.white : Color.primary)
+                .background(prominent ? AnyShapeStyle(Color.brand) : AnyShapeStyle(.regularMaterial), in: Capsule())
+                .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+        }
+        .buttonStyle(.plain)
+    }
+
     private func legend(_ hex: String, _ label: String) -> some View {
         HStack(spacing: 5) {
             Capsule().fill(Color(hex: hex)).frame(width: 18, height: 5)
@@ -93,6 +125,8 @@ struct MapScreen: View {
         }
     }
 }
+
+private struct PlaceID: Identifiable { let id: String }
 
 /// While marking by outline: what to do, then what will be marked, and the buttons.
 struct MarkPanel: View {

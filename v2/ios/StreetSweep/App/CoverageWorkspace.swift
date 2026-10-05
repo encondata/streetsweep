@@ -12,6 +12,33 @@ final class CoverageWorkspace {
     private(set) var lastMarked: MarkSession.Marked?
     var busy = false
     var error: String?
+    /// Adding a place: a pin fixed in the middle of the map, and the card to fill in.
+    private(set) var addingPlace = false
+    /// A place to show (tapped on the map, or just added).
+    var openPlace: String?
+    private(set) var places: [Place] = []
+
+    func startAddingPlace() {
+        if mark != nil { cancelMarking() }
+        addingPlace = true
+    }
+
+    func stopAddingPlace() { addingPlace = false }
+
+    func placeAdded(_ p: Place) {
+        addingPlace = false
+        places.append(p)
+        map.setPlaces(places)
+        openPlace = p.id
+    }
+
+    func reloadPlaces() async {
+        guard let api else { return }
+        if let r = try? await api.get("/api/places", as: PlaceList.self) {
+            places = r.places
+            map.setPlaces(r.places)
+        }
+    }
 
     private weak var app: AppModel?
     private var api: API? { app?.api }
@@ -20,6 +47,7 @@ final class CoverageWorkspace {
     func attach(_ app: AppModel) {
         self.app = app
         map.setPreferences(app.user?.preferences)
+        map.onPlaceTap = { [weak self] id in self?.openPlace = id }
     }
 
     func reload() async {
@@ -28,6 +56,7 @@ final class CoverageWorkspace {
         map.setPreferences(app?.user?.preferences)
         await store.load(api, team: teamId)
         map.setAreas(store.areas, colors: store.colors, selected: nil)
+        await reloadPlaces()
     }
 
     /// Can this person mark streets for the team? (Viewers can't.)
