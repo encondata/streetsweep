@@ -18,13 +18,48 @@
     onmarked?: () => void;
   } = $props();
 
-  // ---- right-click a street: mark it done, or gated (left out, noted "Gated") ----
-  let menu = $state<{ x: number; y: number; street: Missing } | null>(null);
+  // ---- choosing streets: click one, Shift-click a range, Ctrl/⌘-click to add or take one away ----
+  let chosen = $state<Set<number>>(new Set());
+  let anchor = -1;
+  function choose(e: MouseEvent, i: number) {
+    const list = streets ?? [];
+    if (e.shiftKey && anchor >= 0) {
+      const [a, b] = anchor < i ? [anchor, i] : [i, anchor];
+      const next = e.metaKey || e.ctrlKey ? new Set(chosen) : new Set<number>();
+      for (let k = a; k <= b; k++) next.add(k);
+      chosen = next;
+    } else if (e.metaKey || e.ctrlKey) {
+      const next = new Set(chosen);
+      if (!next.delete(i)) next.add(i);
+      chosen = next;
+      anchor = i;
+    } else {
+      chosen = new Set([i]);
+      anchor = i;
+      ctl.flyTo(list[i].at);
+    }
+    // Shift-click would also select the page's text: not wanted here.
+    getSelection()?.removeAllRanges();
+  }
+  let picked = $derived([...chosen].sort((a, b) => a - b).map((i) => streets?.[i]).filter((s): s is Missing => !!s));
+  // The chosen streets pulse on the map, as when picking streets there.
+  $effect(() => {
+    const ids = picked.length > 1 ? picked.flatMap((s) => s.segment_ids) : [];
+    ctl.setSelectedStreets(ids);
+  });
+  onMount(() => () => ctl.setSelectedStreets([]));
+
+  // ---- right-click: mark the chosen streets done, or gated (left out, noted "Gated") ----
+  let menu = $state<{ x: number; y: number; streets: Missing[] } | null>(null);
   let marking = $state(false);
   let done = $state<string | null>(null);
-  function openMenu(e: MouseEvent, street: Missing) {
+  function openMenu(e: MouseEvent, i: number) {
     e.preventDefault();
-    menu = { x: e.clientX, y: e.clientY, street };
+    // On a Mac, Ctrl-click arrives as a right-click (with the main button): it means "add this one".
+    if (e.ctrlKey && e.button === 0) { choose(e, i); return; }
+    // Right-clicking one of the chosen streets acts on them all; any other, on just that one.
+    if (!chosen.has(i)) { chosen = new Set([i]); anchor = i; }
+    menu = { x: e.clientX, y: e.clientY, streets: picked };
   }
   async function mark(kind: "complete" | "excluded") {
     const m = menu;
@@ -34,9 +69,12 @@
     error = null;
     try {
       const r = await api<{ pieces: number; meters: number }>(`/api/teams/${teamId}/marks/bulk`, {
-        body: { segment_ids: m.street.segment_ids, kind, note: kind === "excluded" ? "Gated" : null },
+        body: { segment_ids: m.streets.flatMap((s) => s.segment_ids), kind, note: kind === "excluded" ? "Gated" : null },
       });
-      done = `${kind === "complete" ? "Marked done" : "Marked gated"}: ${label(m.street)}${r.pieces ? "" : " (it was already marked)"}.`;
+      const what = m.streets.length === 1 ? label(m.streets[0]) : `${m.streets.length} streets`;
+      done = `${kind === "complete" ? "Marked done" : "Marked gated"}: ${what}${r.pieces ? "" : " (already marked)"}.`;
+      chosen = new Set();
+      anchor = -1;
       onmarked?.();
       await load(false);
     } catch (e) {
@@ -57,6 +95,9 @@
       // Asked again after a street was marked, and nothing's left: the highlight has done its job.
       if (!fit && !r.streets.length) return onclose();
       streets = r.streets;
+      // The list changed (a street marked here or on the map): start choosing afresh.
+      chosen = new Set();
+      anchor = -1;
       truncated = r.truncated;
       ctl.setMissing(r.streets, { left, fit });
     } catch (e) {
@@ -89,7 +130,8 @@
         {:else if !streets.length}Nothing: every street is driven, marked done or left out.
         {:else}{streets.length} street{streets.length === 1 ? "" : "s"} · {feet(total)}{truncated ? " (the longest shown)" : ""}{/if}
       </span>
-      {#if streets?.length}<span class="muted small hint">{done ?? "Right-click a street to mark it done or gated."}</span>{/if}
+      {#if streets?.length}<span class="muted small hint">{picked.length > 1 ? `${picked.length} streets chosen · right-click to mark them`
+        : done ?? "Right-click a street to mark it done or gated. Shift-click for a range, Ctrl-click (⌘ on a Mac) to pick several."}</span>{/if}
     </div>
     <button class="sm ghost icon" onclick={onclose} aria-label="Stop highlighting" title="Stop highlighting">✕</button>
   </header>
@@ -97,8 +139,8 @@
     <ul>
       {#each streets as s, i (i)}
         <li>
-          <button class="row" class:menued={menu?.street === s} disabled={marking} onclick={() => ctl.flyTo(s.at)}
-            oncontextmenu={(e) => openMenu(e, s)}>
+          <button class="row" class:chosen={chosen.has(i)} disabled={marking} onclick={(e) => choose(e, i)}
+            oncontextmenu={(e) => openMenu(e, i)} aria-pressed={chosen.has(i)}>
             <span class="name">{label(s)}</span>
             <span class="muted small">{feet(s.meters)} left</span>
           </button>
@@ -111,8 +153,8 @@
 {#if menu}
   <!-- A small menu where the street was right-clicked; any other click or Escape closes it. -->
   <div class="ctx-backdrop" role="presentation" onclick={() => (menu = null)} oncontextmenu={(e) => { e.preventDefault(); menu = null; }}></div>
-  <div class="ctx" role="menu" aria-label="Mark {label(menu.street)}" style:left="{Math.min(menu.x, innerWidth - 230)}px" style:top="{Math.min(menu.y, innerHeight - 120)}px">
-    <p class="ctx-head">{label(menu.street)}</p>
+  <div class="ctx" role="menu" aria-label="Mark the chosen streets" style:left="{Math.min(menu.x, innerWidth - 230)}px" style:top="{Math.min(menu.y, innerHeight - 120)}px">
+    <p class="ctx-head">{menu.streets.length === 1 ? label(menu.streets[0]) : `${menu.streets.length} streets · ${feet(menu.streets.reduce((t, s) => t + s.meters, 0))}`}</p>
     <button role="menuitem" onclick={() => mark("complete")}>✓ Mark complete</button>
     <button role="menuitem" onclick={() => mark("excluded")}>⛔ Mark gated</button>
   </div>
@@ -122,7 +164,8 @@
 
 <style>
   .hint { display: block; margin-top: 2px; }
-  .row.menued { background: var(--surface-2); }
+  .row.chosen, .row.chosen:hover:not([disabled]) { background: #fff1e6; box-shadow: inset 3px 0 0 #ff7a00; }
+  .row { user-select: none; -webkit-user-select: none; }
   .ctx-backdrop { position: fixed; inset: 0; z-index: 40; }
   .ctx {
     position: fixed; z-index: 41; width: 220px; display: grid; padding: 6px;
