@@ -15,6 +15,8 @@ final class Workspace {
     private(set) var draft: DrawingSession.Draft? = DrawingSession.Draft.load()
     var busy = false
     var error: String?
+    /// What the map shows right now: the list keeps to the areas in it.
+    private(set) var view: GeoBounds?
 
     private weak var app: AppModel?
 
@@ -37,7 +39,10 @@ final class Workspace {
     }
 
     private func redrawAreas() {
-        map.setAreas(store.areas, colors: store.colors, selected: openArea?.id)
+        // An area opened from search that the team doesn't follow yet still shows its outline.
+        var shown = store.areas
+        if let a = openArea, store.area(a.id) == nil, a.geometry != nil { shown.append(a) }
+        map.setAreas(shown, colors: store.colors, selected: openArea?.id)
     }
 
     func open(_ id: String, fit: Bool = true) async {
@@ -69,16 +74,37 @@ final class Workspace {
 
     func follow(_ area: Area) async {
         guard let api, let teamId else { return }
-        await run { let _: Empty = try await api.post("/api/teams/\(teamId)/follows", ["area_id": area.id]) }
+        busy = true
+        defer { busy = false }
+        do {
+            let _: Empty = try await api.post("/api/teams/\(teamId)/follows", ["area_id": area.id])
+        } catch let e as APIError where e.status == 409 {
+            // Followed already (a tap that went through before): that's what was wanted.
+        } catch {
+            self.error = error.localizedDescription
+            return
+        }
+        // Show it as followed straight away; the full list (with progress) catches up.
+        store.insert(area)
+        redrawAreas()
         await reload()
-        await open(area.id, fit: false)
+        if openArea?.id == area.id { await open(area.id, fit: false) }
     }
 
     func unfollow(_ area: Area) async {
         guard let api, let teamId else { return }
-        await run { try await api.delete("/api/teams/\(teamId)/follows/\(area.id)") }
-        await reload()
+        busy = true
+        defer { busy = false }
+        do {
+            try await api.delete("/api/teams/\(teamId)/follows/\(area.id)")
+        } catch let e as APIError where e.status == 404 {
+            // Not followed any more already: that's what was wanted.
+        } catch {
+            self.error = error.localizedDescription
+            return
+        }
         close()
+        await reload()
     }
 
     func save(_ area: Area, name: String, level: AreaLevel, notes: String) async -> Bool {
@@ -215,6 +241,7 @@ final class Workspace {
     private var shoreTask: Task<Void, Never>?
 
     private func settled(_ frame: MapFrame) {
+        view = GeoBounds(south: frame.view.south, west: frame.view.west, north: frame.view.north, east: frame.view.east)
         guard session != nil else { return }
         loadShores(frame)
     }

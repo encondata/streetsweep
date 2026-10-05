@@ -9,6 +9,10 @@ struct AreaListView: View {
     @State private var boundaries: [Area] = []
     @State private var addresses: [Address]?
     @State private var lookingUp = false
+    /// Areas folded shut in the list (all open unless closed).
+    @State private var collapsed: Set<String> = []
+    /// Show every area, not just those in the map's view.
+    @State private var showAll = false
 
     var body: some View {
         @Bindable var model = model
@@ -77,12 +81,31 @@ struct AreaListView: View {
 
     private var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
+    /// State › county › city › neighbourhood › section, only what's in the map's view.
     @ViewBuilder private var areaSections: some View {
-        if !ws.store.drawn.isEmpty {
-            Section("Drawn") { ForEach(ws.store.drawn) { row($0) } }
-        }
-        if !ws.store.followed.isEmpty {
-            Section("Following") { ForEach(ws.store.followed) { row($0) } }
+        let t = ws.store.tree(in: showAll ? nil : ws.view)
+        if !t.roots.isEmpty {
+            Section {
+                TreeRows(nodes: t.roots, collapsed: $collapsed) { row($0) }
+            } header: {
+                Text(showAll ? "All areas" : "In view")
+            } footer: {
+                if showAll {
+                    Button("Show only areas in view") { showAll = false }.font(.footnote)
+                } else if t.hidden > 0 {
+                    HStack(spacing: 6) {
+                        Text("\(t.hidden) more out of view.")
+                        Button("Show all") { showAll = true }
+                    }
+                    .font(.footnote)
+                }
+            }
+        } else if !ws.store.areas.isEmpty {
+            Section {
+                Text("None of the team's \(ws.store.areas.count) areas are in view. Move the map, or show them all.")
+                    .foregroundStyle(.secondary)
+                Button("Show all areas") { showAll = true }
+            }
         }
         if ws.store.loading && ws.store.areas.isEmpty {
             Section { ProgressView().frame(maxWidth: .infinity) }
@@ -159,5 +182,27 @@ struct AreaListView: View {
         addresses = await ws.geocode(q)
         lookingUp = false
         if let first = addresses?.first, addresses?.count == 1 { ws.show(first) }
+    }
+}
+
+/// Areas nested inside the areas that hold them, each with a fold to close it.
+private struct TreeRows<Row: View>: View {
+    let nodes: [AreasStore.Node]
+    @Binding var collapsed: Set<String>
+    @ViewBuilder let row: (Area) -> Row
+
+    var body: some View {
+        ForEach(nodes) { node in
+            if node.children.isEmpty {
+                row(node.area)
+            } else {
+                DisclosureGroup(isExpanded: Binding(get: { !collapsed.contains(node.id) },
+                                                    set: { open in if open { collapsed.remove(node.id) } else { collapsed.insert(node.id) } })) {
+                    TreeRows(nodes: node.children, collapsed: $collapsed, row: row)
+                } label: {
+                    row(node.area)
+                }
+            }
+        }
     }
 }

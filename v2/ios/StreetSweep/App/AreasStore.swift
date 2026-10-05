@@ -11,6 +11,8 @@ final class AreasStore {
     private(set) var loading = false
     var error: String?
     private(set) var teamId: String?
+    /// What each area sits inside, among the team's own areas (worked out from the outlines).
+    private(set) var parentOf: [String: String] = [:]
 
     func load(_ api: API, team: String) async {
         if team != teamId { areas = []; colors = [:] }
@@ -23,6 +25,7 @@ final class AreasStore {
             areas = r.areas
             canEdit = r.canEdit
             colors = AreaColors.assign(r.areas)
+            parentOf = Self.nest(r.areas)
             error = nil
         } catch {
             self.error = error.localizedDescription
@@ -33,9 +36,76 @@ final class AreasStore {
 
     func color(_ id: String) -> Color { Color(hex: colors[id] ?? "#1e8a28") }
 
-    /// Drawn areas first, then followed boundaries.
-    var drawn: [Area] { areas.filter(\.isDrawn) }
-    var followed: [Area] { areas.filter { !$0.isDrawn } }
+    /// Add an area straight away (just followed, say) while the full list reloads.
+    func insert(_ a: Area) {
+        guard area(a.id) == nil else { return }
+        areas.append(a)
+        colors = AreaColors.assign(areas)
+        parentOf = Self.nest(areas)
+    }
+
+    /// State › county › city › neighbourhood › section, as far as the team has them. Each
+    /// area goes under the nearest bigger kind whose outline it sits inside, so a
+    /// neighbourhood nests under the county when the team doesn't follow the city.
+    static func nest(_ areas: [Area]) -> [String: String] {
+        var out: [String: String] = [:]
+        for child in areas {
+            guard let g = child.geometry else { continue }
+            let samples = g.samplePoints
+            guard !samples.isEmpty else { continue }
+            let parent = areas
+                .filter { $0.level.rank < child.level.rank && $0.geometry != nil && $0.id != child.id }
+                .filter { p in
+                    guard let b = p.bbox, b.count == 4, let s = samples.first,
+                          s.longitude >= b[0], s.longitude <= b[2], s.latitude >= b[1], s.latitude <= b[3] else { return false }
+                    return samples.filter { p.geometry!.contains($0) }.count * 2 > samples.count
+                }
+                .max { a, b in a.level.rank != b.level.rank ? a.level.rank < b.level.rank : (a.km2 ?? 0) > (b.km2 ?? 0) }
+            if let parent { out[child.id] = parent.id }
+        }
+        return out
+    }
+
+    struct Node: Identifiable {
+        let area: Area
+        var children: [Node]
+        var id: String { area.id }
+    }
+
+    /// The nested list, keeping only what's in `view` (and the areas holding it); and how
+    /// many areas that leaves out. With no view, everything.
+    func tree(in view: GeoBounds?) -> (roots: [Node], hidden: Int) {
+        var kids: [String: [Area]] = [:]
+        var roots: [Area] = []
+        for a in areas {
+            if let p = parentOf[a.id] { kids[p, default: []].append(a) } else { roots.append(a) }
+        }
+        var shown = 0
+        func build(_ a: Area) -> Node? {
+            let children = (kids[a.id] ?? []).sorted(by: Self.order).compactMap(build)
+            let here = view.map { v in a.bbox.map(v.intersects) ?? true } ?? true
+            guard here || !children.isEmpty else { return nil }
+            shown += 1
+            return Node(area: a, children: children)
+        }
+        let nodes = roots.sorted(by: Self.order).compactMap(build)
+        return (nodes, areas.count - shown)
+    }
+
+    private static func order(_ a: Area, _ b: Area) -> Bool {
+        a.level.rank != b.level.rank ? a.level.rank < b.level.rank : a.name.localizedStandardCompare(b.name) == .orderedAscending
+    }
+}
+
+/// A box on the map (what's in view), in degrees.
+struct GeoBounds: Equatable {
+    let south: Double, west: Double, north: Double, east: Double
+
+    /// Does an area's [west, south, east, north] box overlap this one?
+    func intersects(_ bbox: [Double]) -> Bool {
+        guard bbox.count == 4 else { return true }
+        return bbox[0] <= east && bbox[2] >= west && bbox[1] <= north && bbox[3] >= south
+    }
 }
 
 /// No area shares a colour with one it touches. The same greedy colouring as the web

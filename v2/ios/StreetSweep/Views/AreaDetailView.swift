@@ -65,7 +65,10 @@ struct AreaDetailView: View {
                     }
                 } else if ws.store.canEdit {
                     Button { Task { await ws.follow(area) } } label: {
-                        Label("Follow for \(model.team?.isPersonal == true ? "me" : model.team?.name ?? "the team")", systemImage: "star")
+                        HStack {
+                            Label("Follow for \(model.team?.isPersonal == true ? "me" : model.team?.name ?? "the team")", systemImage: "star")
+                            if ws.busy { Spacer(); ProgressView() }
+                        }
                     }
                 }
             }

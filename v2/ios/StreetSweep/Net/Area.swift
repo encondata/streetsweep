@@ -43,6 +43,40 @@ struct Outline: Codable, Sendable, Equatable {
         polygons.map { poly in poly.map { ring in (ring + ring.prefix(1)).map { [$0.longitude, $0.latitude] } } }
     }
 
+    /// Is the point inside (holes count as outside)? Even–odd over each polygon's rings.
+    func contains(_ p: CLLocationCoordinate2D) -> Bool {
+        polygons.contains { poly in
+            var inside = false
+            for ring in poly {
+                var j = ring.count - 1
+                for i in ring.indices {
+                    let a = ring[i], b = ring[j]
+                    if (a.latitude > p.latitude) != (b.latitude > p.latitude),
+                       p.longitude < (b.longitude - a.longitude) * (p.latitude - a.latitude) / (b.latitude - a.latitude) + a.longitude {
+                        inside.toggle()
+                    }
+                    j = i
+                }
+            }
+            return inside
+        }
+    }
+
+    /// Points well inside the biggest piece, for asking "is this inside that?": the middle
+    /// of its corners, and points part way from its corners towards that middle.
+    var samplePoints: [CLLocationCoordinate2D] {
+        guard let ring = pieces.max(by: { $0.count < $1.count }), !ring.isEmpty else { return [] }
+        let lat = ring.map(\.latitude).reduce(0, +) / Double(ring.count)
+        let lon = ring.map(\.longitude).reduce(0, +) / Double(ring.count)
+        let mid = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+        let step = max(1, ring.count / 7)
+        let pulled = stride(from: 0, to: ring.count, by: step).prefix(7).map { i in
+            CLLocationCoordinate2D(latitude: ring[i].latitude + (lat - ring[i].latitude) * 0.3,
+                                   longitude: ring[i].longitude + (lon - ring[i].longitude) * 0.3)
+        }
+        return [mid] + pulled
+    }
+
     var bounds: (sw: CLLocationCoordinate2D, ne: CLLocationCoordinate2D)? {
         let all = polygons.flatMap { $0.flatMap { $0 } }
         guard let first = all.first else { return nil }
@@ -83,6 +117,17 @@ enum AreaLevel: String, Codable, CaseIterable, Sendable {
         case .neighborhood: "Neighborhood"
         case .section: "Section"
         case .custom: "Custom area"
+        }
+    }
+
+    /// Biggest first: what nests inside what in the list. A custom area sits with neighbourhoods.
+    var rank: Int {
+        switch self {
+        case .state: 0
+        case .county: 1
+        case .city: 2
+        case .neighborhood, .custom: 3
+        case .section: 4
         }
     }
 
