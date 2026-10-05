@@ -1,329 +1,510 @@
-// Drawing and editing an area's outline: one polygon per piece. Ported from v1's web app.
-import { TerraDraw, TerraDrawPolygonMode, TerraDrawSelectMode, type GeoJSONStoreFeatures } from "terra-draw";
-import { TerraDrawMapLibreGLAdapter } from "terra-draw-maplibre-gl-adapter";
-import { Popup, type Map as MlMap, type MapMouseEvent } from "maplibre-gl";
+/// <reference types="geojson" />
+// Drawing and editing an area's outline, the way the iPad app does it: one polygon per
+// piece, and every tool in the palette along the bottom (nothing pops up on a click).
+//
+// - Corners: click each corner; a dashed line follows the mouse from the last one. Click
+//   the first corner (or double-click, or Enter) to close. Click two points on a shown
+//   area's edge (or a boundary line, with Snap on) and the outline follows it between them.
+// - Edit: every piece's corners and midpoints show. Drag a corner to move it, a midpoint to
+//   add one; click a piece to select it.
+// - Eraser: click a corner, or drag across corners, to delete them; click inside a piece to
+//   delete it. (Dragging erases rather than moving the map while the Eraser is chosen.)
+//
+// Corners snap to the areas shown, shorelines, and (with Snap) intersections, streets and
+// state, county and city lines. Every change can be undone and redone.
+import type { GeoJSONSource, Map as MlMap, MapMouseEvent, MapTouchEvent } from "maplibre-gl";
 
 /** A ring as GeoJSON has it: [lng, lat] pairs, first point not repeated at the end. */
 export type Ring = [number, number][];
+export type Tool = "corners" | "edit" | "eraser";
 
-/** More corners than this and a piece can be selected and deleted, not edited corner by corner. */
-const EDIT_LIMIT = 1500;
+type Pt = { x: number; y: number };
+type Line = { r: Ring; closed: boolean; ends?: boolean };
+/** Where a point snapped to, and how far along which line (segment + fraction). */
+type Hit = { p: [number, number]; d: number; line: number; pos: number; corner: boolean };
+type Piece = { id: string; ring: Ring };
+
 const SNAP_PX = 12;
-/** How close a click has to be to a corner to mean that corner. */
-const CORNER_PX = 12;
-const MAX_UNDO = 60;
-const EDITABLE = "polygon";
-const LARGE = "large";
+const HIT_PX = 10;
+const MAX_UNDO = 80;
+/** More corners than this in all and only the selected piece shows its handles. */
+const HANDLE_LIMIT = 1500;
+const ORANGE = "#e2721f", PURPLE = "#7c3aed";
+const SRC = { pieces: "od-pieces", progress: "od-progress", handles: "od-handles", hover: "od-hover" };
 
-/**
- * Corners drag, the dot between two adds one, and a new corner near another area's
- * outline lands exactly on it, so neighbouring areas share one line rather than two
- * that nearly meet. Clicking a corner offers to delete it (or its whole piece), and
- * every change can be undone.
- */
 export class OutlineDraw {
-  private draw: TerraDraw;
+  tool = $state<Tool>("edit");
   selected = $state<string | null>(null);
-  drawing = $state(false);
   pieces = $state(0);
   canUndo = $state(false);
   canRedo = $state(false);
   /** Snap: also onto streets (their ends, the intersections, first) and state, county and city lines. */
   snapping = $state(false);
-  private undoStack: Ring[][] = [];
-  private redoStack: Ring[][] = [];
+  /** A piece being drawn with the Corners tool (what the panel calls drawing). */
+  get drawing() { return this.tool === "corners"; }
+
+  private list: Piece[] = [];
+  private progress: Ring = [];
+  /** Where each corner of the piece being drawn snapped, for following an edge. */
+  private progressHits: (Hit | null)[] = [];
+  private hover: { p: [number, number]; snapped: boolean } | null = null;
+  private undoStack: Piece[][] = [];
+  private redoStack: Piece[][] = [];
+  private shores: Ring[] = [];
   private streets: Ring[] = [];
   private boundaries: Ring[] = [];
-  /** The outline as of the last finished change: what an undo goes back past. */
-  private committed: Ring[] = [];
-  private popup: Popup | null = null;
-  /** Shorelines in view (open lines, not rings), for corners to snap to. */
-  private shores: Ring[] = [];
-  private onMapClick = (e: MapMouseEvent) => this.cornerClick(e);
+  private drag: { piece: number; corner: number; moved: boolean; start: Pt } | null = null;
+  private erasing = false;
+  private erasedThisStroke = false;
+  private off: (() => void)[] = [];
 
   constructor(private map: MlMap, private neighbours: Ring[], private onChange: () => void = () => {}) {
-    const snapping = { toCoordinate: true, toLine: true, toCustom: (e: { lng: number; lat: number }) => this.snap(e) };
-    const style = { fillColor: "#e2721f" as const, fillOpacity: 0.12, outlineColor: "#e2721f" as const, outlineWidth: 2.5 };
-    this.draw = new TerraDraw({
-      adapter: new TerraDrawMapLibreGLAdapter({ map }),
-      modes: [
-        new TerraDrawPolygonMode({ modeName: EDITABLE, snapping, styles: style }),
-        new TerraDrawPolygonMode({ modeName: LARGE, styles: { ...style, fillOpacity: 0.08 } }),
-        new TerraDrawSelectMode({
-          flags: {
-            [EDITABLE]: { feature: { draggable: false, coordinates: { draggable: true, midpoints: true, deletable: true, snappable: snapping } } },
-            [LARGE]: { feature: { draggable: false } },
-          },
-          styles: { selectedPolygonColor: "#7c3aed", selectedPolygonOutlineColor: "#7c3aed", selectedPolygonFillOpacity: 0.12 },
-        }),
-      ],
-    });
-    this.draw.start();
-    this.draw.on("change", () => { this.count(); this.onChange(); });
-    this.draw.on("select", (id) => { this.selected = String(id); });
-    this.draw.on("deselect", () => { this.selected = null; });
-    this.draw.on("finish", (id, ctx) => {
-      this.commit();
-      if (ctx && (ctx as { action?: string }).action === "draw") {
-        // A piece finished: back to editing, with the new piece selected.
-        this.drawing = false;
-        this.draw.setMode("select");
-        this.draw.selectFeature(id);
-      }
-      this.count();
-      this.onChange();
-    });
-    this.draw.setMode("select");
-    map.on("click", this.onMapClick);
+    this.addLayers();
+    const on = <E>(type: string, fn: (e: E) => void) => {
+      map.on(type as "click", fn as unknown as (e: MapMouseEvent) => void);
+      this.off.push(() => map.off(type as "click", fn as unknown as (e: MapMouseEvent) => void));
+    };
+    on<MapMouseEvent>("mousedown", (e) => this.down(e));
+    on<MapTouchEvent>("touchstart", (e) => { if (e.points.length === 1) this.down(e); });
+    on<MapMouseEvent>("mousemove", (e) => this.move(e));
+    on<MapTouchEvent>("touchmove", (e) => this.move(e));
+    on<MapMouseEvent>("mouseup", (e) => this.up(e));
+    on<MapTouchEvent>("touchend", (e) => this.up(e));
+    on<MapMouseEvent>("click", (e) => this.click(e));
+    on<MapMouseEvent>("dblclick", (e) => { if (this.tool === "corners") { e.preventDefault(); this.closeProgress(); } });
+    on<MapMouseEvent>("mouseout", () => { this.hover = null; this.render(); });
+    on<unknown>("move", () => this.render());
+    map.doubleClickZoom.disable();
+    this.setCursor();
   }
+
+  // ---- the outline ----
 
   /** Put an existing outline's pieces on the map to edit. */
   load(rings: Ring[]) {
-    this.put(rings);
-    this.committed = this.rings(false);
+    this.list = rings.filter((r) => r.length >= 3).map((ring) => ({ id: crypto.randomUUID(), ring }));
+    this.selected = null;
+    this.changed(false);
   }
 
-  private put(rings: Ring[]) {
-    const features: GeoJSONStoreFeatures[] = rings.filter((r) => r.length >= 3).map((r) => ({
-      id: crypto.randomUUID(),
-      type: "Feature",
-      properties: { mode: r.length > EDIT_LIMIT ? LARGE : EDITABLE },
-      geometry: { type: "Polygon", coordinates: [[...r, r[0]]] },
-    }));
-    if (features.length) this.draw.addFeatures(features);
-    this.count();
+  /** Every piece's corners, for keeping a draft (with the piece being drawn, if it has three). */
+  rings(inProgress = true): Ring[] {
+    const out = this.list.map((p) => p.ring);
+    if (inProgress && this.progress.length >= 3) out.push(this.progress);
+    return out;
   }
 
-  /** Draw a new piece: click for each corner, then the first corner (or double click) to close. */
-  addPiece() {
-    this.drawing = true;
-    this.draw.setMode(EDITABLE);
+  /** The outline as GeoJSON, or null with nothing drawn. */
+  geometry(): GeoJSON.MultiPolygon | null {
+    const rings = this.list.map((p) => p.ring).filter((r) => r.length >= 3);
+    return rings.length ? { type: "MultiPolygon", coordinates: rings.map((r) => [[...r, r[0]]]) } : null;
   }
 
+  setTool(tool: Tool) {
+    if (tool === this.tool) return;
+    if (this.tool === "corners") this.closeProgress(false);
+    this.tool = tool;
+    if (tool !== "edit") this.selected = null;
+    this.setCursor();
+    this.render();
+  }
+  /** The panel's names for switching tools. */
+  addPiece() { this.setTool("corners"); }
   cancelPiece() {
-    this.drawing = false;
-    this.draw.setMode("select");
+    this.progress = [];
+    this.progressHits = [];
+    this.setTool("edit");
   }
 
   deleteSelected() {
-    if (this.selected) this.deletePiece(this.selected);
-  }
-
-  deletePiece(id: string) {
-    this.closePopup();
-    if (this.selected === id) this.draw.deselectFeature(id);
-    this.draw.removeFeatures([id]);
+    if (!this.selected) return;
+    this.checkpoint();
+    this.list = this.list.filter((p) => p.id !== this.selected);
     this.selected = null;
     this.changed();
   }
 
-  /** Take one corner out of a piece. A triangle has none to spare: delete the piece instead. */
-  deleteCorner(id: string, index: number) {
-    this.closePopup();
-    const f = this.draw.getSnapshot().find((x) => x.id === id);
-    if (!f || f.geometry.type !== "Polygon") return;
-    const ring = (f.geometry.coordinates as number[][][])[0].slice(0, -1);
-    if (ring.length <= 3) return this.deletePiece(id);
-    ring.splice(index, 1);
-    const reselect = this.selected === id;
-    if (reselect) this.draw.deselectFeature(id);
-    this.draw.updateFeatureGeometry(id, { type: "Polygon", coordinates: [[...ring, ring[0]]] });
-    if (reselect) this.draw.selectFeature(id);
+  /** Swap the whole outline for another (trimmed, tidied), as one undoable change. */
+  replaceAll(rings: Ring[]) {
+    this.checkpoint();
+    this.progress = [];
+    this.progressHits = [];
+    this.list = rings.filter((r) => r.length >= 3).map((ring) => ({ id: crypto.randomUUID(), ring }));
+    this.selected = null;
+    if (this.tool === "corners") this.setTool("edit");
     this.changed();
   }
 
-  setShores(lines: Ring[]) {
-    this.shores = lines;
+  undo() {
+    if (this.progress.length) {
+      this.progress.pop();
+      this.progressHits.pop();
+      this.render();
+      return;
+    }
+    const prev = this.undoStack.pop();
+    if (!prev) return;
+    this.redoStack.push(this.list);
+    this.list = prev;
+    if (this.selected && !this.list.some((p) => p.id === this.selected)) this.selected = null;
+    this.changed();
   }
+
+  redo() {
+    const next = this.redoStack.pop();
+    if (!next || this.progress.length) return;
+    this.undoStack.push(this.list);
+    this.list = next;
+    this.changed();
+  }
+
+  // ---- what corners snap to ----
 
   /** The existing areas corners snap onto (the panel decides which: same kind, when shown). */
-  setNeighbours(rings: Ring[]) {
-    this.neighbours = rings;
-  }
-
+  setNeighbours(rings: Ring[]) { this.neighbours = rings; }
+  setShores(lines: Ring[]) { this.shores = lines; }
   /** Streets and boundary lines in view, snapped to while Snap is on. */
   setSnapLines(streets: Ring[] | null, boundaries: Ring[] | null) {
     if (streets) this.streets = streets;
     if (boundaries) this.boundaries = boundaries;
   }
 
-  /** Swap the whole outline for another (trimmed to the shore, say), as one undoable change. */
-  replaceAll(rings: Ring[]) {
-    this.closePopup();
-    if (this.drawing) this.cancelPiece();
-    if (this.selected) this.draw.deselectFeature(this.selected);
-    this.selected = null;
-    const ids = this.draw.getSnapshot().filter((f) => f.geometry.type === "Polygon" && f.properties.mode !== undefined).map((f) => f.id!);
-    if (ids.length) this.draw.removeFeatures(ids);
-    this.put(rings);
-    this.changed();
+  stop() {
+    for (const f of this.off) f();
+    this.off = [];
+    try {
+      this.map.doubleClickZoom.enable();
+      this.map.dragPan.enable();
+      this.map.getCanvas().style.cursor = "";
+      for (const id of ["od-fill", "od-line", "od-progress", "od-handles", "od-hover"]) if (this.map.getLayer(id)) this.map.removeLayer(id);
+      for (const id of Object.values(SRC)) if (this.map.getSource(id)) this.map.removeSource(id);
+    } catch { /* the map may be gone already */ }
   }
 
-  /** Back to how the outline was before the last change. */
-  undo() {
-    const prev = this.undoStack.pop();
-    if (!prev) return;
-    this.closePopup();
-    if (this.drawing) this.cancelPiece();
-    const ids = this.draw.getSnapshot().filter((f) => f.geometry.type === "Polygon" && f.properties.mode !== undefined).map((f) => f.id!);
-    if (this.selected) this.draw.deselectFeature(this.selected);
-    this.selected = null;
-    if (ids.length) this.draw.removeFeatures(ids);
-    this.redoStack.push(this.committed);
-    this.put(prev);
-    this.committed = prev;
-    this.canUndo = this.undoStack.length > 0;
-    this.canRedo = true;
-    this.onChange();
+  // ---- input ----
+
+  private pt(e: MapMouseEvent | MapTouchEvent): Pt { return { x: e.point.x, y: e.point.y }; }
+  private ll(p: Pt): [number, number] { const c = this.map.unproject([p.x, p.y]); return [c.lng, c.lat]; }
+  private px(c: [number, number]): Pt { const p = this.map.project(c); return { x: p.x, y: p.y }; }
+
+  private down(e: MapMouseEvent | MapTouchEvent) {
+    if ("button" in e.originalEvent && (e.originalEvent as MouseEvent).button !== 0) return;
+    const p = this.pt(e);
+    if (this.tool === "edit") {
+      const hit = this.nearestCorner(p) ?? this.nearestMidpoint(p);
+      if (!hit) return;
+      e.preventDefault();
+      this.map.dragPan.disable();
+      if (hit.mid) {
+        this.checkpoint();
+        this.list[hit.piece].ring.splice(hit.corner, 0, this.ll(p));
+        this.drag = { piece: hit.piece, corner: hit.corner, moved: true, start: p };
+      } else {
+        this.drag = { piece: hit.piece, corner: hit.corner, moved: false, start: p };
+      }
+      this.selected = this.list[hit.piece].id;
+      this.render();
+    } else if (this.tool === "eraser") {
+      e.preventDefault();
+      this.map.dragPan.disable();
+      this.erasing = true;
+      this.erasedThisStroke = false;
+      this.erase(p);
+    }
   }
 
-  /** Forward again past an undo. */
-  redo() {
-    const next = this.redoStack.pop();
-    if (!next) return;
-    this.closePopup();
-    if (this.drawing) this.cancelPiece();
-    const ids = this.draw.getSnapshot().filter((f) => f.geometry.type === "Polygon" && f.properties.mode !== undefined).map((f) => f.id!);
-    if (this.selected) this.draw.deselectFeature(this.selected);
-    this.selected = null;
-    if (ids.length) this.draw.removeFeatures(ids);
-    this.undoStack.push(this.committed);
-    this.put(next);
-    this.committed = next;
-    this.canUndo = true;
-    this.canRedo = this.redoStack.length > 0;
-    this.onChange();
+  private move(e: MapMouseEvent | MapTouchEvent) {
+    const p = this.pt(e);
+    if (this.drag) {
+      const d = this.drag;
+      if (!d.moved) {
+        if (Math.hypot(p.x - d.start.x, p.y - d.start.y) < 3) return;
+        this.checkpoint();
+        d.moved = true;
+      }
+      const piece = this.list[d.piece];
+      piece.ring[d.corner] = this.snap(p, piece.id)?.p ?? this.ll(p);
+      this.render();
+      return;
+    }
+    if (this.erasing) { this.erase(p); return; }
+    if (this.tool === "corners") {
+      const h = this.snap(p, null);
+      this.hover = { p: h?.p ?? this.ll(p), snapped: !!h };
+      this.render();
+    } else if (this.tool === "edit") {
+      this.map.getCanvas().style.cursor = this.nearestCorner(p) || this.nearestMidpoint(p) ? "move" : "";
+    }
   }
 
-  /**
-   * Every piece's corners, for keeping a draft. With `inProgress`, the corners clicked so
-   * far on a piece still being drawn come too (if there are three yet), so a laptop
-   * dying mid-piece loses at most the last couple of clicks.
-   */
-  rings(inProgress = true): Ring[] {
-    const out: Ring[] = [];
-    for (const f of this.draw.getSnapshot()) {
-      if (f.geometry.type !== "Polygon" || (f.properties.mode !== EDITABLE && f.properties.mode !== LARGE)) continue;
-      const pts = (f.geometry.coordinates as number[][][])[0] as [number, number][];
-      if (f.properties.currentlyDrawing) {
-        if (!inProgress) continue;
-        // Being drawn: the clicked corners, then the cursor, then the first corner again.
-        const clicked = pts.slice(0, -2);
-        if (clicked.length >= 3) out.push(clicked);
-      } else if (pts.length >= 4) {
-        out.push(pts.slice(0, -1));
+  private up(_e: MapMouseEvent | MapTouchEvent) {
+    if (this.drag) {
+      const moved = this.drag.moved;
+      this.drag = null;
+      this.map.dragPan.enable();
+      this.suppressClick = true;
+      if (moved) this.changed();
+      return;
+    }
+    if (this.erasing) {
+      this.erasing = false;
+      this.map.dragPan.enable();
+      if (this.erasedThisStroke) this.suppressClick = true;
+      this.changed(this.erasedThisStroke);
+    }
+  }
+
+  private suppressClick = false;
+
+  private click(e: MapMouseEvent) {
+    if (this.suppressClick) { this.suppressClick = false; return; }
+    const p = this.pt(e);
+    if (this.tool === "corners") this.addCorner(p);
+    else if (this.tool === "edit") {
+      const i = this.pieceAt(p);
+      this.selected = i === null ? null : this.list[i].id;
+      this.render();
+    } else if (this.tool === "eraser") {
+      const i = this.pieceAt(p);
+      if (i !== null) {
+        this.checkpoint();
+        this.list.splice(i, 1);
+        this.selected = null;
+        this.changed();
       }
     }
-    return out;
   }
 
-  /** A change made: remember what it replaced, and tell the panel (which keeps a draft). */
-  private changed() {
-    this.commit();
-    this.count();
-    this.onChange();
-  }
+  // ---- the tools' work ----
 
-  private commit() {
-    const now = this.rings(false);
-    if (JSON.stringify(now) === JSON.stringify(this.committed)) return;
-    this.undoStack.push(this.committed);
-    if (this.undoStack.length > MAX_UNDO) this.undoStack.shift();
-    this.committed = now;
-    this.canUndo = true;
-    this.redoStack = [];
-    this.canRedo = false;
-  }
-
-  /** A click on a corner (not a drag): offer to delete it, or the whole piece. */
-  private cornerClick(e: MapMouseEvent) {
-    if (this.drawing) return;
-    let hit: { id: string; index: number; corners: number; at: [number, number]; d: number } | null = null;
-    for (const f of this.draw.getSnapshot()) {
-      if (f.geometry.type !== "Polygon" || f.properties.mode !== EDITABLE) continue;
-      const ring = (f.geometry.coordinates as number[][][])[0].slice(0, -1) as [number, number][];
-      ring.forEach((c, index) => {
-        const p = this.map.project(c);
-        const d = Math.hypot(p.x - e.point.x, p.y - e.point.y);
-        if (d <= CORNER_PX && (!hit || d < hit.d)) hit = { id: String(f.id), index, corners: ring.length, at: c, d };
-      });
+  private addCorner(p: Pt) {
+    if (this.progress.length >= 3) {
+      const first = this.px(this.progress[0]);
+      if (Math.hypot(p.x - first.x, p.y - first.y) <= HIT_PX + 4) { this.closeProgress(); return; }
     }
-    this.closePopup();
-    if (!hit) return;
-    const h = hit as { id: string; index: number; corners: number; at: [number, number] };
-    const el = document.createElement("div");
-    el.className = "corner-menu";
-    const corner = document.createElement("button");
-    corner.className = "sm";
-    corner.textContent = h.corners > 3 ? "Delete this corner" : "Delete this corner (and the triangle)";
-    corner.onclick = () => this.deleteCorner(h.id, h.index);
-    const piece = document.createElement("button");
-    piece.className = "sm ghost danger";
-    piece.textContent = "Delete this piece";
-    piece.onclick = () => this.deletePiece(h.id);
-    el.append(corner, piece);
-    this.popup = new Popup({ closeButton: true, offset: 10, maxWidth: "240px" }).setLngLat(h.at).setDOMContent(el).addTo(this.map);
+    const hit = this.snap(p, null);
+    const c = hit?.p ?? this.ll(p);
+    const last = this.progress[this.progress.length - 1];
+    if (last && last[0] === c[0] && last[1] === c[1]) return;
+    // On the same line as the last corner: follow it between them.
+    const prev = this.progressHits[this.progressHits.length - 1];
+    if (prev && hit && prev.line === hit.line && hit.line < this.followable()) {
+      for (const q of this.between(this.lines(null)[hit.line], prev.pos, hit.pos)) { this.progress.push(q); this.progressHits.push(null); }
+    }
+    this.progress.push(c);
+    this.progressHits.push(hit);
+    this.render();
   }
 
-  private closePopup() {
-    this.popup?.remove();
-    this.popup = null;
+  /** Close the piece being drawn (three corners at least) and go on to editing it. */
+  closeProgress(toEdit = true) {
+    if (this.progress.length >= 3) {
+      // The last corner and the first on the same line: follow it to close too.
+      const a = this.progressHits[this.progressHits.length - 1], b = this.progressHits[0];
+      let ring = [...this.progress];
+      if (a && b && a.line === b.line && a.line < this.followable()) ring = [...ring, ...this.between(this.lines(null)[a.line], a.pos, b.pos)];
+      this.checkpoint();
+      const piece = { id: crypto.randomUUID(), ring };
+      this.list = [...this.list, piece];
+      this.progress = [];
+      this.progressHits = [];
+      this.changed();
+      if (toEdit) {
+        this.setTool("edit");
+        this.selected = piece.id;
+        this.render();
+      }
+    } else {
+      this.progress = [];
+      this.progressHits = [];
+      this.render();
+    }
   }
 
-  /** The outline as GeoJSON, or null with nothing drawn. */
-  geometry(): GeoJSON.MultiPolygon | null {
-    const polys = this.draw.getSnapshot()
-      .filter((f) => f.geometry.type === "Polygon" && (f.properties.mode === EDITABLE || f.properties.mode === LARGE))
-      .map((f) => (f.geometry.coordinates as number[][][]).slice(0, 1))
-      .filter((p) => p[0].length >= 4);
-    return polys.length ? { type: "MultiPolygon", coordinates: polys } : null;
+  private erase(p: Pt) {
+    let any = false;
+    const next: Piece[] = [];
+    for (const piece of this.list) {
+      const kept = piece.ring.filter((c) => { const q = this.px(c); return Math.hypot(q.x - p.x, q.y - p.y) > HIT_PX + 4; });
+      if (kept.length !== piece.ring.length) any = true;
+      if (kept.length >= 3) next.push({ id: piece.id, ring: kept });
+    }
+    if (!any) return;
+    if (!this.erasedThisStroke) { this.checkpoint(); this.erasedThisStroke = true; }
+    this.list = next;
+    if (this.selected && !next.some((x) => x.id === this.selected)) this.selected = null;
+    this.render();
   }
 
-  stop() {
-    this.closePopup();
-    this.map.off("click", this.onMapClick);
-    try { this.draw.stop(); } catch { /* the map may be gone already */ }
+  private nearestCorner(p: Pt): { piece: number; corner: number; mid: false } | null {
+    let best: { piece: number; corner: number; d: number } | null = null;
+    this.list.forEach((piece, pi) => {
+      if (!this.showsHandles(piece)) return;
+      piece.ring.forEach((c, ci) => {
+        const q = this.px(c), d = Math.hypot(q.x - p.x, q.y - p.y);
+        if (d <= HIT_PX && (!best || d < best.d)) best = { piece: pi, corner: ci, d };
+      });
+    });
+    const b = best as { piece: number; corner: number } | null;
+    return b ? { piece: b.piece, corner: b.corner, mid: false } : null;
   }
 
-  private count() {
-    this.pieces = this.draw.getSnapshot().filter((f) => f.geometry.type === "Polygon" && f.properties.mode !== undefined).length;
+  /** The dot between two corners: dragging it adds a corner there (at `corner`). */
+  private nearestMidpoint(p: Pt): { piece: number; corner: number; mid: true } | null {
+    let best: { piece: number; corner: number; d: number } | null = null;
+    this.list.forEach((piece, pi) => {
+      if (!this.showsHandles(piece)) return;
+      piece.ring.forEach((c, i) => {
+        const a = this.px(c), b = this.px(piece.ring[(i + 1) % piece.ring.length]);
+        const d = Math.hypot((a.x + b.x) / 2 - p.x, (a.y + b.y) / 2 - p.y);
+        if (d <= HIT_PX - 2 && (!best || d < best.d)) best = { piece: pi, corner: i + 1, d };
+      });
+    });
+    const b = best as { piece: number; corner: number } | null;
+    return b ? { piece: b.piece, corner: b.corner, mid: true } : null;
   }
 
-  /** The nearest point on another area's outline or a shoreline, if one is within a few pixels. */
-  private snap(e: { lng: number; lat: number }): [number, number] | undefined {
-    const at = this.map.project([e.lng, e.lat]);
-    const view = this.map.getBounds();
-    let best: { d: number; p: [number, number] } | null = null;
-    const lines: { r: Ring; closed: boolean; ends?: boolean }[] = [
-      ...this.neighbours.map((r) => ({ r, closed: true })), ...this.shores.map((r) => ({ r, closed: false })),
-      ...(this.snapping ? [...this.boundaries.map((r) => ({ r, closed: false })), ...this.streets.map((r) => ({ r, closed: false, ends: true }))] : []),
+  private pieceAt(p: Pt): number | null {
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const r = this.list[i].ring.map((c) => this.px(c));
+      let inside = false;
+      for (let a = 0, b = r.length - 1; a < r.length; b = a++) {
+        if ((r[a].y > p.y) !== (r[b].y > p.y) && p.x < ((r[b].x - r[a].x) * (p.y - r[a].y)) / (r[b].y - r[a].y) + r[a].x) inside = !inside;
+      }
+      if (inside) return i;
+    }
+    return null;
+  }
+
+  private showsHandles(piece: Piece): boolean {
+    const total = this.list.reduce((t, x) => t + x.ring.length, 0);
+    return total <= HANDLE_LIMIT || piece.id === this.selected;
+  }
+
+  // ---- snapping and following ----
+
+  /** The lines snapped to: those that can be followed come first (areas shown, boundaries). */
+  private lines(exclude: string | null): Line[] {
+    return [
+      ...this.neighbours.map((r) => ({ r, closed: true })),
+      ...(this.snapping ? this.boundaries.map((r) => ({ r, closed: false })) : []),
+      ...this.shores.map((r) => ({ r, closed: false })),
+      ...this.list.filter((p) => p.id !== exclude).map((p) => ({ r: p.ring, closed: true })),
+      ...(this.snapping ? this.streets.map((r) => ({ r, closed: false, ends: true })) : []),
     ];
-    for (const { r: ring, closed, ends } of lines) {
-      let w = Infinity, s = Infinity, east = -Infinity, n = -Infinity;
-      for (const [x, y] of ring) { if (x < w) w = x; if (x > east) east = x; if (y < s) s = y; if (y > n) n = y; }
-      if (n < view.getSouth() || s > view.getNorth() || east < view.getWest() || w > view.getEast()) continue;
-      for (let i = 0; i < (closed ? ring.length : ring.length - 1); i++) {
-        const a = this.map.project(ring[i]);
-        const z = ring[(i + 1) % ring.length];
-        const c = this.map.project(z);
-        const dx = c.x - a.x, dy = c.y - a.y, span = dx * dx + dy * dy;
-        const t = span ? Math.max(0, Math.min(1, ((at.x - a.x) * dx + (at.y - a.y) * dy) / span)) : 0;
-        // Near a corner, the corner itself: that is what someone aiming at one means.
-        // A street's corners that count are its two ends (the intersections), not every bend.
-        const nearA = Math.hypot(at.x - a.x, at.y - a.y) <= SNAP_PX && (!ends || i === 0);
-        const z2 = ring[i + 1];
-        if (ends && !closed && i === ring.length - 2 && z2) {
-          const e = this.map.project(z2), toE = Math.hypot(at.x - e.x, at.y - e.y);
-          if (toE <= SNAP_PX && (!best || toE < best.d)) best = { d: toE, p: [z2[0], z2[1]] };
+  }
+  /** How many of `lines()` an edge is followed along. */
+  private followable() { return this.neighbours.length + (this.snapping ? this.boundaries.length : 0); }
+
+  /** The nearest corner within reach (a street's are its two ends); failing that, the nearest point on a line. */
+  private snap(at: Pt, exclude: string | null): Hit | null {
+    const view = this.map.getBounds();
+    let corner: Hit | null = null, best: Hit | null = null;
+    this.lines(exclude).forEach(({ r, closed, ends }, li) => {
+      let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
+      for (const [x, y] of r) { if (x < w) w = x; if (x > e) e = x; if (y < s) s = y; if (y > n) n = y; }
+      if (n < view.getSouth() || s > view.getNorth() || e < view.getWest() || w > view.getEast()) return;
+      const pts = r.map((c) => this.px(c));
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i];
+        const toA = Math.hypot(at.x - a.x, at.y - a.y);
+        if ((!ends || i === 0 || i === pts.length - 1) && toA <= SNAP_PX && (!corner || toA < corner.d)) {
+          corner = { p: [r[i][0], r[i][1]], d: toA, line: li, pos: i, corner: true };
         }
+        if (i === pts.length - 1 && !closed) break;
+        const j = (i + 1) % pts.length, b = pts[j];
+        const dx = b.x - a.x, dy = b.y - a.y, span = dx * dx + dy * dy;
+        const t = span ? Math.max(0, Math.min(1, ((at.x - a.x) * dx + (at.y - a.y) * dy) / span)) : 0;
         const d = Math.hypot(at.x - (a.x + dx * t), at.y - (a.y + dy * t));
         if (d > SNAP_PX || (best && d >= best.d)) continue;
-        const p: [number, number] = nearA ? [ring[i][0], ring[i][1]]
-          : [ring[i][0] + (z[0] - ring[i][0]) * t, ring[i][1] + (z[1] - ring[i][1]) * t];
-        best = { d, p };
+        best = { p: [r[i][0] + (r[j][0] - r[i][0]) * t, r[i][1] + (r[j][1] - r[i][1]) * t], d, line: li, pos: i + t, corner: false };
+      }
+    });
+    return corner ?? best;
+  }
+
+  /** The corners of a line between two spots on it, whichever way round is shorter. */
+  private between(line: Line, a: number, b: number): Ring {
+    const r = line.r, n = r.length;
+    const ways: Ring[] = [];
+    const hi = b >= a ? b : line.closed ? b + n : null;
+    if (hi !== null) { const w: Ring = []; for (let k = Math.floor(a) + 1; k < hi; k++) w.push(r[k % n]); ways.push(w); }
+    const lo = b <= a ? b : line.closed ? b - n : null;
+    if (lo !== null) { const w: Ring = []; for (let k = Math.ceil(a) - 1; k > lo; k--) w.push(r[((k % n) + n) % n]); ways.push(w); }
+    const len = (w: Ring) => w.reduce((t, p, i) => (i ? t + Math.hypot(p[0] - w[i - 1][0], p[1] - w[i - 1][1]) : 0), 0);
+    return ways.sort((x, y) => len(x) - len(y))[0] ?? [];
+  }
+
+  // ---- undo, change, draw ----
+
+  private checkpoint() {
+    this.undoStack.push(this.list.map((p) => ({ id: p.id, ring: [...p.ring] })));
+    if (this.undoStack.length > MAX_UNDO) this.undoStack.shift();
+    this.redoStack = [];
+  }
+
+  /** Something changed: redraw, count, and tell the panel (which keeps a draft). */
+  private changed(notify = true) {
+    this.list = [...this.list];
+    this.pieces = this.list.length;
+    this.canUndo = this.undoStack.length > 0;
+    this.canRedo = this.redoStack.length > 0;
+    this.render();
+    if (notify) this.onChange();
+  }
+
+  private setCursor() {
+    this.map.getCanvas().style.cursor = this.tool === "corners" ? "crosshair" : this.tool === "eraser" ? "cell" : "";
+  }
+
+  private addLayers() {
+    const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+    for (const id of Object.values(SRC)) if (!this.map.getSource(id)) this.map.addSource(id, { type: "geojson", data: empty });
+    const color = ["case", ["get", "selected"], PURPLE, ORANGE] as unknown as string;
+    this.map.addLayer({ id: "od-fill", type: "fill", source: SRC.pieces, paint: { "fill-color": color, "fill-opacity": 0.13 } });
+    this.map.addLayer({ id: "od-line", type: "line", source: SRC.pieces, layout: { "line-join": "round" }, paint: { "line-color": color, "line-width": 2.5 } });
+    this.map.addLayer({ id: "od-progress", type: "line", source: SRC.progress, layout: { "line-join": "round", "line-cap": "round" },
+      paint: { "line-color": ORANGE, "line-width": 2.5, "line-dasharray": [2, 1.5] } });
+    this.map.addLayer({
+      id: "od-handles", type: "circle", source: SRC.handles,
+      paint: {
+        "circle-radius": ["match", ["get", "kind"], "mid", 4, "first", 7, 5.5] as unknown as number,
+        "circle-color": ["match", ["get", "kind"], "mid", "#ffffff", color] as unknown as string,
+        "circle-stroke-color": ["match", ["get", "kind"], "mid", color, "#ffffff"] as unknown as string,
+        "circle-stroke-width": 2,
+      },
+    });
+    this.map.addLayer({
+      id: "od-hover", type: "circle", source: SRC.hover,
+      paint: { "circle-radius": 6, "circle-color": ["case", ["get", "snapped"], PURPLE, ORANGE] as unknown as string, "circle-opacity": 0.35,
+        "circle-stroke-width": 2, "circle-stroke-color": ["case", ["get", "snapped"], PURPLE, ORANGE] as unknown as string },
+    });
+  }
+
+  private render() {
+    const set = (id: string, features: GeoJSON.Feature[]) => (this.map.getSource(id) as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features });
+    const pt = (c: [number, number], props: Record<string, unknown>): GeoJSON.Feature => ({ type: "Feature", properties: props, geometry: { type: "Point", coordinates: c } });
+    set(SRC.pieces, this.list.map((p) => ({ type: "Feature", properties: { selected: p.id === this.selected },
+      geometry: { type: "Polygon", coordinates: [[...p.ring, p.ring[0]]] } })));
+    const handles: GeoJSON.Feature[] = [];
+    if (this.tool !== "corners") {
+      for (const p of this.list) {
+        if (!this.showsHandles(p)) continue;
+        const sel = p.id === this.selected;
+        p.ring.forEach((c, i) => {
+          handles.push(pt(c, { kind: "corner", selected: sel }));
+          if (this.tool === "edit") {
+            const d = p.ring[(i + 1) % p.ring.length];
+            handles.push(pt([(c[0] + d[0]) / 2, (c[1] + d[1]) / 2], { kind: "mid", selected: sel }));
+          }
+        });
       }
     }
-    return best?.p;
+    this.progress.forEach((c, i) => handles.push(pt(c, { kind: i === 0 && this.progress.length >= 3 ? "first" : "corner", selected: false })));
+    set(SRC.handles, handles);
+    const line = this.tool === "corners" && this.hover && this.progress.length ? [...this.progress, this.hover.p] : this.progress;
+    set(SRC.progress, line.length >= 2 ? [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: line } }] : []);
+    set(SRC.hover, this.tool === "corners" && this.hover ? [pt(this.hover.p, { snapped: this.hover.snapped })] : []);
   }
 }
 

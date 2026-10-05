@@ -447,6 +447,7 @@
     else if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); draw.redo(); }
     else if ((e.key === "Delete" || e.key === "Backspace") && draw.selected) { e.preventDefault(); draw.deleteSelected(); }
     else if (e.key === "Escape" && draw.drawing) draw.cancelPiece();
+    else if (e.key === "Enter" && draw.drawing) { e.preventDefault(); draw.closeProgress(); }
   }
 
   async function trimWater() {
@@ -784,8 +785,10 @@
     <header><h2>{redrawing ? `Redraw ${redrawing.name}` : "Draw an area"}</h2></header>
     {#if error}<p class="notice error">{error}</p>{/if}
     <p class="muted small">
-      {#if draw.drawing}Click each corner on the map. Click the first corner again (or double-click) to close the shape.
-      {:else}Drag a corner to move it; drag the dot between two corners to add one. Click a corner to delete it. An area can have several pieces.{/if}
+      {#if draw.tool === "corners"}Click each corner on the map. Click the first corner again, double-click, or press Enter to close the shape.
+        {#if showOthers}Click a point on a neighbouring area's edge, then another further along it: the outline follows that edge between them.{/if}
+      {:else if draw.tool === "edit"}Drag a corner to move it; drag the dot between two corners to add one. Click a piece to select it (then Delete piece). An area can have several pieces.
+      {:else}Click a corner, or drag across corners, to delete them. Click inside a piece to delete the whole piece. Switch tools to move the map by dragging.{/if}
     </p>
     {#if snap}
       <p class="muted small">{streetsTooFar
@@ -815,13 +818,17 @@
 {#if mode === "draw" && draw}
   <!-- The drawing tools, floating along the bottom of the map (as on the iPad). -->
   <div class="palette" role="toolbar" aria-label="Drawing tools">
-    <button class="tool" class:on={draw.drawing} aria-pressed={draw.drawing} onclick={() => draw!.addPiece()} title="Click each corner to add a piece">
+    <button class="tool" class:on={draw.tool === "corners"} aria-pressed={draw.tool === "corners"} onclick={() => draw!.setTool("corners")} title="Click each corner to add a piece">
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M5 18 9 6l10 4-6 9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" /><circle cx="5" cy="18" r="2" fill="currentColor" /><circle cx="9" cy="6" r="2" fill="currentColor" /><circle cx="19" cy="10" r="2" fill="currentColor" /><circle cx="13" cy="19" r="2" fill="currentColor" /></svg>
       <span>Corners</span>
     </button>
-    <button class="tool" class:on={!draw.drawing} aria-pressed={!draw.drawing} onclick={() => draw!.cancelPiece()} title="Drag corners, add them from the midpoints, click a piece to select it">
+    <button class="tool" class:on={draw.tool === "edit"} aria-pressed={draw.tool === "edit"} onclick={() => draw!.setTool("edit")} title="Drag corners, add them from the midpoints, click a piece to select it">
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M6 3l12 9-5.5 1.2L15 20l-2.5 1-2.6-6.7L6 18z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" /></svg>
       <span>Edit</span>
+    </button>
+    <button class="tool" class:on={draw.tool === "eraser"} aria-pressed={draw.tool === "eraser"} onclick={() => draw!.setTool("eraser")} title="Click or drag across corners to delete them; click inside a piece to delete it">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="m14 4 6 6-9 9H6l-3-3zM9 9l6 6M11 19h9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+      <span>Eraser</span>
     </button>
     <span class="pdiv" aria-hidden="true"></span>
     <button class="tool others" class:on={showOthers} aria-pressed={showOthers} onclick={() => setOthers(!showOthers)}
@@ -839,11 +846,10 @@
     <button class="icon-btn" disabled={!draw.canRedo} onclick={() => draw!.redo()} title="Redo (⇧⌘Z)" aria-label="Redo">
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="m15 7 5 5-5 5M20 12H9a5 5 0 0 0 0 10h2" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" /></svg>
     </button>
-    {#if draw.selected}
-      <button class="icon-btn danger" onclick={() => draw!.deleteSelected()} title="Delete the selected piece (Delete)" aria-label="Delete piece">
-        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
-      </button>
-    {/if}
+    <button class="icon-btn danger" disabled={!draw.selected} onclick={() => draw!.deleteSelected()}
+      title={draw.selected ? "Delete the selected piece (Delete)" : "Click a piece to select it, then delete it here"} aria-label="Delete piece">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+    </button>
   </div>
 {/if}
 
@@ -936,8 +942,6 @@
   }
   .draft .grow { display: grid; gap: 1px; }
   .kept { margin: 0; }
-  :global(.corner-menu) { display: grid; gap: 6px; padding-top: 2px; }
-  :global(.corner-menu button) { justify-content: flex-start; }
   @media (max-width: 760px) {
     .panel { top: auto; left: 8px; right: 8px; bottom: 84px; width: auto !important; max-height: 44%; }
   }

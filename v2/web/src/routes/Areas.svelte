@@ -58,6 +58,7 @@
     ctl.onAreaClick = (id) => panel?.open(id);
     // Street clicks belong to the Map page; here they'd only get in the way of drawing.
     ctl.onStreetClick = null;
+    (window as unknown as { streetsweep?: object }).streetsweep = { map: ctl.map, ctl };
     return () => {
       unwatch();
       ctl?.destroy();

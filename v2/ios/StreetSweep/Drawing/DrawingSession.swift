@@ -135,6 +135,7 @@ final class DrawingSession {
     func undo() {
         if !inProgress.isEmpty {
             inProgress.removeLast()
+            if !inProgressHits.isEmpty { inProgressHits.removeLast() }
             changed(persist: false)
             return
         }
@@ -166,6 +167,7 @@ final class DrawingSession {
         pieces = rings.filter { $0.count >= 3 }.map { Piece(ring: $0) }
         selected = nil
         inProgress = []
+        inProgressHits = []
         changed()
     }
 
@@ -193,13 +195,21 @@ final class DrawingSession {
         guard !inProgress.isEmpty else { return }
         if inProgress.count >= 3 {
             checkpoint()
-            pieces.append(Piece(ring: inProgress))
+            var ring = inProgress
+            // The last corner and the first on the same edge: follow it to close too.
+            if let a = inProgressHits.last ?? nil, let b = inProgressHits.first ?? nil, a.line == b.line,
+               a.line < followable, a.line < lastFollowLines.count, let f = lastFrame {
+                ring += Geometry.follow(lastFollowLines[a.line], from: a, to: b, drawn: .infinity, radius: 0, project: f.projection)
+            }
+            pieces.append(Piece(ring: Geometry.dedupe(ring)))
             inProgress = []
+            inProgressHits = []
             changed()
         } else if force {
             note = "A piece needs at least three corners."
         } else {
             inProgress = []
+            inProgressHits = []
             changed(persist: false)
         }
     }
@@ -332,10 +342,25 @@ final class DrawingSession {
             closeInProgress()
             return
         }
-        let snap = snapPoint(p, map, excluding: nil)
+        let lines = snapLines(excluding: nil)
+        let snap = Geometry.snap(p, lines: lines, radius: Self.snapRadius, view: map.view, project: map.projection)
         let c = snap?.coord ?? map.projection.toCoord(p)
-        if inProgress.last != c { inProgress.append(c) }
+        guard inProgress.last != c else { return }
+        // On the same area's edge (or boundary line) as the last corner: follow it between them.
+        if let prev = inProgressHits.last ?? nil, let snap, prev.line == snap.line, snap.line < followable {
+            let way = Geometry.follow(lines[snap.line], from: prev, to: snap, drawn: .infinity, radius: 0, project: map.projection)
+            inProgress += way
+            inProgressHits += way.map { _ in nil }
+        }
+        inProgress.append(c)
+        inProgressHits.append(snap)
+        lastFollowLines = lines
+        lastFrame = map
     }
+
+    /// The lines (and the map) the last corner was snapped against, so closing can follow too.
+    private var lastFollowLines: [SnapLine] = []
+    private var lastFrame: MapFrame?
 
     private func erase(at p: CGPoint, _ map: MapFrame) {
         var changedAny = false
@@ -388,10 +413,17 @@ final class DrawingSession {
     }
 
     /// Neighbours, shorelines, and this drawing's other pieces (so pieces can share an edge too).
+    /// What corners snap to. The ones an edge is followed along come first: the areas shown,
+    /// then (with Snap) boundary lines.
     private func snapLines(excluding id: UUID?) -> [SnapLine] {
-        neighbours + shores + pieces.filter { $0.id != id }.map { SnapLine($0.ring, closed: true) }
-            + (snapping ? boundaries + streets : [])
+        neighbours + (snapping ? boundaries : []) + shores
+            + pieces.filter { $0.id != id }.map { SnapLine($0.ring, closed: true) }
+            + (snapping ? streets : [])
     }
+    private var followable: Int { neighbours.count + (snapping ? boundaries.count : 0) }
+
+    /// Where each corner of the piece being drawn snapped, for following an edge.
+    private var inProgressHits: [Snap?] = []
 
     /// The Corners tool's line from the last corner to where the hovering Pencil would land.
     var rubberBand: (from: CLLocationCoordinate2D, to: CLLocationCoordinate2D)? {
