@@ -102,43 +102,44 @@ struct MarkPanel: View {
     @Environment(CoverageWorkspace.self) private var cw
 
     var body: some View {
-        HStack(spacing: 16) {
-            Picker("How", selection: $mode) {
-                Label("Scribble", systemImage: "scribble").tag(MarkSession.Mode.scribble)
-                Label("Lasso", systemImage: "lasso").tag(MarkSession.Mode.lasso)
+        // Two rows, so nothing spills past the panel: what's happening, then the buttons.
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 14) {
+                Picker("How", selection: $mode) {
+                    Label("Scribble", systemImage: "scribble").tag(MarkSession.Mode.scribble)
+                    Label("Lasso", systemImage: "lasso").tag(MarkSession.Mode.lasso)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 200)
+                .onChange(of: mode) { _, m in session.mode = m }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.headline)
+                    Text(detail).font(.subheadline).foregroundStyle(session.error != nil ? .red : .secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if session.loading { ProgressView() }
             }
-            .pickerStyle(.segmented)
-            .frame(width: 200)
-            .onChange(of: mode) { _, m in session.mode = m }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.headline)
-                Text(detail).font(.subheadline).foregroundStyle(session.error != nil ? .red : .secondary)
-            }
-            .frame(minWidth: 320, alignment: .leading)
-
-            if session.loading { ProgressView() }
-
-            Spacer(minLength: 8)
-
-            Toggle(isOn: $fingerDraws) { Image(systemName: "hand.draw") }
-                .toggleStyle(.button)
-                .accessibilityLabel("Draw with finger")
-                .help("Draw with finger")
-            if session.mode == .scribble && session.scribbles.count > 0 {
-                Button { session.undo() } label: { Image(systemName: "arrow.uturn.backward") }
+            HStack(spacing: 10) {
+                Toggle(isOn: $fingerDraws) { Label("Finger", systemImage: "hand.draw") }
+                    .toggleStyle(.button)
+                    .controlSize(.large)
+                    .accessibilityLabel("Draw with finger")
+                Spacer(minLength: 0)
+                if session.mode == .scribble && !session.scribbles.isEmpty {
+                    Button { session.undo() } label: { Label("Undo stroke", systemImage: "arrow.uturn.backward") }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                }
+                if session.hasDrawing {
+                    Button(session.mode == .scribble ? "Clear" : "Redraw") { session.clearCurrent() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                }
+                Button("Cancel") { cw.cancelMarking() }
                     .buttonStyle(.bordered)
                     .controlSize(.large)
-                    .accessibilityLabel("Undo the last scribble")
-            }
-            if session.hasDrawing {
-                Button(session.mode == .scribble ? "Clear" : "Redraw") { session.clear() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-            }
-            Button("Cancel") { cw.cancelMarking() }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-            if let p = session.preview, p.pieces > 0 {
                 Button {
                     Task { await cw.confirmMarking() }
                 } label: {
@@ -146,12 +147,12 @@ struct MarkPanel: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .disabled(session.loading)
+                .disabled(session.loading || (session.preview?.pieces ?? 0) == 0)
             }
+            .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
-        .frame(maxWidth: 980)
+        .padding(16)
+        .frame(width: 720)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22))
         .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
     }
@@ -171,7 +172,7 @@ struct MarkPanel: View {
             return p.pieces == 0
                 ? "Every street inside is already driven or marked. Draw somewhere else, or cancel."
                 : session.mode == .scribble
-                    ? "Flashing streets will be marked done. Keep scribbling to add more; two-finger tap undoes the last stroke."
+                    ? "Flashing streets will be marked done. Lift and keep scribbling to add more; move the map with your fingers in between."
                     : "Flashing streets will be marked done. Streets already driven or marked stay as they are."
         }
         if session.hasDrawing { return " " }

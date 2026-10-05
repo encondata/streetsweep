@@ -42,7 +42,8 @@ final class CoverageWorkspace {
         s.mode = mode
         let render = { [weak self, weak s] in
             guard let self, let s else { return }
-            self.map.setMarkPreview(outline: s.outline, lines: s.preview?.lines ?? [], scribbles: s.scribbles)
+            self.map.setMarkPreview(outline: s.mode == .lasso ? s.outline : nil, lines: s.preview?.lines ?? [],
+                                    scribbles: s.mode == .scribble ? s.scribbles : [])
         }
         mark = s
         map.startInk(s)

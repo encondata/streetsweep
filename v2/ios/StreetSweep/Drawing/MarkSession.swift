@@ -34,7 +34,18 @@ final class MarkSession: PencilTarget {
 
     let teamId: String
     private let api: API
-    var mode: Mode = .scribble { didSet { if mode != oldValue { clear() } } }
+    /// Switching keeps what each mode has drawn (scribbles aren't lost by a look at Lasso).
+    var mode: Mode = .scribble {
+        didSet {
+            guard mode != oldValue else { return }
+            request?.cancel()
+            preview = nil
+            error = nil
+            loading = false
+            if hasDrawing { fetchPreview() }
+            onChange?()
+        }
+    }
     /// Scribble strokes so far, and how far each side of them counts (metres, from the zoom
     /// when they were drawn: about a fingertip's width on screen).
     private(set) var scribbles: [[CLLocationCoordinate2D]] = []
@@ -63,7 +74,9 @@ final class MarkSession: PencilTarget {
     // MARK: - The Pencil
 
     func began(_ p: CGPoint, _ map: MapFrame) {
-        clear()
+        // A new lasso replaces the last; a new scribble adds to the ones before.
+        if mode == .lasso { outline = nil; preview = nil; request?.cancel() }
+        error = nil
         points = [p]
         stroke = [map.projection.toCoord(p)]
         onChange?()
@@ -114,13 +127,23 @@ final class MarkSession: PencilTarget {
 
     /// Undo (two-finger tap): the last scribble, or the outline, to draw again.
     func undo() {
-        guard mode == .scribble, !scribbles.isEmpty else { clear(); return }
+        guard mode == .scribble, !scribbles.isEmpty else { clearCurrent(); return }
         scribbles.removeLast()
-        if scribbles.isEmpty { clear() } else { fetchPreview() }
+        if scribbles.isEmpty { clearCurrent() } else { fetchPreview() }
         onChange?()
     }
     func redo() {}
     func swapTool() {}
+
+    /// Clear what this mode has drawn (the other mode's drawing stays).
+    func clearCurrent() {
+        request?.cancel()
+        if mode == .lasso { outline = nil } else { scribbles = [] }
+        preview = nil
+        error = nil
+        loading = false
+        onChange?()
+    }
 
     func clear() {
         request?.cancel()
@@ -146,7 +169,7 @@ final class MarkSession: PencilTarget {
     }
 
     /// Something's been drawn to mark.
-    var hasDrawing: Bool { outline != nil || !scribbles.isEmpty }
+    var hasDrawing: Bool { mode == .lasso ? outline != nil : !scribbles.isEmpty }
 
     private func fetchPreview() {
         guard let body else { return }
