@@ -571,7 +571,7 @@
   .seg { display: flex; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 3px; box-shadow: var(--shadow); }
   .seg button { height: 30px; border: 0; background: none; padding: 0 12px; font-size: 13px; border-radius: 7px; color: var(--ink-soft); }
   .seg button.on { background: var(--accent-soft); color: var(--green-700); }
-  .bottom { position: absolute; left: 50%; transform: translateX(-50%); bottom: 36px; display: flex; justify-content: center; pointer-events: none; max-width: calc(100% - 32px); }
+  .bottom { position: absolute; left: 50%; transform: translateX(-50%); bottom: 96px; display: flex; justify-content: center; pointer-events: none; max-width: calc(100% - 32px); }
   .chip {
     pointer-events: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 99px; padding: 8px 14px;
     font-size: 13px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 8px; text-align: center;
@@ -588,7 +588,6 @@
   :global(.maplibregl-popup-content .muted) { color: var(--ink-soft); }
   :global(.maplibregl-popup-content .popup-btn) { margin: 6px 0 4px; height: 30px; font-size: 13px; }
   @media (max-width: 760px) {
-    .mapwrap { height: calc(100dvh - 64px - env(safe-area-inset-bottom)); }
     .bottom { bottom: auto; top: 60px; left: 50%; }
   }
   .tools {

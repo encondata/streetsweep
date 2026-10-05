@@ -27,7 +27,13 @@ export class OutlineDraw {
   drawing = $state(false);
   pieces = $state(0);
   canUndo = $state(false);
+  canRedo = $state(false);
+  /** Snap: also onto streets (their ends, the intersections, first) and state, county and city lines. */
+  snapping = $state(false);
   private undoStack: Ring[][] = [];
+  private redoStack: Ring[][] = [];
+  private streets: Ring[] = [];
+  private boundaries: Ring[] = [];
   /** The outline as of the last finished change: what an undo goes back past. */
   private committed: Ring[] = [];
   private popup: Popup | null = null;
@@ -130,6 +136,12 @@ export class OutlineDraw {
     this.shores = lines;
   }
 
+  /** Streets and boundary lines in view, snapped to while Snap is on. */
+  setSnapLines(streets: Ring[] | null, boundaries: Ring[] | null) {
+    if (streets) this.streets = streets;
+    if (boundaries) this.boundaries = boundaries;
+  }
+
   /** Swap the whole outline for another (trimmed to the shore, say), as one undoable change. */
   replaceAll(rings: Ring[]) {
     this.closePopup();
@@ -152,9 +164,29 @@ export class OutlineDraw {
     if (this.selected) this.draw.deselectFeature(this.selected);
     this.selected = null;
     if (ids.length) this.draw.removeFeatures(ids);
+    this.redoStack.push(this.committed);
     this.put(prev);
     this.committed = prev;
     this.canUndo = this.undoStack.length > 0;
+    this.canRedo = true;
+    this.onChange();
+  }
+
+  /** Forward again past an undo. */
+  redo() {
+    const next = this.redoStack.pop();
+    if (!next) return;
+    this.closePopup();
+    if (this.drawing) this.cancelPiece();
+    const ids = this.draw.getSnapshot().filter((f) => f.geometry.type === "Polygon" && f.properties.mode !== undefined).map((f) => f.id!);
+    if (this.selected) this.draw.deselectFeature(this.selected);
+    this.selected = null;
+    if (ids.length) this.draw.removeFeatures(ids);
+    this.undoStack.push(this.committed);
+    this.put(next);
+    this.committed = next;
+    this.canUndo = true;
+    this.canRedo = this.redoStack.length > 0;
     this.onChange();
   }
 
@@ -194,6 +226,8 @@ export class OutlineDraw {
     if (this.undoStack.length > MAX_UNDO) this.undoStack.shift();
     this.committed = now;
     this.canUndo = true;
+    this.redoStack = [];
+    this.canRedo = false;
   }
 
   /** A click on a corner (not a drag): offer to delete it, or the whole piece. */
@@ -255,8 +289,11 @@ export class OutlineDraw {
     const at = this.map.project([e.lng, e.lat]);
     const view = this.map.getBounds();
     let best: { d: number; p: [number, number] } | null = null;
-    const lines = [...this.neighbours.map((r) => ({ r, closed: true })), ...this.shores.map((r) => ({ r, closed: false }))];
-    for (const { r: ring, closed } of lines) {
+    const lines: { r: Ring; closed: boolean; ends?: boolean }[] = [
+      ...this.neighbours.map((r) => ({ r, closed: true })), ...this.shores.map((r) => ({ r, closed: false })),
+      ...(this.snapping ? [...this.boundaries.map((r) => ({ r, closed: false })), ...this.streets.map((r) => ({ r, closed: false, ends: true }))] : []),
+    ];
+    for (const { r: ring, closed, ends } of lines) {
       let w = Infinity, s = Infinity, east = -Infinity, n = -Infinity;
       for (const [x, y] of ring) { if (x < w) w = x; if (x > east) east = x; if (y < s) s = y; if (y > n) n = y; }
       if (n < view.getSouth() || s > view.getNorth() || east < view.getWest() || w > view.getEast()) continue;
@@ -267,7 +304,13 @@ export class OutlineDraw {
         const dx = c.x - a.x, dy = c.y - a.y, span = dx * dx + dy * dy;
         const t = span ? Math.max(0, Math.min(1, ((at.x - a.x) * dx + (at.y - a.y) * dy) / span)) : 0;
         // Near a corner, the corner itself: that is what someone aiming at one means.
-        const nearA = Math.hypot(at.x - a.x, at.y - a.y) <= SNAP_PX;
+        // A street's corners that count are its two ends (the intersections), not every bend.
+        const nearA = Math.hypot(at.x - a.x, at.y - a.y) <= SNAP_PX && (!ends || i === 0);
+        const z2 = ring[i + 1];
+        if (ends && !closed && i === ring.length - 2 && z2) {
+          const e = this.map.project(z2), toE = Math.hypot(at.x - e.x, at.y - e.y);
+          if (toE <= SNAP_PX && (!best || toE < best.d)) best = { d: toE, p: [z2[0], z2[1]] };
+        }
         const d = Math.hypot(at.x - (a.x + dx * t), at.y - (a.y + dy * t));
         if (d > SNAP_PX || (best && d >= best.d)) continue;
         const p: [number, number] = nearA ? [ring[i][0], ring[i][1]]

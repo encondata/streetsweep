@@ -42,6 +42,8 @@ function style(): StyleSpecification {
       "drive-track": { type: "geojson", data: empty() },
       places: { type: "geojson", data: empty(), promoteId: "id" },
       "search-pin": { type: "geojson", data: empty() },
+      // While drawing with Snap on: the state, county and city lines it snaps to.
+      "snap-lines": { type: "geojson", data: empty() },
       // An area's streets still to sweep, when asked for ("Highlight what's left").
       "missing": { type: "geojson", data: empty() },
       // Zoomed out, where the team has swept: cells of covered streets, clustered.
@@ -142,6 +144,10 @@ function style(): StyleSpecification {
         paint: { "line-color": "#ffd60a", "line-width": ["interpolate", ["linear"], ["zoom"], 10, 3, 16, 7] } },
       { id: "missing-dot", type: "circle", source: "missing", filter: ["==", ["geometry-type"], "Point"],
         paint: { "circle-radius": 7, "circle-color": "#ffd60a", "circle-stroke-color": "#111827", "circle-stroke-width": 2.5 } },
+      {
+        id: "snap-lines", type: "line", source: "snap-lines",
+        paint: { "line-color": "#7c3aed", "line-width": 2, "line-opacity": 0.55, "line-dasharray": [3, 2] },
+      },
       // An address found with the search box.
       {
         id: "search-pin", type: "circle", source: "search-pin",
@@ -560,6 +566,13 @@ export class MapController {
     const p = new Popup({ closeButton: true, maxWidth: "280px", offset: 8 }).setLngLat(at).setDOMContent(el);
     if (onClose) p.on("close", onClose);
     this.popup = p.addTo(this.map);
+  }
+
+  /** The boundary lines a drawing snaps to, shown dashed; none to clear. */
+  setSnapLines(lines: [number, number][][]) {
+    this.whenReady(() => (this.map.getSource("snap-lines") as GeoJSONSource).setData(lines.length
+      ? { type: "Feature", properties: {}, geometry: { type: "MultiLineString", coordinates: lines } }
+      : empty()));
   }
 
   fitBounds(b: [number, number, number, number], opts: { left?: number; animate?: boolean } = {}) {

@@ -3,7 +3,7 @@
   // details, and drawing. The map stays put; this tells it what to show.
   import { onDestroy, onMount, tick, untrack } from "svelte";
   import Icon from "./Icon.svelte";
-  import { api, errorText } from "../lib/api";
+  import { api, ApiError, errorText } from "../lib/api";
   import { session } from "../lib/session.svelte";
   import { defaultTeam } from "../lib/settings";
   import { OutlineDraw, ringsOf, type Ring } from "../lib/draw.svelte";
@@ -13,6 +13,9 @@
   import { AREA_COLORS, LEVEL_LABEL, type Area } from "../lib/types";
   import { assignAreaColors } from "../lib/areaColors";
   import { areaFeatures } from "../lib/teamAreas";
+  import { nest, tree, type Node } from "../lib/areaTree";
+  import { ui } from "../lib/ui.svelte";
+  import { decodePolyline } from "../lib/polyline";
 
   let { ctl, panelWidth = 360, onteam, shown = true, onshow, onhide, onmissing, onarea }: {
     ctl: MapController; panelWidth?: number; onteam?: (teamId: string) => void;
@@ -63,6 +66,27 @@
   const colorOf = (a: Area) => colors.get(a.id) ?? AREA_COLORS[0];
 
   const followedHere = (a: Area) => areas.some((x) => x.id === a.id);
+
+  // ---- the list: nested by kind, kept to what's in view ----
+  let parentOf = $derived(nest(areas));
+  let view = $state<[number, number, number, number] | null>(null);
+  let showAll = $state(false);
+  let collapsed = $state<Set<string>>(new Set());
+  let listed = $derived(tree(areas, parentOf, showAll ? null : view));
+  const readView = () => {
+    const b = ctl.map.getBounds();
+    view = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
+  };
+  onMount(() => {
+    ctl.ready().then(readView);
+    ctl.map.on("moveend", readView);
+    return () => ctl.map.off("moveend", readView);
+  });
+  function toggle(id: string) {
+    const next = new Set(collapsed);
+    if (!next.delete(id)) next.add(id);
+    collapsed = next;
+  }
 
   // ---- the team's areas ----
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
@@ -189,9 +213,24 @@
     }
   }
 
-  const follow = () => act(() => api(`/api/teams/${teamId}/follows`, { body: { area_id: area!.id } }), async () => {
+  // Shows as followed as soon as the server says yes; the list (with progress) catches up.
+  // "Already follows" counts as done (a first click that went through).
+  const follow = () => act(async () => {
+    const a = area!;
+    try {
+      await api(`/api/teams/${teamId}/follows`, { body: { area_id: a.id } });
+    } catch (e) {
+      if (!(e instanceof ApiError && e.status === 409)) throw e;
+    }
+    if (!areas.some((x) => x.id === a.id)) {
+      areas = [...areas, a];
+      ctl.setTeamAreas(areaFeatures(areas));
+      ctl.setPreview(null);
+      ctl.setSelectedArea(a.id);
+    }
+  }, async () => {
     await loadAreas();
-    await open(area!.id, false);
+    if (area) await open(area.id, false);
   });
   const unfollow = () => {
     if (!confirm(`Stop following ${area!.name}? Its drives stay; it just leaves this team's list.`)) return;
@@ -316,7 +355,76 @@
       draw?.setShores(r.lines);
     } catch { /* no snapping to water, that's all */ }
   }
-  const onMoveEnd = () => { clearTimeout(shoreTimer); shoreTimer = setTimeout(loadShores, 250); };
+  const onMoveEnd = () => { clearTimeout(shoreTimer); shoreTimer = setTimeout(() => { loadShores(); loadSnapLines(); }, 250); };
+
+  // ---- Snap: streets and boundary lines in view, when it's on ----
+  let snap = $state(readSnap());
+  let streetsTooFar = $state(false);
+  let snapAbort: AbortController | null = null;
+  function readSnap() {
+    try { return localStorage.getItem("streetsweep.drawSnap") === "on"; } catch { return false; }
+  }
+  function setSnap(on: boolean) {
+    snap = on;
+    try { localStorage.setItem("streetsweep.drawSnap", on ? "on" : "off"); } catch { /* fine */ }
+    if (draw) draw.snapping = on;
+    if (on) loadSnapLines();
+    else ctl.setSnapLines([]);
+  }
+  async function loadSnapLines() {
+    if (!draw || !snap) return;
+    const b = ctl.map.getBounds();
+    const w = b.getWest(), so = b.getSouth(), e = b.getEast(), n = b.getNorth();
+    const bbox = [w, so, e, n].map((x) => x.toFixed(5)).join(",");
+    snapAbort?.abort();
+    snapAbort = new AbortController();
+    const signal = snapAbort.signal;
+    streetsTooFar = e - w > 0.2 || n - so > 0.2;
+    const [lines, segs] = await Promise.all([
+      api<{ lines: Ring[] }>(`/api/areas/lines?bbox=${bbox}`, { signal }).catch(() => null),
+      streetsTooFar ? Promise.resolve(null) : api<{ segments: unknown[][] }>(`/api/segments?bbox=${bbox}`, { signal }).catch(() => null),
+    ]);
+    if (signal.aborted || !draw) return;
+    const streets = segs ? segs.segments.map((row) => decodePolyline(String(row[row.length - 1]))).filter((r) => r.length >= 2) : null;
+    draw.setSnapLines(streets, lines?.lines ?? null);
+    if (lines && snap) ctl.setSnapLines(lines.lines);
+  }
+
+  /** Tidy: round the streets inside, 10 m out or halfway to the next street (server). Undoable. */
+  async function tidy() {
+    const geometry = draw?.geometry();
+    if (!draw || !geometry) { drawNote = "Draw a rough outline round the streets first, then tidy it."; return; }
+    trimming = true;
+    drawNote = null;
+    error = null;
+    try {
+      const r = await api<{ geometry: GeoJSON.MultiPolygon; pieces: number }>("/api/areas/tidy", { body: { geometry } });
+      draw.replaceAll(ringsOf(r.geometry));
+      drawNote = `Tidied round ${r.pieces} street piece${r.pieces === 1 ? "" : "s"}: 10 m out, or halfway to the next street. Undo puts your drawing back.`;
+    } catch (e) {
+      error = errorText(e);
+    } finally {
+      trimming = false;
+    }
+  }
+
+  // Drawing takes the bottom of the screen: the nav bar steps aside.
+  $effect(() => {
+    ui.drawing = mode === "draw";
+  });
+  onDestroy(() => { ui.drawing = false; });
+
+  // Keys while drawing: undo, redo, delete the selected piece, Escape stops a piece.
+  function onKey(e: KeyboardEvent) {
+    if (mode !== "draw" || !draw) return;
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) draw.redo(); else draw.undo(); }
+    else if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); draw.redo(); }
+    else if ((e.key === "Delete" || e.key === "Backspace") && draw.selected) { e.preventDefault(); draw.deleteSelected(); }
+    else if (e.key === "Escape" && draw.drawing) draw.cancelPiece();
+  }
 
   async function trimWater() {
     const geometry = draw?.geometry();
@@ -355,6 +463,7 @@
     dirty = !!from;
     if (!from) writeDraft(null);
     draw = new OutlineDraw(ctl.map, neighbours, () => { dirty = true; keepDraft(); });
+    draw.snapping = snap;
     const rings = from ? from.rings : existing?.geometry ? ringsOf(existing.geometry) : [];
     if (rings.length) {
       draw.load(rings);
@@ -365,6 +474,7 @@
     drawNote = null;
     ctl.map.on("moveend", onMoveEnd);
     loadShores();
+    loadSnapLines();
   }
 
   function endDraw() {
@@ -372,6 +482,8 @@
     clearTimeout(shoreTimer);
     shoreAbort?.abort();
     ctl.map.off("moveend", onMoveEnd);
+    snapAbort?.abort();
+    ctl.setSnapLines([]);
     dirty = false;
     draw?.stop();
     draw = null;
@@ -447,6 +559,38 @@
   const kind = (a: Area) => `${LEVEL_LABEL[a.level]}${a.parent_name ? ` in ${a.parent_name}` : ""}`;
 </script>
 
+{#snippet row(a: Area)}
+  <button class="item" onclick={() => open(a.id)}>
+    <span class="swatch" style:background={colorOf(a)}></span>
+    <span class="grow">
+      <strong>{a.name}</strong>
+      <span class="muted small">{a.source === "drawn" ? LEVEL_LABEL[a.level] : kind(a)} · {status(a)}</span>
+      {#if progressOf(a.id)}
+        <span class="bar" title="{miles(a.driven_m)} of {miles(a.total_m)} swept"><span style:width="{share(a)}%" style:background={colorOf(a)}></span></span>
+      {/if}
+    </span>
+    {#if progressOf(a.id)}<span class="pct">{percent(a.driven_m ?? 0, a.total_m!)}</span>{/if}
+    {#if a.build_status === "queued" || a.build_status === "building"}<span class="spin" aria-label="Working"></span>{/if}
+  </button>
+{/snippet}
+
+{#snippet branch(nodes: Node[], depth: number)}
+  {#each nodes as n (n.area.id)}
+    <div class="node" style:padding-left="{depth * 16}px">
+      {#if n.children.length}
+        <button class="fold" class:shut={collapsed.has(n.area.id)} onclick={() => toggle(n.area.id)}
+          aria-label="{collapsed.has(n.area.id) ? 'Open' : 'Close'} {n.area.name}" aria-expanded={!collapsed.has(n.area.id)}>
+          <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        </button>
+      {:else}
+        <span class="fold-space"></span>
+      {/if}
+      {@render row(n.area)}
+    </div>
+    {#if n.children.length && !collapsed.has(n.area.id)}{@render branch(n.children, depth + 1)}{/if}
+  {/each}
+{/snippet}
+
 <aside class="panel" class:hidden={!shown && mode !== "draw"} style:width="{panelWidth}px">
   {#if mode === "list"}
     <header>
@@ -512,28 +656,25 @@
       </div>
     {:else}
       <div class="list">
-        {#each areas as a (a.id)}
-          <button class="item" onclick={() => open(a.id)}>
-            <span class="swatch" style:background={colorOf(a)}></span>
-            <span class="grow">
-              <strong>{a.name}</strong>
-              <span class="muted small">{a.source === "drawn" ? LEVEL_LABEL[a.level] : kind(a)} · {status(a)}</span>
-              {#if progressOf(a.id)}
-                <span class="bar" title="{miles(a.driven_m)} of {miles(a.total_m)} swept"><span style:width="{share(a)}%" style:background={colorOf(a)}></span></span>
-              {/if}
-            </span>
-            {#if progressOf(a.id)}<span class="pct">{percent(a.driven_m ?? 0, a.total_m!)}</span>{/if}
-            {#if a.build_status === "queued" || a.build_status === "building"}<span class="spin" aria-label="Working"></span>{/if}
-          </button>
-        {:else}
-          {#if !loading}
-            <div class="empty muted small">
-              <p><strong>No areas yet.</strong></p>
-              <p>Search for your county or city above and follow it{canEdit ? ", or draw your own neighborhood" : ""}.
-                {#if !canEdit} Only {team?.kind === "personal" ? "you" : "this team's admins"} can add areas.{/if}</p>
-            </div>
+        {#if listed.roots.length}
+          <p class="muted small pad addr-head">{showAll ? "All areas" : "In view"}</p>
+          {@render branch(listed.roots, 0)}
+          {#if showAll}
+            <button class="sm ghost more" onclick={() => (showAll = false)}>Show only areas in view</button>
+          {:else if listed.hidden > 0}
+            <p class="muted small pad">{listed.hidden} more out of view. <button class="link" onclick={() => (showAll = true)}>Show all</button></p>
           {/if}
-        {/each}
+        {:else if areas.length}
+          <div class="empty muted small">
+            <p>None of the team's {areas.length} areas are in view. Move the map, or <button class="link" onclick={() => (showAll = true)}>show them all</button>.</p>
+          </div>
+        {:else if !loading}
+          <div class="empty muted small">
+            <p><strong>No areas yet.</strong></p>
+            <p>Search for your county or city above and follow it{canEdit ? ", or draw your own neighborhood" : ""}.
+              {#if !canEdit} Only {team?.kind === "personal" ? "you" : "this team's admins"} can add areas.{/if}</p>
+          </div>
+        {/if}
       </div>
     {/if}
 
@@ -620,24 +761,22 @@
     <p class="muted small">
       {#if draw.drawing}Click each corner on the map. Click the first corner again (or double-click) to close the shape.
       {:else}Drag a corner to move it; drag the dot between two corners to add one. Click a corner to delete it. An area can have several pieces.{/if}
-      Corners snap to shorelines and neighbouring areas.
     </p>
+    {#if snap}
+      <p class="muted small">{streetsTooFar
+        ? "Snap is on: zoom in closer to snap to streets too. City, county and state lines snap at any zoom."
+        : "Snap is on: corners land on intersections, streets and city, county and state lines, as well as neighbouring areas and shorelines."}</p>
+    {/if}
     {#if drawNote}<p class="notice">{drawNote}</p>{/if}
-    <div class="row-btns">
-      {#if draw.drawing}
-        <button class="sm" onclick={() => draw!.cancelPiece()}>Stop drawing</button>
-      {:else}
-        <button class="sm" onclick={() => draw!.addPiece()}><Icon name="plus" size={15} /> Add a piece</button>
-        {#if draw.selected}<button class="sm ghost danger" onclick={() => draw!.deleteSelected()}>Delete piece</button>{/if}
-      {/if}
-      <button class="sm ghost" disabled={!draw.canUndo} onclick={() => draw!.undo()} title="Undo the last change">Undo</button>
-    </div>
-    <div class="row-btns">
+    <div class="tool-btns">
+      <button class="sm" disabled={trimming || draw.pieces === 0} onclick={tidy}
+        title="Wrap the streets inside 10 m out, or halfway to the next street outside">✨ Tidy round the streets</button>
+      <span class="muted small">Draw roughly round a neighbourhood, then tidy: the outline wraps the streets inside 10 m out, or halfway to the next street where that's closer, so neighbours meet on one line.</span>
       <button class="sm" disabled={trimming || draw.pieces === 0} onclick={trimWater}
-        title="Cut mapped lakes, ponds and rivers out of the outline, keeping the land as drawn">{trimming ? "Trimming…" : "Trim to shoreline"}</button>
+        title="Cut mapped lakes, ponds and rivers out of the outline, keeping the land as drawn">{trimming ? "Working…" : "Trim to shoreline"}</button>
       <span class="muted small">Draw a big shape out into the water, then trim: the land stays as drawn.</span>
-      <span class="muted small">{draw.pieces} piece{draw.pieces === 1 ? "" : "s"}</span>
     </div>
+    <span class="muted small">{draw.pieces} piece{draw.pieces === 1 ? "" : "s"}</span>
     <form class="stack" onsubmit={(e) => { e.preventDefault(); saveDraw(e.currentTarget); }}>
       <label class="field">Name <input type="text" name="name" bind:value={form.name} maxlength="120" autocomplete="off" placeholder="e.g. Old Town" required /></label>
       <label class="field">Kind
@@ -648,9 +787,41 @@
   {/if}
 </aside>
 
+{#if mode === "draw" && draw}
+  <!-- The drawing tools, floating along the bottom of the map (as on the iPad). -->
+  <div class="palette" role="toolbar" aria-label="Drawing tools">
+    <button class="tool" class:on={draw.drawing} aria-pressed={draw.drawing} onclick={() => draw!.addPiece()} title="Click each corner to add a piece">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M5 18 9 6l10 4-6 9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" /><circle cx="5" cy="18" r="2" fill="currentColor" /><circle cx="9" cy="6" r="2" fill="currentColor" /><circle cx="19" cy="10" r="2" fill="currentColor" /><circle cx="13" cy="19" r="2" fill="currentColor" /></svg>
+      <span>Corners</span>
+    </button>
+    <button class="tool" class:on={!draw.drawing} aria-pressed={!draw.drawing} onclick={() => draw!.cancelPiece()} title="Drag corners, add them from the midpoints, click a piece to select it">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M6 3l12 9-5.5 1.2L15 20l-2.5 1-2.6-6.7L6 18z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" /></svg>
+      <span>Edit</span>
+    </button>
+    <span class="pdiv" aria-hidden="true"></span>
+    <button class="tool snap" class:on={snap} aria-pressed={snap} onclick={() => setSnap(!snap)} title="Snap to streets, intersections and city, county and state lines">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="M12 2v5M12 17v5M2 12h5M17 12h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><circle cx="12" cy="12" r="1.8" fill="currentColor" /></svg>
+      <span>Snap</span>
+    </button>
+    <button class="icon-btn" disabled={!draw.canUndo} onclick={() => draw!.undo()} title="Undo (⌘Z)" aria-label="Undo">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M9 7 4 12l5 5M4 12h11a5 5 0 0 1 0 10h-2" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" /></svg>
+    </button>
+    <button class="icon-btn" disabled={!draw.canRedo} onclick={() => draw!.redo()} title="Redo (⇧⌘Z)" aria-label="Redo">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="m15 7 5 5-5 5M20 12H9a5 5 0 0 0 0 10h2" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" /></svg>
+    </button>
+    {#if draw.selected}
+      <button class="icon-btn danger" onclick={() => draw!.deleteSelected()} title="Delete the selected piece (Delete)" aria-label="Delete piece">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+      </button>
+    {/if}
+  </div>
+{/if}
+
+<svelte:window onkeydown={onKey} />
+
 <style>
   .panel {
-    position: absolute; top: 14px; left: 14px; max-height: calc(100% - 28px); z-index: 2;
+    position: absolute; top: 14px; left: 14px; max-height: calc(100% - 110px); z-index: 2;
     background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow);
     display: flex; flex-direction: column; gap: 10px; padding: 12px; overflow: auto;
   }
@@ -666,6 +837,15 @@
   .addr-ask { color: var(--link); }
   .addr-head { padding-bottom: 0; text-transform: uppercase; letter-spacing: .04em; font-size: 11.5px; }
   .list { display: grid; gap: 2px; }
+  .node { display: flex; align-items: center; gap: 2px; }
+  .node .item { flex: 1; min-width: 0; }
+  .fold { width: 22px; height: 30px; padding: 0; border: 0; background: none; flex: none; color: var(--ink-soft); display: grid; place-items: center; }
+  .fold svg { transition: transform .15s; }
+  .fold.shut svg { transform: rotate(-90deg); }
+  .fold-space { width: 22px; flex: none; }
+  .link { border: 0; background: none; padding: 0; height: auto; color: var(--link); font: inherit; font-weight: 600; cursor: pointer; }
+  .link:hover:not([disabled]) { background: none; text-decoration: underline; }
+  .more { justify-self: start; margin: 4px 0 0 6px; }
   .item {
     display: flex; align-items: center; justify-content: flex-start; gap: 10px; text-align: left; height: auto; padding: 9px 10px; white-space: normal;
     border: 0; background: none; border-radius: 10px; width: 100%; font-weight: 400;
@@ -694,6 +874,29 @@
   .progress { display: grid; gap: 6px; }
   .progress-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
   .row-btns { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .tool-btns { display: grid; gap: 4px; justify-items: start; }
+  .tool-btns span { margin-bottom: 6px; }
+  .palette {
+    position: absolute; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 3;
+    display: flex; align-items: center; gap: 6px; padding: 8px;
+    background: rgba(255, 255, 255, .88); backdrop-filter: blur(16px) saturate(1.4); -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    border: 1px solid var(--line); border-radius: 22px; box-shadow: 0 8px 28px rgba(13, 27, 40, .18);
+  }
+  .tool {
+    display: grid; justify-items: center; gap: 2px; width: 68px; height: 56px; padding: 0; border: 0; border-radius: 14px;
+    background: none; color: var(--ink); font-size: 11px; font-weight: 700;
+  }
+  .tool:hover:not([disabled]) { background: var(--surface-2); }
+  .tool.on { background: var(--green-600); color: #fff; }
+  .tool.on:hover:not([disabled]) { background: var(--green-700); }
+  .tool.snap.on { background: #f08a24; }
+  .tool.snap.on:hover:not([disabled]) { background: #e07a14; }
+  .tool svg { margin-top: 6px; }
+  .pdiv { width: 1px; height: 40px; background: var(--line); margin: 0 4px; }
+  .icon-btn { width: 52px; height: 56px; padding: 0; border: 0; background: none; border-radius: 14px; color: var(--ink); display: grid; place-items: center; }
+  .icon-btn:hover:not([disabled]) { background: var(--surface-2); }
+  .icon-btn[disabled] { opacity: .3; }
+  .icon-btn.danger { color: var(--danger); }
   .danger { color: var(--danger); }
   .draft {
     display: grid; gap: 8px; padding: 10px 12px; border-radius: 10px;
@@ -704,6 +907,6 @@
   :global(.corner-menu) { display: grid; gap: 6px; padding-top: 2px; }
   :global(.corner-menu button) { justify-content: flex-start; }
   @media (max-width: 760px) {
-    .panel { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto !important; max-height: 48%; }
+    .panel { top: auto; left: 8px; right: 8px; bottom: 84px; width: auto !important; max-height: 44%; }
   }
 </style>

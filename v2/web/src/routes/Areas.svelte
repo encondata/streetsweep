@@ -111,7 +111,4 @@
   .seg { display: flex; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 3px; box-shadow: var(--shadow); }
   .seg button { height: 30px; border: 0; background: none; padding: 0 12px; font-size: 13px; border-radius: 7px; color: var(--ink-soft); }
   .seg button.on { background: var(--accent-soft); color: var(--green-700); }
-  @media (max-width: 760px) {
-    .wrap { height: calc(100dvh - 64px - env(safe-area-inset-bottom)); }
-  }
 </style>
