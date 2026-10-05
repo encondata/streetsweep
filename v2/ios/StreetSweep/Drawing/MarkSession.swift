@@ -29,6 +29,7 @@ final class MarkSession: PencilTarget {
     private(set) var stroke: [CLLocationCoordinate2D] = []
     var strokeStyle: StrokeStyle { .lasso }
     var hover: (coord: CLLocationCoordinate2D, snapped: Bool)? { nil }
+    var rubberBand: (from: CLLocationCoordinate2D, to: CLLocationCoordinate2D)? { nil }
     var onChange: (() -> Void)?
 
     /// The outline drawn, once the Pencil lifts.

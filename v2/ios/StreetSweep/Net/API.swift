@@ -42,6 +42,19 @@ struct API: Sendable {
         try await send("PATCH", path, body: body)
     }
 
+    /// The body as it comes, for answers that aren't one simple shape (packed segments).
+    func raw(_ path: String) async throws -> Data {
+        guard let url = URL(string: path, relativeTo: server) else {
+            throw APIError(status: 0, message: "That server address doesn't look right.", code: nil)
+        }
+        var req = URLRequest(url: url)
+        if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        let (data, response) = try await Self.session.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else { throw APIError(status: status, message: "The server answered \(status).", code: nil) }
+        return data
+    }
+
     func delete(_ path: String) async throws {
         let _: Empty = try await send("DELETE", path, body: Optional<Empty>.none)
     }

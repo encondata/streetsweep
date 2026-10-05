@@ -17,6 +17,10 @@ final class Workspace {
     var error: String?
     /// What the map shows right now: the list keeps to the areas in it.
     private(set) var view: GeoBounds?
+    /// Snap drawings to streets and boundary lines too (the palette's magnet).
+    private(set) var snapping = false
+    /// Zoomed too far out to fetch the streets to snap to.
+    private(set) var streetsTooFar = false
 
     private weak var app: AppModel?
 
@@ -153,10 +157,11 @@ final class Workspace {
         if draft == nil { DrawingSession.Draft.clear(); self.draft = nil }
         let neighbours = store.areas.filter { $0.id != area?.id }.flatMap { $0.geometry?.pieces ?? [] }
         let s = DrawingSession(teamId: teamId, area: area, neighbours: neighbours, draft: draft)
+        s.snapping = snapping
         session = s
         map.startDrawing(s)
         if draft != nil, let o = s.outline { map.fit(o) }
-        if let f = map.frame() { loadShores(f) }
+        if let f = map.frame() { loadShores(f); loadSnapLines(f) }
     }
 
     func resumeDraft() async {
@@ -181,6 +186,8 @@ final class Workspace {
     }
 
     private func endDrawing() {
+        map.setSnapLines([])
+        snapTask?.cancel()
         map.stopDrawing()
         session = nil
         draft = nil
@@ -244,6 +251,53 @@ final class Workspace {
         view = GeoBounds(south: frame.view.south, west: frame.view.west, north: frame.view.north, east: frame.view.east)
         guard session != nil else { return }
         loadShores(frame)
+        loadSnapLines(frame)
+    }
+
+    func setSnapping(_ on: Bool) {
+        snapping = on
+        session?.snapping = on
+        if on, session != nil, let f = map.frame() { loadSnapLines(f) }
+        if !on { map.setSnapLines([]) }
+    }
+
+    // MARK: - Streets and boundary lines, for Snap
+
+    private var snapTask: Task<Void, Never>?
+
+    private func loadSnapLines(_ f: MapFrame) {
+        guard snapping, let api else { return }
+        snapTask?.cancel()
+        let w = f.view.west, s = f.view.south, e = f.view.east, n = f.view.north
+        let bbox = [w, s, e, n].map { String(format: "%.5f", $0) }.joined(separator: ",")
+        let streetsFit = e - w <= 0.2 && n - s <= 0.2
+        streetsTooFar = !streetsFit
+        snapTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            async let bounds = try? api.get("/api/areas/lines?bbox=\(bbox)", as: Shores.self)
+            async let streets: [SnapLine]? = streetsFit ? Self.streetLines(api, box: bbox) : []
+            let (b, st) = await (bounds, streets)
+            guard !Task.isCancelled, let session = self?.session else { return }
+            if let b {
+                let rings = b.lines.map { $0.map { CLLocationCoordinate2D(latitude: $0[1], longitude: $0[0]) } }
+                session.boundaries = rings.map { SnapLine($0, closed: false) }
+                self?.map.setSnapLines(rings)
+            }
+            if let st { session.streets = st }
+        }
+    }
+
+    /// The street pieces in a box (`/api/segments`, as the phone uses), as lines to snap to.
+    private static func streetLines(_ api: API, box bbox: String) async -> [SnapLine]? {
+        guard let data = try? await api.raw("/api/segments?bbox=\(bbox)"),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let segs = obj["segments"] as? [[Any]] else { return nil }
+        return segs.compactMap { row in
+            guard let line = row.last as? String else { return nil }
+            let pts = Polyline.decode(line)
+            return pts.count >= 2 ? SnapLine(pts, closed: false, endsOnly: true) : nil
+        }
     }
 
     private func loadShores(_ f: MapFrame) {

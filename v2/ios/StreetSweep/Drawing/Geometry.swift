@@ -15,12 +15,16 @@ struct Projection {
 struct SnapLine {
     let ring: Ring
     let closed: Bool
+    /// A street: only its two ends (intersections) count as corners to snap onto, not
+    /// every bend in between.
+    let endsOnly: Bool
     /// Bounding box, to skip lines nowhere near.
     let south: Double, west: Double, north: Double, east: Double
 
-    init(_ ring: Ring, closed: Bool) {
+    init(_ ring: Ring, closed: Bool, endsOnly: Bool = false) {
         self.ring = ring
         self.closed = closed
+        self.endsOnly = endsOnly
         var s = 90.0, w = 180.0, n = -90.0, e = -180.0
         for c in ring { s = min(s, c.latitude); n = max(n, c.latitude); w = min(w, c.longitude); e = max(e, c.longitude) }
         south = s; west = w; north = n; east = e
@@ -34,6 +38,8 @@ struct Snap {
     let distance: CGFloat
     let line: Int
     let position: Double
+    /// On a corner (an intersection), not part way along a line.
+    var isCorner = false
 }
 
 enum Geometry {
@@ -54,8 +60,9 @@ enum Geometry {
             for i in 0..<n {
                 let a = pts[i]
                 let toA = distance(at, a)
-                if toA <= radius, corner == nil || toA < corner!.distance {
-                    corner = Snap(coord: r[i], distance: toA, line: li, position: Double(i))
+                let isCorner = !line.endsOnly || i == 0 || i == n - 1
+                if isCorner, toA <= radius, corner == nil || toA < corner!.distance {
+                    corner = Snap(coord: r[i], distance: toA, line: li, position: Double(i), isCorner: true)
                 }
                 if i == n - 1 && !line.closed { break }
                 let j = (i + 1) % n
@@ -155,6 +162,51 @@ enum Geometry {
         return best.way
     }
 
+    /// A lasso with Snap on: straightened first into clean edges (corners only where the
+    /// stroke really turns), then each corner onto the nearest intersection, street, boundary,
+    /// neighbour or shore; between two corners on the same boundary or neighbour, that line
+    /// is followed. Corners left free that are near a right angle are squared up.
+    static func snappedLasso(_ stroke: [CGPoint], lines: [SnapLine], radius: CGFloat, tolerance: CGFloat,
+                             view: (south: Double, west: Double, north: Double, east: Double), project: Projection) -> Ring {
+        var keep = simplify(stroke, tolerance: tolerance)
+        if keep.count > 3, distance(stroke[keep.last!], stroke[0]) < 18 { keep.removeLast() }
+        guard keep.count >= 3 else { return [] }
+        let hits = keep.map { snap(stroke[$0], lines: lines, radius: radius, view: view, project: project) }
+        var pts = keep.indices.map { hits[$0].map { project.toPoint($0.coord) } ?? stroke[keep[$0]] }
+
+        // Square up: a free corner within 12° of a right angle moves onto the circle whose
+        // diameter joins its neighbours, where the angle is exactly 90°.
+        if pts.count >= 4 {
+            for i in pts.indices where hits[i] == nil {
+                let a = pts[(i + pts.count - 1) % pts.count], v = pts[i], b = pts[(i + 1) % pts.count]
+                let u = CGPoint(x: a.x - v.x, y: a.y - v.y), w = CGPoint(x: b.x - v.x, y: b.y - v.y)
+                let lu = hypot(u.x, u.y), lw = hypot(w.x, w.y)
+                guard lu > 8, lw > 8 else { continue }
+                let angle = acos(max(-1, min(1, (u.x * w.x + u.y * w.y) / (lu * lw)))) * 180 / .pi
+                guard abs(angle - 90) < 12 else { continue }
+                let m = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+                let r = distance(a, b) / 2, dv = distance(v, m)
+                guard dv > 0 else { continue }
+                pts[i] = CGPoint(x: m.x + (v.x - m.x) * r / dv, y: m.y + (v.y - m.y) * r / dv)
+            }
+        }
+
+        var along: [CGFloat] = [0]
+        for i in 1..<stroke.count { along.append(along[i - 1] + distance(stroke[i], stroke[i - 1])) }
+        let total = along.last! + distance(stroke.last!, stroke[0])
+        var out: Ring = []
+        for k in keep.indices {
+            out.append(hits[k]?.coord ?? project.toCoord(pts[k]))
+            let n = (k + 1) % keep.count
+            // Follow a boundary or neighbour between two corners on it (streets are short
+            // pieces between intersections: the straight edge already follows them).
+            guard let a = hits[k], let b = hits[n], a.line == b.line, !lines[a.line].endsOnly else { continue }
+            let drawn = n > k ? along[keep[n]] - along[keep[k]] : total - along[keep[k]] + along[keep[n]]
+            out += follow(lines[a.line], from: a, to: b, drawn: drawn, radius: radius, project: project)
+        }
+        return dedupe(out)
+    }
+
     static func dedupe(_ ring: Ring) -> Ring {
         var out: Ring = []
         for c in ring where out.last != c { out.append(c) }
@@ -179,5 +231,33 @@ enum Geometry {
             j = i
         }
         return inside
+    }
+}
+
+/// Google's encoded polyline format, at 6 decimal places (what PostGIS's
+/// ST_AsEncodedPolyline(geom, 6) writes for the street pieces).
+enum Polyline {
+    static func decode(_ s: String, precision: Double = 1e6) -> [CLLocationCoordinate2D] {
+        var out: [CLLocationCoordinate2D] = []
+        let bytes = Array(s.utf8)
+        var i = 0, lat = 0, lon = 0
+        func next() -> Int? {
+            var result = 0, shift = 0
+            while i < bytes.count {
+                let b = Int(bytes[i]) - 63
+                i += 1
+                result |= (b & 0x1f) << shift
+                shift += 5
+                if b < 0x20 { return (result & 1) != 0 ? ~(result >> 1) : result >> 1 }
+            }
+            return nil
+        }
+        while i < bytes.count {
+            guard let dLat = next(), let dLon = next() else { break }
+            lat += dLat
+            lon += dLon
+            out.append(CLLocationCoordinate2D(latitude: Double(lat) / precision, longitude: Double(lon) / precision))
+        }
+        return out
     }
 }

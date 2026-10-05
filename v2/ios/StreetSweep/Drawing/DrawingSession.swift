@@ -70,6 +70,11 @@ final class DrawingSession {
     // ---- snapping ----
     private var neighbours: [SnapLine]
     var shores: [SnapLine] = []
+    /// Snap: also onto streets (intersections first) and state, county and city lines, with
+    /// lasso strokes straightened and right angles squared. Neighbours and shores always snap.
+    var snapping = false
+    var streets: [SnapLine] = []
+    var boundaries: [SnapLine] = []
 
     // ---- undo ----
     private var undoStack: [[Piece]] = []
@@ -277,8 +282,11 @@ final class DrawingSession {
             note = "Draw all the way round the area in one stroke, then lift the Pencil to close it."
             return
         }
-        let ring = Geometry.lassoRing(strokePoints, lines: snapLines(excluding: nil), radius: Self.snapRadius,
-                                      tolerance: Self.lassoTolerance, view: map.view, project: map.projection)
+        let ring = snapping
+            ? Geometry.snappedLasso(strokePoints, lines: snapLines(excluding: nil), radius: Self.snapRadius + 6,
+                                    tolerance: 12, view: map.view, project: map.projection)
+            : Geometry.lassoRing(strokePoints, lines: snapLines(excluding: nil), radius: Self.snapRadius,
+                                 tolerance: Self.lassoTolerance, view: map.view, project: map.projection)
         guard ring.count >= 3 else { return }
         checkpoint()
         let piece = Piece(ring: ring)
@@ -349,6 +357,13 @@ final class DrawingSession {
     /// Neighbours, shorelines, and this drawing's other pieces (so pieces can share an edge too).
     private func snapLines(excluding id: UUID?) -> [SnapLine] {
         neighbours + shores + pieces.filter { $0.id != id }.map { SnapLine($0.ring, closed: true) }
+            + (snapping ? boundaries + streets : [])
+    }
+
+    /// The Corners tool's line from the last corner to where the hovering Pencil would land.
+    var rubberBand: (from: CLLocationCoordinate2D, to: CLLocationCoordinate2D)? {
+        guard tool == .corners, let last = inProgress.last, let h = hover else { return nil }
+        return (last, h.coord)
     }
 
     private func snapPoint(_ p: CGPoint, _ map: MapFrame, excluding id: UUID?) -> Snap? {

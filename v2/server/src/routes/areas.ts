@@ -132,6 +132,31 @@ export default async function areaRoutes(app: FastifyInstance) {
     return { areas: rows };
   });
 
+  // The state, county and city lines in a box, for a drawing to snap to (the iPad's Snap
+  // option), clipped to the box like the shorelines.
+  app.get<{ Querystring: { bbox?: string } }>("/api/areas/lines", async (req, reply) => {
+    requireUser(req);
+    const b = (req.query.bbox ?? "").split(",").map(Number);
+    if (b.length !== 4 || b.some((n) => !Number.isFinite(n)) || b[0] >= b[2] || b[1] >= b[3]) throw badRequest("bbox=w,s,e,n");
+    if (b[2] - b[0] > 0.4 || b[3] - b[1] > 0.4) return { lines: [] };
+    const { rows } = await query<{ c: string }>(
+      `SELECT ST_AsGeoJSON(ST_SimplifyPreserveTopology(ST_Intersection(ST_Boundary(a.geom), e), 0.000005), 6) AS c
+         FROM areas a, ST_MakeEnvelope($1, $2, $3, $4, 4326) e
+        WHERE a.source = 'osm_boundary' AND a.deleted_at IS NULL AND a.level IN ('state', 'county', 'city')
+          AND a.geom && e AND NOT ST_Contains(a.geom, e)
+        LIMIT 200`,
+      b,
+    );
+    reply.header("Cache-Control", "private, max-age=3600");
+    const lines: [number, number][][] = [];
+    for (const r of rows) {
+      const g = JSON.parse(r.c) as { type: string; coordinates: unknown };
+      if (g.type === "LineString") lines.push(g.coordinates as [number, number][]);
+      else if (g.type === "MultiLineString") lines.push(...(g.coordinates as [number, number][][]));
+    }
+    return { lines: lines.filter((l) => l.length >= 2) };
+  });
+
   // A team's areas: what it drew and what it follows, with outlines for the map.
   app.get<{ Params: { id: string } }>("/api/teams/:id/areas", async (req) => {
     const me = requireUser(req);

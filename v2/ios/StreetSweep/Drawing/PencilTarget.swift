@@ -11,6 +11,8 @@ protocol PencilTarget: AnyObject {
     var strokeStyle: StrokeStyle { get }
     /// Where a hovering Pencil would land, and whether it would snap.
     var hover: (coord: CLLocationCoordinate2D, snapped: Bool)? { get }
+    /// A line from the last point placed to where the hovering Pencil would land.
+    var rubberBand: (from: CLLocationCoordinate2D, to: CLLocationCoordinate2D)? { get }
     /// Called after anything visible changes, so the map redraws.
     var onChange: (() -> Void)? { get set }
 

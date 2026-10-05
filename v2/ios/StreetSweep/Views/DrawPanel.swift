@@ -15,6 +15,12 @@ struct DrawPanel: View {
                 if let note = session.note {
                     Text(note).font(.callout).foregroundStyle(.orange)
                 }
+                if session.snapping {
+                    Text(ws.streetsTooFar
+                         ? "Snap is on: zoom in closer to snap to streets too. City, county and state lines snap at any zoom."
+                         : "Snap is on: points land on intersections, streets and city, county and state lines; lasso edges straighten and near-right angles square up.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
             } footer: {
                 Text("Fingers move the map. Two-finger tap undoes, three-finger tap redoes. Double-tap or squeeze the Pencil to switch back to the last tool.")
             }
@@ -80,9 +86,10 @@ struct DrawPanel: View {
     }
 }
 
-/// The floating tools over the map: Lasso, Corners, Edit, Eraser, then undo and redo.
+/// The floating tools over the map: Lasso, Corners, Edit, Eraser, then Snap, undo and redo.
 struct ToolPalette: View {
     @Bindable var session: DrawingSession
+    @Binding var snap: Bool
 
     var body: some View {
         HStack(spacing: 6) {
@@ -100,6 +107,18 @@ struct ToolPalette: View {
                 .accessibilityAddTraits(session.tool == tool ? .isSelected : [])
             }
             Divider().frame(height: 40).padding(.horizontal, 4)
+            Button { snap.toggle() } label: {
+                VStack(spacing: 3) {
+                    Image(systemName: "scope").font(.system(size: 22, weight: .medium))
+                    Text("Snap").font(.caption2.weight(.semibold))
+                }
+                .frame(width: 60, height: 56)
+                .foregroundStyle(snap ? Color.white : Color.primary)
+                .background(snap ? Color.orange : Color.clear, in: RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Snap to streets and boundaries")
+            .accessibilityAddTraits(snap ? .isSelected : [])
             iconButton("arrow.uturn.backward", "Undo", enabled: session.canUndo) { session.undo() }
             iconButton("arrow.uturn.forward", "Redo", enabled: session.canRedo) { session.redo() }
             if session.tool == .corners && session.inProgress.count >= 3 {

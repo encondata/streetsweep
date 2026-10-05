@@ -219,7 +219,22 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
         mp.lineOpacity = NSExpression(forConstantValue: 0)
         style.addLayer(mp)
 
+        // While drawing with Snap on: the lines it snaps to (state, county, city), faintly.
+        let sl = MLNLineStyleLayer(identifier: "snap-lines", source: source("snap-lines"))
+        sl.lineColor = NSExpression(forConstantValue: UIColor(red: 0.486, green: 0.227, blue: 0.929, alpha: 1))
+        sl.lineWidth = NSExpression(forConstantValue: 2)
+        sl.lineOpacity = NSExpression(forConstantValue: 0.55)
+        sl.lineDashPattern = NSExpression(forConstantValue: [3, 2])
+        style.addLayer(sl)
+
         addStreets(style)
+    }
+
+    /// The boundary lines a drawing will snap to, or none.
+    func setSnapLines(_ lines: [Ring]) {
+        guard styleReady, let src = view?.style?.source(withIdentifier: "snap-lines") as? MLNShapeSource else { return }
+        src.shape = Self.shape(lines.isEmpty ? [] : [["type": "Feature", "properties": [:],
+            "geometry": ["type": "MultiLineString", "coordinates": lines.map { $0.map { [$0.longitude, $0.latitude] } }]]])
     }
 
     // MARK: - Streets
@@ -625,6 +640,7 @@ final class PencilRecognizer: UIGestureRecognizer {
 final class DrawingOverlay: UIView {
     private let strokeLayer = CAShapeLayer()
     private let hoverLayer = CAShapeLayer()
+    private let bandLayer = CAShapeLayer()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -634,6 +650,11 @@ final class DrawingOverlay: UIView {
         strokeLayer.lineCap = .round
         strokeLayer.lineJoin = .round
         hoverLayer.lineWidth = 2
+        bandLayer.fillColor = UIColor.clear.cgColor
+        bandLayer.lineWidth = 2.5
+        bandLayer.lineDashPattern = [7, 5]
+        bandLayer.lineCap = .round
+        layer.addSublayer(bandLayer)
         layer.addSublayer(strokeLayer)
         layer.addSublayer(hoverLayer)
     }
@@ -653,6 +674,16 @@ final class DrawingOverlay: UIView {
         strokeLayer.path = path.cgPath
         strokeLayer.strokeColor = (s?.strokeStyle == .eraser ? UIColor.systemRed.withAlphaComponent(0.5) : orange.withAlphaComponent(0.9)).cgColor
         strokeLayer.lineWidth = s?.strokeStyle == .eraser ? 2 * DrawingSession.snapRadius : 3
+
+        if let band = s?.rubberBand {
+            let p = UIBezierPath()
+            p.move(to: view.convert(band.from, toPointTo: self))
+            p.addLine(to: view.convert(band.to, toPointTo: self))
+            bandLayer.path = p.cgPath
+            bandLayer.strokeColor = orange.withAlphaComponent(0.85).cgColor
+        } else {
+            bandLayer.path = nil
+        }
 
         if let h = s?.hover {
             let p = view.convert(h.coord, toPointTo: self)
