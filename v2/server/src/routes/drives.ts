@@ -14,6 +14,9 @@ import type { RawPoint } from "../drives/track.js";
 import { avatarUrl } from "./account.js";
 
 const MAX_POINTS = 50_000;
+/** Marking inside an outline: big enough for a whole neighbourhood or two, not a county. */
+const MARK_WITHIN_MAX_KM2 = 50;
+const MARK_WITHIN_MAX_PIECES = 5000;
 
 // One shape for lists and details. $1 is the viewer.
 const DRIVE = `
@@ -526,6 +529,80 @@ export default async function driveRoutes(app: FastifyInstance) {
         entity: "segment", data: { bulk: true, asked: b.segment_ids.length, changed: changed.length } });
       if (changed.length) await sendJob("achievements", { teamId: team.id }, { singletonKey: team.id });
       return { pieces: changed.length, meters: Math.round(changed.reduce((t, r) => t + Number(r.length_m), 0)) };
+    },
+  );
+
+  // Everything inside an outline drawn on the map (the iPad's outline tool): the pieces
+  // whose middle is inside, by the same rules as several streets at once (never what's
+  // driven or already marked either way). With `preview`, nothing changes: it says what
+  // would be marked and sends those pieces' lines, for the map to highlight first.
+  app.post<{ Params: { id: string }; Body: { geometry: unknown; kind: "complete" | "excluded"; preview?: boolean; note?: string | null } }>(
+    "/api/teams/:id/marks/within",
+    { schema: { body: { type: "object", required: ["geometry", "kind"], properties: {
+        geometry: { type: "object" }, kind: { type: "string", enum: ["complete", "excluded"] },
+        preview: { type: "boolean" }, note: { type: ["string", "null"], maxLength: 500 } } } } },
+    async (req) => {
+      const me = requireUser(req);
+      const team = await loadTeam(req.params.id);
+      if (!canDrive(await roleIn(team.id, me.id)) && !me.is_site_admin) throw forbidden("Viewers can't mark streets.");
+      const b = req.body;
+      const outline = await query<{ ok: boolean; km2: number }>(
+        `WITH g AS (SELECT ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326)), 3)) AS g)
+         SELECT NOT ST_IsEmpty(g) AS ok, coalesce(ST_Area(g::geography) / 1e6, 0) AS km2 FROM g`,
+        [JSON.stringify(b.geometry)],
+      ).catch(() => { throw badRequest("That outline isn't a shape we can use. Try drawing it again."); });
+      if (!outline.rows[0]?.ok) throw badRequest("That outline isn't a shape we can use. Try drawing it again.");
+      if (outline.rows[0].km2 > MARK_WITHIN_MAX_KM2) {
+        throw badRequest(`That outline covers ${Math.round(outline.rows[0].km2).toLocaleString()} km². Mark at most ${MARK_WITHIN_MAX_KM2} km² at a time.`);
+      }
+      // The pieces to mark: middle inside, not driven, not marked either way.
+      const pick = `WITH g AS (SELECT ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326)), 3)) AS g)
+        SELECT s.id, s.length_m, s.geom, s.way_id FROM g, street_segments s
+         WHERE s.retired_at IS NULL AND s.geom && g.g AND ST_Intersects(g.g, ST_LineInterpolatePoint(s.geom, 0.5))
+           AND NOT EXISTS (SELECT 1 FROM segment_marks mk WHERE mk.team_id = $2 AND mk.segment_id = s.id)
+           AND ($3 <> 'complete' OR NOT EXISTS (SELECT 1 FROM team_coverage tc WHERE tc.team_id = $2 AND tc.segment_id = s.id))`;
+      // Streets, not pieces: one name is one street (an unnamed way counts on its own).
+      const streets = `count(DISTINCT coalesce(w.name, p.way_id::text))::int`;
+
+      if (b.preview) {
+        const { rows } = await query<{ ids: string[] | null; streets: number; meters: number; lines: string | null }>(
+          `WITH p AS (${pick})
+           SELECT array_agg(p.id) AS ids, ${streets} AS streets, coalesce(sum(p.length_m), 0) AS meters,
+                  ST_AsGeoJSON(ST_Multi(ST_Collect(p.geom)), 6) AS lines
+             FROM p JOIN street_ways w ON w.way_id = p.way_id`,
+          [JSON.stringify(b.geometry), team.id, b.kind]);
+        const r = rows[0];
+        const pieces = r.ids?.length ?? 0;
+        if (pieces > MARK_WITHIN_MAX_PIECES) {
+          throw badRequest(`That's more than ${MARK_WITHIN_MAX_PIECES.toLocaleString()} street pieces at once. Draw a smaller outline.`);
+        }
+        return { streets: r.streets, pieces, meters: Math.round(Number(r.meters)), lines: r.lines ? JSON.parse(r.lines) : null };
+      }
+
+      const changed = await tx(async (c) => {
+        const { rows } = await c.query<{ segment_id: string; length_m: number; street: string }>(
+          `WITH p AS (${pick}),
+                ins AS (INSERT INTO segment_marks (team_id, segment_id, kind, user_id, note)
+                        SELECT $2, p.id, $3, $4, $5 FROM p
+                        ON CONFLICT DO NOTHING RETURNING segment_id)
+           SELECT ins.segment_id, p.length_m, coalesce(w.name, p.way_id::text) AS street
+             FROM ins JOIN p ON p.id = ins.segment_id JOIN street_ways w ON w.way_id = p.way_id`,
+          [JSON.stringify(b.geometry), team.id, b.kind, me.id, b.note?.trim() || null]);
+        if (rows.length > MARK_WITHIN_MAX_PIECES) {
+          throw badRequest(`That's more than ${MARK_WITHIN_MAX_PIECES.toLocaleString()} street pieces at once. Draw a smaller outline.`);
+        }
+        return rows;
+      });
+      await audit(pool, { userId: me.id, teamId: team.id, action: `street.${b.kind}`, entity: "segment",
+        data: { within: true, km2: Math.round(outline.rows[0].km2 * 100) / 100, changed: changed.length } });
+      if (changed.length) await sendJob("achievements", { teamId: team.id }, { singletonKey: team.id });
+      return {
+        streets: new Set(changed.map((r) => r.street)).size,
+        pieces: changed.length,
+        meters: Math.round(changed.reduce((t, r) => t + Number(r.length_m), 0)),
+        // So the app can undo exactly this (marks/bulk with "clear").
+        segment_ids: changed.map((r) => Number(r.segment_id)),
+      };
     },
   );
 

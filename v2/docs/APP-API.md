@@ -60,6 +60,13 @@ doesn't show them yet. Sync's coverage can still list highway segment ids; skip 
   while you were in it.
 - `PUT /api/teams/:id/marks/:segmentId` `{ kind: "complete"|"excluded", note? }` sets a mark;
   `DELETE` removes it.
+- `POST /api/teams/:id/marks/within` `{ geometry (GeoJSON Polygon/MultiPolygon), kind: "complete"|"excluded", preview?: true }`
+  marks every street piece whose middle is inside the outline, except pieces already
+  driven or marked either way (the same rules as `marks/bulk`). With `preview` nothing
+  changes: it answers `{ streets, pieces, meters, lines }` (`lines` is a MultiLineString of
+  those pieces, for highlighting). Otherwise `{ streets, pieces, meters, segment_ids }`;
+  undo by posting those ids to `marks/bulk` with `kind: "clear"`. At most 50 km² and 5,000
+  pieces at once. The iPad app's "Mark by outline" uses this.
 - `POST /api/places` `{ id (uuid from the phone), name, note?, lon, lat, drive_id?, team_ids? }`
   answers 201, or 200 `duplicate`. `PATCH /api/places/:id` edits (and `team_ids`
   replaces the sharing), `DELETE` removes. Photos: `POST /api/places/:id/photos?w=&h=`

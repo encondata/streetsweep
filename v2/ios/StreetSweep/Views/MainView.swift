@@ -26,6 +26,7 @@ enum AppSection: String, CaseIterable, Identifiable {
 struct MainView: View {
     @Environment(AppModel.self) private var model
     @State private var ws = Workspace()
+    @State private var cw = CoverageWorkspace()
     @AppStorage("section") private var section: AppSection = .areas
     @State private var showAccount = false
 
@@ -36,35 +37,48 @@ struct MainView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             // Areas stays alive underneath, so its map doesn't reload on every switch.
+            // The two maps stay alive underneath, so they don't reload on every switch.
             AreasScreen()
                 .opacity(section == .areas ? 1 : 0)
                 .allowsHitTesting(section == .areas)
-            if section != .areas {
+            MapScreen()
+                .opacity(section == .map ? 1 : 0)
+                .allowsHitTesting(section == .map)
+            if section != .areas && section != .map {
                 SoonView(section: section)
                     .transition(.opacity)
             }
-            if ws.session == nil {
+            // Drawing or marking: the tools take the bottom of the screen instead.
+            if ws.session == nil && cw.mark == nil {
                 NavBar(sections: sections, selection: $section) { showAccount = true }
                     .padding(.bottom, 14)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(.spring(duration: 0.3), value: ws.session == nil)
+        .animation(.spring(duration: 0.3), value: ws.session == nil && cw.mark == nil)
         .animation(.easeInOut(duration: 0.15), value: section)
         .environment(ws)
+        .environment(cw)
         .sheet(isPresented: $showAccount) { AccountView() }
-        .alert("Something went wrong", isPresented: Binding(get: { ws.error != nil }, set: { if !$0 { ws.error = nil } })) {
-            Button("OK") { ws.error = nil }
+        .alert("Something went wrong", isPresented: Binding(get: { ws.error != nil || cw.error != nil },
+                                                             set: { if !$0 { ws.error = nil; cw.error = nil } })) {
+            Button("OK") { ws.error = nil; cw.error = nil }
         } message: {
-            Text(ws.error ?? "")
+            Text(ws.error ?? cw.error ?? "")
         }
-        .onAppear { ws.attach(model) }
+        .onAppear {
+            ws.attach(model)
+            cw.attach(model)
+        }
         // The team is known once the server has said who you are (straight away after
         // signing in, a moment after launch otherwise), and changes with the picker.
         .task(id: model.team?.id) {
             guard model.team != nil else { return }
             ws.close()
-            await ws.reload()
+            if cw.mark != nil { cw.cancelMarking() }
+            async let a: Void = ws.reload()
+            async let b: Void = cw.reload()
+            _ = await (a, b)
         }
     }
 }

@@ -65,7 +65,13 @@ neighbours share one. Address search through `/api/geocode`. Tap an area to open
 
 **i3. Drawing.** Everything under "Tools" above, plus drafts kept on the iPad.
 
-**i4. Coverage map.** Driven and undriven streets in your personal colours, finished-area
+**i4. Coverage map.** Built so far (2026-10-04): the Map tab with the team's streets in
+your colours, finished areas shaded, and **Mark by outline**: draw round streets with the
+Pencil, see the ones it would mark flashing (pieces whose middle is inside, not already
+driven or marked), then Mark done, with Undo afterwards. Still to come: tapping a street
+to mark it.
+
+**i4 (as planned).** Driven and undriven streets in your personal colours, finished-area
 shading, and marks, matching the web's Map page.
 
 **Later.** The rest of the portal, one screen at a time: Home, Drives, Places, Teams,

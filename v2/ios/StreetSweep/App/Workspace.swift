@@ -7,7 +7,7 @@ import Observation
 @MainActor @Observable
 final class Workspace {
     let store = AreasStore()
-    let map = MapController()
+    let map = MapController(mode: .areas)
     private(set) var openArea: Area?
     private(set) var openCanEdit = false
     private(set) var session: DrawingSession?

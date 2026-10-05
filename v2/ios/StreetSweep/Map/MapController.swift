@@ -8,14 +8,32 @@ enum Basemap: String, CaseIterable, Identifiable {
     var label: String { rawValue.capitalized }
 }
 
-/// The map, and everything drawn on it: the server's basemaps and plain streets, the team's
-/// areas, and an outline being drawn. Fingers always move the map; while drawing, the
-/// Apple Pencil draws (and a finger too, if "Draw with finger" is on).
+/// The map, and everything drawn on it: the server's basemaps and streets, the team's
+/// areas, and whatever the Pencil is drawing. Fingers always move the map; while drawing,
+/// the Apple Pencil draws (and a finger too, if "Draw with finger" is on).
+///
+/// Two kinds: the Areas map shows plain streets (planning, no drive history), the
+/// coverage map colours them for a team: driven, still to do, left out.
 @MainActor
 final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestureRecognizerDelegate, UIPencilInteractionDelegate {
+    enum Mode { case areas, coverage }
+    let mode: Mode
     private(set) weak var view: MLNMapView?
     private var styleReady = false
     private let overlay = DrawingOverlay()
+    private var root = ""
+
+    init(mode: Mode) {
+        self.mode = mode
+        super.init()
+    }
+
+    /// The coverage map's team: its streets come coloured for it.
+    private(set) var teamId: String?
+    private var streetsVersion = 0
+    private var colorsPref: MapColors = .standard
+    private var completeFill = StreetColor(color: "#39ff14", opacity: 0.1)
+    private var shadeComplete = true
 
     var base: Basemap = .map { didSet { applyBase() } }
     /// Tapped an area on the map (not while drawing).
@@ -30,12 +48,17 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
     private var selectedArea: String?
     private var searchPin: CLLocationCoordinate2D?
 
+    /// An area's outline being drawn (its pieces are drawn as map layers).
     private(set) var session: DrawingSession?
+    /// Whatever the Pencil draws into right now: the drawing session, or a mark outline.
+    private(set) var ink: PencilTarget?
     var fingerDraws = false { didSet { configureGestures() } }
 
     // MARK: - Making the view
 
     func makeView(server: URL) -> MLNMapView {
+        root = server.absoluteString
+        while root.hasSuffix("/") { root.removeLast() }
         let view = MLNMapView(frame: .zero, styleURL: Self.writeStyle(server: server))
         view.delegate = self
         view.logoView.isHidden = true
@@ -100,18 +123,12 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
                 "osm": raster("osm", "© OpenStreetMap contributors"),
                 "sat": raster("sat", "Imagery © Esri"),
                 "ref": raster("ref", nil),
-                "streets": ["type": "vector", "tiles": ["\(root)/api/tiles/streets/{z}/{x}/{y}"], "minzoom": 12, "maxzoom": 16],
             ],
             "layers": [
                 ["id": "background", "type": "background", "paint": ["background-color": "#eef1f4"]],
                 ["id": "base-osm", "type": "raster", "source": "osm", "paint": ["raster-saturation": -0.35]],
                 ["id": "base-sat", "type": "raster", "source": "sat", "layout": ["visibility": "none"]],
                 ["id": "base-ref", "type": "raster", "source": "ref", "layout": ["visibility": "none"]],
-                // Plain streets, as on the web's Areas page: no coverage while planning areas.
-                ["id": "streets", "type": "line", "source": "streets", "source-layer": "streets",
-                 "layout": ["line-cap": "round", "line-join": "round"],
-                 "paint": ["line-color": "#8b98a6", "line-opacity": 0.75,
-                           "line-width": ["interpolate", ["linear"], ["zoom"], 12, 1.2, 16, 4, 19, 9]]],
             ],
         ]
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("streetsweep-style.json")
@@ -139,9 +156,8 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
 
         let areas = source("areas")
         let fill = MLNFillStyleLayer(identifier: "areas-fill", source: areas)
-        fill.fillColor = NSExpression(mglJSONObject: ["case", ["get", "complete"], "#39ff14", ["to-color", ["get", "color"]]])
-        fill.fillOpacity = NSExpression(mglJSONObject: ["case", ["get", "selected"], 0.18, ["get", "complete"], 0.12, 0.06])
         style.addLayer(fill)
+        applyAreaFill()
         let line = MLNLineStyleLayer(identifier: "areas-line", source: areas)
         line.lineColor = color
         line.lineWidth = NSExpression(mglJSONObject: ["case", ["get", "selected"], 4.5, 2.2])
@@ -183,6 +199,147 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
         hc.circleStrokeColor = NSExpression(mglJSONObject: ["match", ["get", "kind"], "mid", ["case", ["get", "selected"], purple, orange], "#ffffff"])
         hc.circleStrokeWidth = NSExpression(forConstantValue: 2.5)
         style.addLayer(hc)
+
+        // An outline of streets to mark: its shape, and the streets it would mark, flashing.
+        let markOutline = source("mark-outline")
+        let mof = MLNFillStyleLayer(identifier: "mark-outline-fill", source: markOutline)
+        mof.fillColor = NSExpression(forConstantValue: UIColor(red: 1, green: 0.478, blue: 0, alpha: 1))
+        mof.fillOpacity = NSExpression(forConstantValue: 0.08)
+        style.addLayer(mof)
+        let mol = MLNLineStyleLayer(identifier: "mark-outline-line", source: markOutline)
+        mol.lineColor = NSExpression(forConstantValue: UIColor(red: 1, green: 0.478, blue: 0, alpha: 1))
+        mol.lineWidth = NSExpression(forConstantValue: 2.5)
+        mol.lineDashPattern = NSExpression(forConstantValue: [2, 1.5])
+        style.addLayer(mol)
+        let mp = MLNLineStyleLayer(identifier: "mark-preview", source: source("mark-preview"))
+        mp.lineColor = NSExpression(forConstantValue: UIColor(red: 1, green: 0.478, blue: 0, alpha: 1))
+        mp.lineCap = NSExpression(forConstantValue: "round")
+        mp.lineJoin = NSExpression(forConstantValue: "round")
+        mp.lineWidth = Self.previewWidth(1)
+        mp.lineOpacity = NSExpression(forConstantValue: 0)
+        style.addLayer(mp)
+
+        addStreets(style)
+    }
+
+    // MARK: - Streets
+
+    /// Streets from the server's tiles, under the area outlines: plain on the Areas map,
+    /// coloured for the team on the coverage map.
+    private func addStreets(_ style: MLNStyle) {
+        var url = "\(root)/api/tiles/streets/{z}/{x}/{y}"
+        if mode == .coverage, let teamId { url += "?team=\(teamId)&v=\(streetsVersion)" }
+        let src = MLNVectorTileSource(identifier: "streets", tileURLTemplates: [url],
+                                      options: [.minimumZoomLevel: 12, .maximumZoomLevel: 16])
+        style.addSource(src)
+        let below = style.layer(withIdentifier: "areas-line")
+        let width: [Any] = ["interpolate", ["linear"], ["zoom"], 12, 1.2, 16, 4, 19, 9]
+        if mode == .coverage {
+            let casing = MLNLineStyleLayer(identifier: "streets-casing", source: src)
+            casing.sourceLayerIdentifier = "streets"
+            casing.lineColor = NSExpression(forConstantValue: UIColor.white)
+            casing.lineOpacity = NSExpression(forConstantValue: 0.9)
+            casing.lineWidth = NSExpression(mglJSONObject: ["interpolate", ["linear"], ["zoom"], 12, 2.5, 16, 7, 19, 14])
+            casing.lineCap = NSExpression(forConstantValue: "round")
+            casing.lineJoin = NSExpression(forConstantValue: "round")
+            if let below { style.insertLayer(casing, below: below) } else { style.addLayer(casing) }
+        }
+        let line = MLNLineStyleLayer(identifier: "streets", source: src)
+        line.sourceLayerIdentifier = "streets"
+        line.lineWidth = NSExpression(mglJSONObject: width)
+        line.lineCap = NSExpression(forConstantValue: "round")
+        line.lineJoin = NSExpression(forConstantValue: "round")
+        if let below { style.insertLayer(line, below: below) } else { style.addLayer(line) }
+        applyStreetColors()
+    }
+
+    private func applyStreetColors() {
+        guard let line = view?.style?.layer(withIdentifier: "streets") as? MLNLineStyleLayer else { return }
+        if mode == .areas {
+            // Plain streets, as on the web's Areas page: no coverage while planning areas.
+            line.lineColor = NSExpression(forConstantValue: UIColor(red: 0.545, green: 0.596, blue: 0.651, alpha: 1))
+            line.lineOpacity = NSExpression(forConstantValue: 0.75)
+            return
+        }
+        // As the web colours them: done or marked done in the driven colour, left out grey,
+        // highways the team doesn't count faint, the rest in the to-do colour.
+        let c = colorsPref
+        line.lineColor = NSExpression(mglJSONObject: ["match", ["get", "state"], ["done", "complete"], c.driven.color, "excluded", "#9aa7b4", c.undriven.color])
+        line.lineOpacity = NSExpression(mglJSONObject: ["match", ["get", "state"], ["done", "complete"], c.driven.opacity, "excluded", 0.7, "nc", 0.3, c.undriven.opacity])
+    }
+
+    private func applyAreaFill() {
+        guard let fill = view?.style?.layer(withIdentifier: "areas-fill") as? MLNFillStyleLayer else { return }
+        let own: [Any] = ["to-color", ["get", "color"]]
+        fill.fillColor = NSExpression(mglJSONObject: shadeComplete ? ["case", ["get", "complete"], completeFill.color, own] : own)
+        fill.fillOpacity = NSExpression(mglJSONObject: shadeComplete
+            ? ["case", ["get", "complete"], completeFill.opacity, ["get", "selected"], 0.16, 0.06]
+            : ["case", ["get", "selected"], 0.16, 0.06])
+    }
+
+    /// The person's colours, from their preferences on the website.
+    func setPreferences(_ p: Preferences?) {
+        colorsPref = p?.mapColors ?? .standard
+        completeFill = p?.completeFill ?? StreetColor(color: "#39ff14", opacity: 0.1)
+        shadeComplete = p?.shadeComplete ?? true
+        applyStreetColors()
+        applyAreaFill()
+    }
+
+    /// The coverage map's team: its streets come coloured for it.
+    func setTeam(_ id: String?) {
+        guard id != teamId else { return }
+        teamId = id
+        reloadStreets()
+    }
+
+    /// Fetch the streets again (after marking some done, say): coverage has changed.
+    func reloadStreets() {
+        streetsVersion += 1
+        guard styleReady, let style = view?.style else { return }
+        for id in ["streets", "streets-casing"] { if let l = style.layer(withIdentifier: id) { style.removeLayer(l) } }
+        if let s = style.source(withIdentifier: "streets") { style.removeSource(s) }
+        addStreets(style)
+    }
+
+    // MARK: - Marking by outline: the preview
+
+    private var pulse: CADisplayLink?
+    private var pulseStart: CFTimeInterval = 0
+
+    /// The outline drawn to mark streets, and the streets it would mark (flashing), or nothing.
+    func setMarkPreview(outline: Ring?, lines: [[CLLocationCoordinate2D]]) {
+        guard styleReady, let style = view?.style else { return }
+        (style.source(withIdentifier: "mark-outline") as? MLNShapeSource)?.shape = Self.shape(outline.map { r in
+            [["type": "Feature", "properties": [:], "geometry": ["type": "Polygon", "coordinates": [(r + r.prefix(1)).map { [$0.longitude, $0.latitude] }]]]]
+        } ?? [])
+        (style.source(withIdentifier: "mark-preview") as? MLNShapeSource)?.shape = Self.shape(lines.isEmpty ? [] : [
+            ["type": "Feature", "properties": [:], "geometry": ["type": "MultiLineString", "coordinates": lines.map { $0.map { [$0.longitude, $0.latitude] } }]],
+        ])
+        if lines.isEmpty {
+            pulse?.invalidate()
+            pulse = nil
+            (style.layer(withIdentifier: "mark-preview") as? MLNLineStyleLayer)?.lineOpacity = NSExpression(forConstantValue: 0)
+        } else if pulse == nil {
+            pulseStart = CACurrentMediaTime()
+            let link = CADisplayLink(target: self, selector: #selector(pulseTick))
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 15, maximum: 30)
+            link.add(to: .main, forMode: .common)
+            pulse = link
+        }
+    }
+
+    /// A beat about once a second, brighter and a touch wider, like the web's multi-select.
+    @objc private func pulseTick() {
+        guard let layer = view?.style?.layer(withIdentifier: "mark-preview") as? MLNLineStyleLayer else { return }
+        let t = CACurrentMediaTime() - pulseStart
+        let beat = 0.5 - 0.5 * cos(t * 2 * .pi / 1.1)
+        layer.lineOpacity = NSExpression(forConstantValue: 0.55 + 0.45 * beat)
+        layer.lineWidth = Self.previewWidth(1 + 0.35 * beat)
+    }
+
+    private static func previewWidth(_ w: Double) -> NSExpression {
+        NSExpression(mglJSONObject: ["interpolate", ["linear"], ["zoom"], 10, 2.5 * w, 12, 4 * w, 16, 9 * w, 19, 16 * w])
     }
 
     private func applyBase() {
@@ -233,7 +390,7 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
     }
 
     @objc private func tapped(_ r: UITapGestureRecognizer) {
-        guard session == nil, let view else { return }
+        guard ink == nil, let view else { return }
         let p = r.location(in: view)
         let hits = view.visibleFeatures(at: p, styleLayerIdentifiers: ["areas-fill"])
         // Smallest first: tapping inside a neighbourhood that sits inside a city means the neighbourhood.
@@ -246,18 +403,31 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
 
     func startDrawing(_ s: DrawingSession) {
         session = s
-        s.onChange = { [weak self] in self?.renderDrawing() }
-        configureGestures()
+        startInk(s)
         renderAreas()
         renderDrawing()
     }
 
     func stopDrawing() {
-        session?.onChange = nil
         session = nil
-        configureGestures()
+        stopInk()
         renderAreas()
         renderDrawing()
+    }
+
+    /// The Pencil draws into `target` (fingers keep moving the map) until `stopInk`.
+    func startInk(_ target: PencilTarget) {
+        ink?.onChange = nil
+        ink = target
+        target.onChange = { [weak self] in self?.renderDrawing() }
+        configureGestures()
+    }
+
+    func stopInk() {
+        ink?.onChange = nil
+        ink = nil
+        configureGestures()
+        overlay.render(nil, view: view)
     }
 
     /// The map right now, for the drawing to turn screen points into ground and back.
@@ -271,7 +441,7 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
     }
 
     private func renderDrawing() {
-        overlay.render(session, view: view)
+        overlay.render(ink, view: view)
         guard styleReady, let style = view?.style else { return }
         let s = session
         let pieces: [[String: Any]] = (s?.pieces ?? []).map { p in
@@ -322,7 +492,7 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
     /// and the map needs two fingers to move.
     private func configureGestures() {
         guard let view else { return }
-        let drawing = session != nil
+        let drawing = ink != nil
         let ours: Set<UIGestureRecognizer> = [pencil, twoFingerTap, threeFingerTap]
         let fingers = [UITouch.TouchType.direct, .indirectPointer].map { NSNumber(value: $0.rawValue) }
         let all = [UITouch.TouchType.direct, .indirect, .pencil, .indirectPointer].map { NSNumber(value: $0.rawValue) }
@@ -343,7 +513,7 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
     }
 
     @objc private func pencilMoved(_ r: PencilRecognizer) {
-        guard let s = session, let f = frame() else { return }
+        guard let s = ink, let f = frame() else { return }
         switch r.state {
         case .began: s.began(r.points.first ?? r.location(in: view), f); s.moved(Array(r.points.dropFirst()), f)
         case .changed: s.moved(r.points, f)
@@ -354,11 +524,11 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
         r.points.removeAll()
     }
 
-    @objc private func undoTap() { session?.undo() }
-    @objc private func redoTap() { session?.redo() }
+    @objc private func undoTap() { ink?.undo() }
+    @objc private func redoTap() { ink?.redo() }
 
     @objc private func hovered(_ r: UIHoverGestureRecognizer) {
-        guard let s = session, let f = frame() else { return }
+        guard let s = ink, let f = frame() else { return }
         // A Pencil hovering above the screen (it reports a height); a trackpad pointer doesn't.
         let isPencil = r.zOffset > 0
         switch r.state {
@@ -369,12 +539,12 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
 
     func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveTap tap: UIPencilInteraction.Tap) {
         guard UIPencilInteraction.preferredTapAction != .ignore else { return }
-        session?.swapTool()
+        ink?.swapTool()
     }
 
     func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveSqueeze squeeze: UIPencilInteraction.Squeeze) {
         guard squeeze.phase == .ended, UIPencilInteraction.preferredSqueezeAction != .ignore else { return }
-        session?.swapTool()
+        ink?.swapTool()
     }
 
     func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
@@ -384,12 +554,12 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
     // MARK: - Camera
 
     func mapView(_ mapView: MLNMapView, regionIsChangingWith reason: MLNCameraChangeReason) {
-        overlay.render(session, view: view)
+        overlay.render(ink, view: view)
     }
 
     func mapView(_ mapView: MLNMapView, regionDidChangeAnimated animated: Bool) {
         Camera.save(center: mapView.centerCoordinate, zoom: mapView.zoomLevel)
-        overlay.render(session, view: view)
+        overlay.render(ink, view: view)
         if let f = frame() { onSettle?(f) }
     }
 
@@ -469,7 +639,7 @@ final class DrawingOverlay: UIView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    @MainActor func render(_ s: DrawingSession?, view: MLNMapView?) {
+    @MainActor func render(_ s: PencilTarget?, view: MLNMapView?) {
         guard let view else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -478,11 +648,11 @@ final class DrawingOverlay: UIView {
         if let s, s.stroke.count >= 2 {
             path.move(to: view.convert(s.stroke[0], toPointTo: self))
             for c in s.stroke.dropFirst() { path.addLine(to: view.convert(c, toPointTo: self)) }
-            if s.tool == .lasso { path.close() }
+            if s.strokeStyle == .lasso { path.close() }
         }
         strokeLayer.path = path.cgPath
-        strokeLayer.strokeColor = (s?.tool == .eraser ? UIColor.systemRed.withAlphaComponent(0.5) : orange.withAlphaComponent(0.9)).cgColor
-        strokeLayer.lineWidth = s?.tool == .eraser ? 2 * DrawingSession.snapRadius : 3
+        strokeLayer.strokeColor = (s?.strokeStyle == .eraser ? UIColor.systemRed.withAlphaComponent(0.5) : orange.withAlphaComponent(0.9)).cgColor
+        strokeLayer.lineWidth = s?.strokeStyle == .eraser ? 2 * DrawingSession.snapRadius : 3
 
         if let h = s?.hover {
             let p = view.convert(h.coord, toPointTo: self)
