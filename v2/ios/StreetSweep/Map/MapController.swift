@@ -40,6 +40,10 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
     var onAreaTap: ((String) -> Void)?
     /// Tapped a place's pin (the coverage map shows them).
     var onPlaceTap: ((String) -> Void)?
+    /// Tapped a street (the coverage map): its piece id and name. Tapping nothing gives nil.
+    var onStreetTap: ((StreetTap?) -> Void)?
+    /// Something else is happening on the map (adding a place): taps do nothing.
+    var tapsPaused = false
 
     /// The middle of the map, where a place being added goes.
     var centerCoordinate: CLLocationCoordinate2D? { view?.centerCoordinate }
@@ -290,6 +294,24 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
         applyStreetColors()
     }
 
+    /// The street piece tapped, drawn bold over the others; empty to clear.
+    func setPickedStreet(_ coords: [CLLocationCoordinate2D]) {
+        guard styleReady, let style = view?.style else { return }
+        if style.source(withIdentifier: "street-picked") == nil {
+            let src = MLNShapeSource(identifier: "street-picked", shape: nil, options: nil)
+            style.addSource(src)
+            let l = MLNLineStyleLayer(identifier: "street-picked", source: src)
+            l.lineColor = NSExpression(forConstantValue: UIColor(red: 0.051, green: 0.106, blue: 0.157, alpha: 1))
+            l.lineWidth = NSExpression(mglJSONObject: ["interpolate", ["linear"], ["zoom"], 12, 4, 16, 8, 19, 14])
+            l.lineCap = NSExpression(forConstantValue: "round")
+            l.lineJoin = NSExpression(forConstantValue: "round")
+            l.lineOpacity = NSExpression(forConstantValue: 0.8)
+            if let above = style.layer(withIdentifier: "streets") { style.insertLayer(l, above: above) } else { style.addLayer(l) }
+        }
+        var c = coords
+        (style.source(withIdentifier: "street-picked") as? MLNShapeSource)?.shape = coords.count >= 2 ? MLNPolyline(coordinates: &c, count: UInt(c.count)) : nil
+    }
+
     private func applyStreetColors() {
         guard let line = view?.style?.layer(withIdentifier: "streets") as? MLNLineStyleLayer else { return }
         if mode == .areas {
@@ -448,8 +470,30 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
         guard ink == nil, let view else { return }
         let p = r.location(in: view)
         let near = CGRect(x: p.x - 14, y: p.y - 14, width: 28, height: 28)
+        guard !tapsPaused else { return }
         if let id = view.visibleFeatures(in: near, styleLayerIdentifiers: ["places"]).first?.attribute(forKey: "id") as? String {
             onPlaceTap?(id)
+            return
+        }
+        if mode == .coverage {
+            // The street nearest the finger: the piece's id is the tile feature's own id.
+            let hits = view.visibleFeatures(in: near, styleLayerIdentifiers: ["streets"])
+            let best = hits.compactMap { f -> (MLNFeature, Int, CGFloat)? in
+                guard let id = (f.identifier as? NSNumber)?.intValue ?? (f.identifier as? Int), let line = f as? MLNPolylineFeature else { return nil }
+                let pts = UnsafeBufferPointer(start: line.coordinates, count: Int(line.pointCount)).map { view.convert($0, toPointTo: view) }
+                var d = CGFloat.infinity
+                for i in 1..<max(1, pts.count) { d = min(d, Geometry.distance(p, toSegment: pts[i - 1], pts[i])) }
+                return (f, id, d)
+            }.min { $0.2 < $1.2 }
+            if let (f, id, _) = best, let line = f as? MLNPolylineFeature {
+                let coords = UnsafeBufferPointer(start: line.coordinates, count: Int(line.pointCount)).map { $0 }
+                setPickedStreet(coords)
+                onStreetTap?(StreetTap(id: id, name: f.attribute(forKey: "name") as? String,
+                                       highway: f.attribute(forKey: "highway") as? String ?? "", lengthM: (f.attribute(forKey: "length_m") as? NSNumber)?.doubleValue ?? 0))
+            } else {
+                setPickedStreet([])
+                onStreetTap?(nil)
+            }
             return
         }
         let hits = view.visibleFeatures(at: p, styleLayerIdentifiers: ["areas-fill"])
@@ -785,4 +829,13 @@ struct MapView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: MLNMapView, context: Context) {}
+}
+
+
+/// A street piece tapped on the coverage map.
+struct StreetTap: Equatable, Identifiable {
+    let id: Int
+    let name: String?
+    let highway: String
+    let lengthM: Double
 }

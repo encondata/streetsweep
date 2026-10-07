@@ -17,16 +17,35 @@ final class CoverageWorkspace {
     /// A place to show (tapped on the map, or just added).
     var openPlace: String?
     private(set) var places: [Place] = []
+    /// A street tapped on the map, shown in its card.
+    var pickedStreet: StreetTap?
+
+    func closeStreet() {
+        pickedStreet = nil
+        map.setPickedStreet([])
+    }
+
+    /// A street was marked from its card: redraw the streets, recount the areas.
+    func streetChanged() {
+        map.reloadStreets()
+        Task { await reloadAreas() }
+    }
 
     func startAddingPlace() {
         if mark != nil { cancelMarking() }
+        closeStreet()
         addingPlace = true
+        map.tapsPaused = true
     }
 
-    func stopAddingPlace() { addingPlace = false }
+    func stopAddingPlace() {
+        addingPlace = false
+        map.tapsPaused = false
+    }
 
     func placeAdded(_ p: Place) {
         addingPlace = false
+        map.tapsPaused = false
         places.append(p)
         map.setPlaces(places)
         openPlace = p.id
@@ -48,10 +67,12 @@ final class CoverageWorkspace {
         self.app = app
         map.setPreferences(app.user?.preferences)
         map.onPlaceTap = { [weak self] id in self?.openPlace = id }
+        map.onStreetTap = { [weak self] tap in self?.pickedStreet = tap }
     }
 
     func reload() async {
         guard let api, let teamId else { return }
+        closeStreet()
         map.setTeam(teamId)
         map.setPreferences(app?.user?.preferences)
         await store.load(api, team: teamId)
@@ -67,6 +88,7 @@ final class CoverageWorkspace {
     func startMarking(_ mode: MarkSession.Mode) {
         guard let api, let teamId else { return }
         lastMarked = nil
+        closeStreet()
         let s = MarkSession(teamId: teamId, api: api)
         s.mode = mode
         let render = { [weak self, weak s] in
@@ -117,7 +139,7 @@ final class CoverageWorkspace {
     }
 
     /// Progress (and finished shading) changes as streets are marked.
-    private func reloadAreas() async {
+    func reloadAreas() async {
         guard let api, let teamId else { return }
         // Counting is done by the server shortly after a mark; give it a moment.
         try? await Task.sleep(for: .milliseconds(800))

@@ -69,21 +69,7 @@ struct MapScreen: View {
                 .padding(.bottom, 92)
             }
         }
-        .overlay(alignment: .bottom) {
-            if let s = cw.mark {
-                MarkPanel(session: s, fingerDraws: $fingerDraws, mode: $markMode)
-                    .padding(.bottom, 20)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            } else if cw.addingPlace {
-                AddPlaceCard()
-                    .padding(.bottom, 20)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            } else if let m = cw.lastMarked {
-                UndoToast(marked: m)
-                    .padding(.bottom, 92)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
+        .overlay(alignment: .bottom) { bottomPanel }
         .sheet(item: Binding(get: { cw.openPlace.map(PlaceID.init) }, set: { cw.openPlace = $0?.id })) { p in
             NavigationStack {
                 PlaceDetailView(placeId: p.id) { Task { await cw.reloadPlaces() } }
@@ -94,6 +80,7 @@ struct MapScreen: View {
         .animation(.spring(duration: 0.3), value: cw.mark == nil)
         .animation(.spring(duration: 0.3), value: cw.addingPlace)
         .animation(.spring(duration: 0.3), value: cw.lastMarked)
+        .animation(.spring(duration: 0.25), value: cw.pickedStreet == nil)
         .onAppear {
             cw.map.base = base
             cw.map.fingerDraws = fingerDraws
@@ -102,6 +89,27 @@ struct MapScreen: View {
         .onChange(of: fingerDraws) { _, on in cw.map.fingerDraws = on }
         .onChange(of: model.user?.preferences) { _, p in cw.map.setPreferences(p) }
     }
+
+    /// Along the bottom: the mark panel, the add-place card, a tapped street, or the undo offer.
+    @ViewBuilder private var bottomPanel: some View {
+            if let s = cw.mark {
+                MarkPanel(session: s, fingerDraws: $fingerDraws, mode: $markMode)
+                    .padding(.bottom, 20)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if cw.addingPlace {
+                AddPlaceCard()
+                    .padding(.bottom, 20)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if let t = cw.pickedStreet, let team = model.team?.id {
+                StreetCard(tap: t, teamId: team, onChange: { cw.streetChanged() }, onClose: { cw.closeStreet() })
+                    .padding(.bottom, 92)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if let m = cw.lastMarked {
+                UndoToast(marked: m)
+                    .padding(.bottom, 92)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            }
 
     private var colors: MapColors { model.user?.preferences?.mapColors ?? .standard }
 

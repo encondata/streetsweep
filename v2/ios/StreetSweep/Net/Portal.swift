@@ -288,6 +288,12 @@ extension Format {
         return mins < 60 ? "\(max(1, mins)) min" : "\(mins / 60) h \(mins % 60) min"
     }
 
+    /// Feet for short lengths (under 1,000 ft), miles past that, as the website shows them.
+    static func length(_ meters: Double) -> String {
+        let ft = Int((meters * 3.28084).rounded())
+        return ft < 1000 ? "\(max(1, ft).formatted()) ft" : miles(meters)
+    }
+
     static func day(_ s: String?) -> String {
         ISO.date(s)?.formatted(date: .abbreviated, time: .omitted) ?? ""
     }
