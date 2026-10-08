@@ -1,1 +1,4 @@
-Night map: the map on the phone and in the car now darkens at night. The phone follows its own dark mode; the car follows the car's day and night setting.
+Night map: the phone follows its own dark mode, the car follows the car's.
+Car screen: north up or driving up, street map or aerial imagery, both in the new View menu.
+Car screen: the map now glides to each GPS fix instead of jumping, so following reads smoothly.
+Car screen: Guide picks between no guidance, the nearest street owing, and a worked-out route.
