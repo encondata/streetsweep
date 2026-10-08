@@ -108,28 +108,25 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
      * The heading the map is turned to, eased towards the real one.
      *
      * A GPS bearing twitches by a few degrees even on a straight road, and feeding it
-     * straight to the camera makes the whole map shiver. This follows it at a fifth of
-     * the gap per fix, so a real turn comes round in about a second and the twitching
-     * averages out to nothing.
+     * straight to the camera makes the whole map shiver.
      */
-    private var shownBearing: Float? = null
+    private var targetBearing: Float? = null
 
+    /**
+     * Sets the heading the map should be turned to. The glide walks towards it a frame at
+     * a time, taking the short way round, so a turn sweeps over about a second instead of
+     * snapping and a jittery GPS bearing averages out instead of making the map shiver.
+     */
     private fun applyRotation() {
         if (mapRotation == MapRotation.NORTH_UP) {
-            shownBearing = null
+            targetBearing = null
             camera.bearing = 0f
             return
         }
         val want = heading() ?: return
-        val from = shownBearing
-        shownBearing = if (from == null) {
-            want
-        } else {
-            // Go the short way round: 350 to 10 degrees is twenty degrees, not three hundred.
-            var delta = ((want - from + 540f) % 360f) - 180f
-            from + delta * 0.2f
-        }
-        camera.bearing = shownBearing ?: 0f
+        targetBearing = want
+        if (camera.bearing == 0f && !gliding) camera.bearing = want   // first turn, nothing to ease from
+        startGliding()
     }
     private var guidanceJob: Job? = null
 
@@ -599,6 +596,10 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
     }
 
     override fun onStop(owner: LifecycleOwner) {
+        // Or the glide keeps posting frames at a surface that is going away.
+        gliding = false
+        glideTarget = null
+        renderHandler.removeCallbacks(glideStep)
         locationCallback?.let { container.fusedLocationClient.removeLocationUpdates(it) }
         locationCallback = null
     }
@@ -750,10 +751,71 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
         }
     }
 
+    /**
+     * Follow the car, but glide to it.
+     *
+     * Fixes arrive every two seconds, and moving the camera straight to each one makes
+     * the map sit still and then jump — which reads as the map lagging, because for most
+     * of those two seconds it is showing where you were. Easing towards the fix across
+     * the gap instead keeps the car near the middle the whole time and spends the two
+     * seconds moving rather than waiting.
+     *
+     * The first fix still snaps: there is nowhere to glide from.
+     */
     private fun centerOnCar() {
         val p = position ?: return
-        camera.moveTo(p, if (!centeredOnce) 16.0 else camera.zoom)
-        centeredOnce = true
+        if (!centeredOnce) {
+            camera.moveTo(p, 16.0)
+            centeredOnce = true
+            glideTarget = null
+            return
+        }
+        glideTarget = p
+        startGliding()
+    }
+
+    private var glideTarget: LatLngPoint? = null
+    private var gliding = false
+
+    private fun startGliding() {
+        if (gliding) return
+        gliding = true
+        renderHandler.post(glideStep)
+    }
+
+    /**
+     * One frame of the glide. Closes a fixed fraction of the remaining gap each time,
+     * which is an exponential ease: quick at first, settling without overshoot, and it
+     * needs no knowledge of when the next fix will arrive.
+     */
+    private val glideStep = object : Runnable {
+        override fun run() {
+            val target = glideTarget
+            if (!following || target == null) { gliding = false; return }
+
+            val c = camera.center
+            val dLat = target.latitude - c.latitude
+            val dLng = target.longitude - c.longitude
+            val wantBearing = targetBearing
+            val bearingGap = wantBearing?.let { ((it - camera.bearing + 540f) % 360f) - 180f } ?: 0f
+
+            // Within a metre or so, and square to the heading: stop, or the loop would
+            // run for ever chasing numbers too small to see.
+            val closeEnough = kotlin.math.abs(dLat) < 1e-5 && kotlin.math.abs(dLng) < 1e-5 &&
+                kotlin.math.abs(bearingGap) < 0.5f
+            if (closeEnough) {
+                camera.moveTo(target)
+                wantBearing?.let { camera.bearing = it }
+                gliding = false
+                render()
+                return
+            }
+
+            camera.moveTo(LatLngPoint(c.latitude + dLat * GLIDE, c.longitude + dLng * GLIDE))
+            if (wantBearing != null) camera.bearing += bearingGap * GLIDE
+            render()
+            renderHandler.postDelayed(this, FRAME_MS)
+        }
     }
 
     // ---- rendering ---------------------------------------------------------------------------
@@ -840,6 +902,16 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
     }
 
     companion object {
+        /**
+         * Fraction of the remaining gap closed each frame, and how often a frame runs.
+         * At these numbers about 95% of a gap is closed within half a second — quick
+         * enough to keep up with a fix every two seconds, slow enough not to read as a
+         * jump. The loop stops as soon as it arrives, so a stationary car costs nothing
+         * and a parked one costs nothing at all.
+         */
+        private const val GLIDE = 0.18f
+        private const val FRAME_MS = 33L
+
         private const val TAG = "CoverageMapScreen"
         /** Drive types per strip: a fourth slot is left for More or Cancel. */
         private const val TYPES_PER_PAGE = 3

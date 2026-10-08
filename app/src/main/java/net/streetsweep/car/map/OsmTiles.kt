@@ -30,7 +30,9 @@ class OsmTiles(
      * shows whichever was fetched first.
      */
     data class Key(val zoom: Int, val x: Int, val y: Int, val base: MapBase = MapBase.MAP) {
-        val fileName get() = if (base == MapBase.SATELLITE) "sat-$zoom-$x-$y.png" else "$zoom-$x-$y.png"
+        // The server sends imagery as JPEG and the street map as PNG. The decoder reads
+        // the bytes either way; the name just tells the truth on disk.
+        val fileName get() = if (base == MapBase.SATELLITE) "sat-$zoom-$x-$y.jpg" else "$zoom-$x-$y.png"
     }
 
     private val diskDir = File(context.cacheDir, "car_tiles").apply { mkdirs() }
