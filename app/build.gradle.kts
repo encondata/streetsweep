@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.play.publisher)
 }
 
 // This project lives in an iCloud-synced folder (Desktop). iCloud creates
@@ -69,6 +70,34 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+}
+
+/**
+ * Publishing to Google Play (`./gradlew publishBundle`). The service account key lives outside
+ * the repository, in ~/.config/play; without it the publish tasks are simply disabled.
+ * Uploads go to the internal track, and versionCode is set to one above Play's highest.
+ * Release notes come from src/main/play/release-notes/en-US/default.txt; rewrite it each release.
+ */
+val playCredentials = File(System.getProperty("user.home"), ".config/play/streetsweep-publisher.json")
+play {
+    enabled.set(playCredentials.exists())
+    serviceAccountCredentials.set(playCredentials)
+    track.set("internal")
+    defaultToAppBundles.set(true)
+    resolutionStrategy.set(com.github.triplet.gradle.androidpublisher.ResolutionStrategy.AUTO)
+}
+
+/**
+ * Play shows only the version name, and AUTO above changes only the code, so every build would
+ * otherwise read "1.1". Carrying the code in the name, "1.1 (3)", tells builds apart on a phone.
+ */
+androidComponents {
+    onVariants { variant ->
+        for (output in variant.outputs) {
+            val baseName = android.defaultConfig.versionName
+            output.versionName.set(output.versionCode.map { code -> "$baseName ($code)" })
+        }
     }
 }
 

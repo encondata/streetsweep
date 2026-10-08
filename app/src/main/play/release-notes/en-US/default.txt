@@ -1,0 +1,1 @@
+Night map: the map on the phone and in the car now darkens at night. The phone follows its own dark mode; the car follows the car's day and night setting.

@@ -37,3 +37,7 @@ tools/web/dist
 *.jks
 *.keystore
 keystore.properties
+
+# Google service account keys (Play publishing) must never be committed
+*-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].json
+*publisher*.json
