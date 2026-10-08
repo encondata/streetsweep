@@ -21,6 +21,18 @@ class StreetSweepCarAppService : CarAppService() {
         }
 
     override fun onCreateSession(): Session = object : Session() {
-        override fun onCreateScreen(intent: Intent): Screen = CoverageMapScreen(carContext)
+        private var screen: CoverageMapScreen? = null
+
+        override fun onCreateScreen(intent: Intent): Screen =
+            CoverageMapScreen(carContext).also { screen = it }
+
+        /**
+         * The car switching between day and night arrives here. Without it the map keeps
+         * whichever it started in until something else happens to force a redraw, so the
+         * screen stays white for the first stretch of a drive after dusk.
+         */
+        override fun onCarConfigurationChanged(newConfiguration: android.content.res.Configuration) {
+            screen?.redraw()
+        }
     }
 }

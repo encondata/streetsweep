@@ -666,6 +666,12 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
     private var renderPending = false
     private var lockFailures = 0
 
+    /** The car changed between day and night; repaint with the other set of colours. */
+    fun redraw() {
+        requestRender()
+        invalidate()
+    }
+
     private fun requestRender() {
         synchronized(lock) {
             if (renderPending) return
@@ -702,6 +708,10 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
                 branchPreviews = gateBranches?.map { BranchPreview(it.side.label, it.label, it.preview) },
                 visibleArea = visibleArea,
                 following = following,
+                // The car decides, not the phone: most head units switch with the
+                // headlights, and the driver should not have to agree with their phone
+                // about whether it is dark outside.
+                night = carContext.isDarkMode,
             )
             // The host can hand a restarted app a surface whose producer is still held by the
             // previous process; lockCanvas then throws until the surface is recreated. Retry for

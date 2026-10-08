@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
@@ -201,6 +202,38 @@ object OsmConfig {
         m.postConcat(lighten)
         ColorMatrixColorFilter(m)
     }
+
+    /**
+     * The same tiles at night.
+     *
+     * Not an invert: on these tiles the road is the brightest thing on the map, so
+     * inverting turns the roads black and the land nearly black with them — the one
+     * line you need to see disappears. The gap is what matters instead. Road white is
+     * 255 and the land around it about 240, so pulling everything below 231 to black and
+     * multiplying what is left by seven opens those fifteen points into a hundred: dark
+     * ground, legible road.
+     *
+     * Saturation goes first, or the stretch multiplies the land's beige tint sevenfold
+     * and the map comes out brown. A few points of blue are added back at the end so it
+     * reads as night rather than as a fault.
+     */
+    val nightFilter: ColorMatrixColorFilter by lazy {
+        val m = ColorMatrix().apply { setSaturation(0f) }
+        m.postConcat(
+            ColorMatrix(
+                floatArrayOf(
+                    7f, 0f, 0f, 0f, -1611f,
+                    0f, 7f, 0f, 0f, -1607f,
+                    0f, 0f, 7f, 0f, -1601f,
+                    0f, 0f, 0f, 1f, 0f,
+                ),
+            ),
+        )
+        ColorMatrixColorFilter(m)
+    }
+
+    /** Which of the two a surface should be using. */
+    fun tileFilter(night: Boolean): ColorMatrixColorFilter = if (night) nightFilter else subduedFilter
 }
 
 /** Single overlay drawing all layers with one Canvas pass; far cheaper than one Polyline overlay per street. */
@@ -256,6 +289,23 @@ class LayersOverlay : Overlay() {
     private val poiRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt(); style = Paint.Style.STROKE; strokeWidth = 3f }
     private val poiLabel = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1C1B1F.toInt(); textSize = 26f }
     private val poiLabelBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xE6FFFFFF.toInt() }
+
+    /**
+     * Night. The tiles are handled by a colour filter on the tile overlay, but these
+     * labels are drawn by us on top of it and would stay as white cards on a dark map —
+     * the brightest thing on the screen, which is the opposite of the point.
+     */
+    var night: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            val ink = if (value) 0xFFE8EEF4.toInt() else 0xFF1C1B1F.toInt()
+            val card = if (value) 0xE6101A24.toInt() else 0xE6FFFFFF.toInt()
+            areaLabel.color = ink
+            poiLabel.color = ink
+            areaLabelBg.color = card
+            poiLabelBg.color = card
+        }
     private val dotFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF1E8A28.toInt() }
     private val dotRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt(); style = Paint.Style.STROKE; strokeWidth = 4f }
     private val path = Path()
@@ -496,6 +546,9 @@ fun TrackMap(
     draftEditor: DraftEditor? = null,
 ) {
     val context = LocalContext.current
+    // Night follows the system, so the map darkens with everything else rather than
+    // needing its own switch.
+    val night = isSystemInDarkTheme()
     OsmConfig.ensure(context)
     val overlay = remember { LayersOverlay() }
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -527,7 +580,7 @@ fun TrackMap(
                 isTilesScaledToDpi = true
                 minZoomLevel = 3.0
                 maxZoomLevel = 19.5
-                overlayManager.tilesOverlay.setColorFilter(OsmConfig.subduedFilter)
+                overlayManager.tilesOverlay.setColorFilter(OsmConfig.tileFilter(night))
                 overlays.add(
                     MapEventsOverlay(object : MapEventsReceiver {
                         override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
@@ -559,6 +612,10 @@ fun TrackMap(
         },
         update = { mv ->
             overlay.layers = layers
+            // Re-applied on every pass: the factory only runs once, so without this the
+            // map would keep the filter it was born with when the theme changed.
+            mv.overlayManager.tilesOverlay.setColorFilter(OsmConfig.tileFilter(night))
+            overlay.night = night
             mv.invalidate()
         },
     )

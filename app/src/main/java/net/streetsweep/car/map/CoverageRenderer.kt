@@ -46,6 +46,9 @@ class CoverageRenderer(private val tiles: OsmTiles) {
         val branchPreviews: List<BranchPreview>? = null,
         val visibleArea: Rect?,
         val following: Boolean,
+        /** The car's own day/night state, which Android Auto reports and most cars drive
+         *  from their headlights. */
+        val night: Boolean = false,
     )
 
     private val background = Paint().apply { color = 0xFFEDF2F7.toInt() }
@@ -54,6 +57,50 @@ class CoverageRenderer(private val tiles: OsmTiles) {
         val m = ColorMatrix().apply { setSaturation(0.25f) }
         m.postConcat(ColorMatrix(floatArrayOf(0.85f, 0f, 0f, 0f, 38f, 0f, 0.85f, 0f, 0f, 40f, 0f, 0f, 0.85f, 0f, 38f, 0f, 0f, 0f, 1f, 0f)))
         colorFilter = ColorMatrixColorFilter(m)
+    }
+
+    /**
+     * Night, driven by the car rather than by us: Android Auto reports the head
+     * unit's day/night state and most cars switch it with the headlights.
+     *
+     * Not an invert: on these tiles the road is the brightest thing on the map, so
+     * inverting turns the roads black and the land nearly black with them — the one
+     * line you need to see disappears. The gap is what matters instead. Road white is
+     * 255 and the land around it about 240, so pulling everything below 231 to black and
+     * multiplying what is left by seven opens those fifteen points into a hundred: dark
+     * ground, legible road.
+     *
+     * Saturation goes first, or the stretch multiplies the land's beige tint sevenfold
+     * and the map comes out brown. A few points of blue are added back at the end so it
+     * reads as night rather than as a fault.
+     */
+    private val nightTilePaint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
+        val m = ColorMatrix().apply { setSaturation(0f) }
+        m.postConcat(
+            ColorMatrix(
+                floatArrayOf(
+                    7f, 0f, 0f, 0f, -1611f,
+                    0f, 7f, 0f, 0f, -1607f,
+                    0f, 0f, 7f, 0f, -1601f,
+                    0f, 0f, 0f, 1f, 0f,
+                ),
+            ),
+        )
+        colorFilter = ColorMatrixColorFilter(m)
+    }
+    private val nightBackground = Paint().apply { color = 0xFF0A121B.toInt() }
+    private val nightTilePlaceholder = Paint().apply { color = 0xFF111C27.toInt() }
+
+    /** Set from the frame at the top of every draw, so the helpers below can read it. */
+    private var nightNow = false
+
+    /** The status card has to turn over too, or it is a white slab in a dark car. */
+    private fun applyNight(on: Boolean) {
+        if (nightNow == on) return
+        nightNow = on
+        textPaint.color = if (on) 0xFFE8EEF4.toInt() else 0xFF1C1B1F.toInt()
+        subTextPaint.color = if (on) 0xFF9FB0C0.toInt() else 0xFF49454F.toInt()
+        pillPaint.color = if (on) 0xF20D1620.toInt() else 0xF2FFFFFF.toInt()
     }
     private val undrivenPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xFFA7B3C0.toInt(); style = Paint.Style.STROKE; strokeWidth = 7f
@@ -111,7 +158,11 @@ class CoverageRenderer(private val tiles: OsmTiles) {
 
     fun draw(canvas: Canvas, f: Frame) {
         val cam = f.camera
-        canvas.drawRect(0f, 0f, cam.width.toFloat(), cam.height.toFloat(), background)
+        applyNight(f.night)
+        canvas.drawRect(
+            0f, 0f, cam.width.toFloat(), cam.height.toFloat(),
+            if (f.night) nightBackground else background,
+        )
         drawTiles(canvas, cam)
         f.areas.sortedByDescending { it.area.level }.forEach { a ->
             path.rewind()
@@ -198,7 +249,8 @@ class CoverageRenderer(private val tiles: OsmTiles) {
                 val side = (tilePx * scale).toFloat()
                 val dest = RectF(sx, sy, sx + side, sy + side)
                 val bmp = tiles.get(OsmTiles.Key(tz, tx, ty))
-                if (bmp != null) canvas.drawBitmap(bmp, null, dest, tilePaint) else canvas.drawRect(dest, tilePlaceholder)
+                if (bmp != null) canvas.drawBitmap(bmp, null, dest, if (nightNow) nightTilePaint else tilePaint)
+                else canvas.drawRect(dest, if (nightNow) nightTilePlaceholder else tilePlaceholder)
             }
         }
     }
