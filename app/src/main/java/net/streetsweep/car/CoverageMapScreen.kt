@@ -42,6 +42,8 @@ import net.streetsweep.domain.ExclusionReason
 import net.streetsweep.car.map.BranchPreview
 import net.streetsweep.domain.Geo
 import net.streetsweep.domain.GuidanceMode
+import net.streetsweep.domain.MapBase
+import net.streetsweep.domain.MapRotation
 import net.streetsweep.domain.RoadGraph
 import net.streetsweep.domain.LatLngPoint
 import net.streetsweep.domain.TriggerSource
@@ -99,6 +101,36 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
     private var typeChoices: List<Pair<String, String>> = emptyList()
     private var currentType: String? = null
     private var guidanceMode: GuidanceMode = GuidanceMode.OFF
+    private var mapRotation: MapRotation = MapRotation.NORTH_UP
+    private var mapBase: MapBase = MapBase.MAP
+
+    /**
+     * The heading the map is turned to, eased towards the real one.
+     *
+     * A GPS bearing twitches by a few degrees even on a straight road, and feeding it
+     * straight to the camera makes the whole map shiver. This follows it at a fifth of
+     * the gap per fix, so a real turn comes round in about a second and the twitching
+     * averages out to nothing.
+     */
+    private var shownBearing: Float? = null
+
+    private fun applyRotation() {
+        if (mapRotation == MapRotation.NORTH_UP) {
+            shownBearing = null
+            camera.bearing = 0f
+            return
+        }
+        val want = heading() ?: return
+        val from = shownBearing
+        shownBearing = if (from == null) {
+            want
+        } else {
+            // Go the short way round: 350 to 10 degrees is twenty degrees, not three hundred.
+            var delta = ((want - from + 540f) % 360f) - 180f
+            from + delta * 0.2f
+        }
+        camera.bearing = shownBearing ?: 0f
+    }
     private var guidanceJob: Job? = null
 
     /** Roads leaving this spot, while the driver says which one the gate is on. */
@@ -168,6 +200,20 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
         }
         lifecycleScope.launch {
             container.coverageRepository.observeAreasWithStats().collect { areas = it; requestRender() }
+        }
+        lifecycleScope.launch {
+            // Which way up and what on. Changed from the car itself, but also honoured if
+            // it is changed on the phone while the car screen is already up.
+            container.settings.settings
+                .map { it.mapRotation to it.mapBase }
+                .distinctUntilChanged()
+                .collect { (rot, base) ->
+                    mapRotation = rot
+                    mapBase = base
+                    applyRotation()
+                    invalidate()
+                    requestRender()
+                }
         }
         lifecycleScope.launch {
             // Street and finished-area colours from the web's Preferences, as on the phone.
@@ -289,13 +335,54 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
                 }.build()
             }
 
-            // Three guidance choices and the drive type. The mode in force has a tick, and
-            // tapping it is the way out without changing anything; a fifth action (Cancel)
-            // won't fit in a strip.
+            // Four things to set and four slots, so each one gets a slot and every tap
+            // closes the menu. That removes the need for a Cancel, which would not have
+            // fitted, and keeps it to one decision per visit — the right shape for
+            // something used at the wheel. Each title says what tapping it will do rather
+            // than where things stand; the View button already shows that.
             pickingGuidance -> ActionStrip.Builder()
-                .addAction(guidanceChoice("Off", GuidanceMode.OFF))
-                .addAction(guidanceChoice("Nearest", GuidanceMode.NEAREST))
-                .addAction(guidanceChoice("Route", GuidanceMode.ROUTE))
+                .addAction(
+                    Action.Builder()
+                        .setTitle(
+                            when (guidanceMode) {
+                                GuidanceMode.OFF -> "Guide: nearest"
+                                GuidanceMode.NEAREST -> "Guide: route"
+                                GuidanceMode.ROUTE -> "Guide: off"
+                            },
+                        )
+                        .setOnClickListener {
+                            chooseGuidance(
+                                when (guidanceMode) {
+                                    GuidanceMode.OFF -> GuidanceMode.NEAREST
+                                    GuidanceMode.NEAREST -> GuidanceMode.ROUTE
+                                    GuidanceMode.ROUTE -> GuidanceMode.OFF
+                                },
+                            )
+                        }
+                        .build(),
+                )
+                .addAction(
+                    Action.Builder()
+                        .setTitle(
+                            if (mapRotation == MapRotation.NORTH_UP) MapRotation.DRIVING_UP.label
+                            else MapRotation.NORTH_UP.label,
+                        )
+                        .setOnClickListener {
+                            setRotation(
+                                if (mapRotation == MapRotation.NORTH_UP) MapRotation.DRIVING_UP
+                                else MapRotation.NORTH_UP,
+                            )
+                        }
+                        .build(),
+                )
+                .addAction(
+                    Action.Builder()
+                        .setTitle(if (mapBase == MapBase.MAP) MapBase.SATELLITE.label else MapBase.MAP.label)
+                        .setOnClickListener {
+                            setBase(if (mapBase == MapBase.MAP) MapBase.SATELLITE else MapBase.MAP)
+                        }
+                        .build(),
+                )
                 .addAction(
                     Action.Builder()
                         .setTitle(typeChoices.firstOrNull { it.first == currentType }?.second ?: "Type")
@@ -345,13 +432,7 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
                         } else {
                             addAction(
                                 Action.Builder()
-                                    .setTitle(
-                                        when (guidanceMode) {
-                                            GuidanceMode.OFF -> "Guide"
-                                            GuidanceMode.NEAREST -> "Nearest"
-                                            GuidanceMode.ROUTE -> "Route"
-                                        },
-                                    )
+                                    .setTitle("View")
                                     .setIcon(
                                         icon(
                                             if (guidanceMode == GuidanceMode.OFF) R.drawable.ic_car_guide_off
@@ -507,6 +588,7 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
                 } ?: run { headingAnchor = here }
                 position = here
                 bearing = if (l.hasBearing() && l.speed > 1f) l.bearing else bearing
+                applyRotation()
                 if (following) centerOnCar()
                 updateGuidance()
                 requestRender()
@@ -591,17 +673,30 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
         }
     }
 
-    private fun guidanceChoice(title: String, mode: GuidanceMode): Action =
-        Action.Builder()
-            .setTitle(if (mode == guidanceMode) "$title ✓" else title)
-            .setOnClickListener { chooseGuidance(mode) }
-            .build()
-
     /**
      * Picking a mode has to recompute straight away rather than wait for the car to move
      * far enough: someone who has just asked where to go next should not have to drive
      * before being told.
      */
+    private fun setRotation(mode: MapRotation) {
+        pickingGuidance = false
+        mapRotation = mode
+        applyRotation()
+        invalidate()
+        requestRender()
+        lifecycleScope.launch { container.settings.setMapRotation(mode) }
+        toastCar(if (mode == MapRotation.DRIVING_UP) "The map turns with you" else "North stays up")
+    }
+
+    private fun setBase(mode: MapBase) {
+        pickingGuidance = false
+        mapBase = mode
+        invalidate()
+        requestRender()
+        lifecycleScope.launch { container.settings.setMapBase(mode) }
+        toastCar(if (mode == MapBase.SATELLITE) "Aerial imagery" else "Street map")
+    }
+
     private fun chooseGuidance(mode: GuidanceMode) {
         pickingGuidance = false
         lifecycleScope.launch {
@@ -712,6 +807,7 @@ class CoverageMapScreen(carContext: CarContext) : Screen(carContext), DefaultLif
                 // headlights, and the driver should not have to agree with their phone
                 // about whether it is dark outside.
                 night = carContext.isDarkMode,
+                base = mapBase,
             )
             // The host can hand a restarted app a surface whose producer is still held by the
             // previous process; lockCanvas then throws until the surface is recreated. Retry for

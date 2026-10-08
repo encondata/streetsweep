@@ -15,6 +15,7 @@ import net.streetsweep.data.StreetStatus
 import net.streetsweep.data.TrackPolyline
 import net.streetsweep.domain.Geo
 import net.streetsweep.domain.LatLngPoint
+import net.streetsweep.domain.MapBase
 import net.streetsweep.tracking.TrackingStatus
 import kotlin.math.floor
 import kotlin.math.roundToInt
@@ -46,6 +47,7 @@ class CoverageRenderer(private val tiles: OsmTiles) {
         val branchPreviews: List<BranchPreview>? = null,
         val visibleArea: Rect?,
         val following: Boolean,
+        val base: MapBase = MapBase.MAP,
         /** The car's own day/night state, which Android Auto reports and most cars drive
          *  from their headlights. */
         val night: Boolean = false,
@@ -87,6 +89,20 @@ class CoverageRenderer(private val tiles: OsmTiles) {
             ),
         )
         colorFilter = ColorMatrixColorFilter(m)
+    }
+    /** Imagery as shot, and the same dimmed for night. */
+    private val photoPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val nightPhotoPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
+        colorFilter = ColorMatrixColorFilter(
+            ColorMatrix(
+                floatArrayOf(
+                    0.55f, 0f, 0f, 0f, 0f,
+                    0f, 0.55f, 0f, 0f, 0f,
+                    0f, 0f, 0.60f, 0f, 4f,
+                    0f, 0f, 0f, 1f, 0f,
+                ),
+            ),
+        )
     }
     private val nightBackground = Paint().apply { color = 0xFF0A121B.toInt() }
     private val nightTilePlaceholder = Paint().apply { color = 0xFF111C27.toInt() }
@@ -163,7 +179,17 @@ class CoverageRenderer(private val tiles: OsmTiles) {
             0f, 0f, cam.width.toFloat(), cam.height.toFloat(),
             if (f.night) nightBackground else background,
         )
-        drawTiles(canvas, cam)
+
+        // Everything geographic is drawn into a rotated canvas, so the projection stays
+        // north-up and only the canvas turns. The car marker and the status card are put
+        // back the right way up afterwards: a heading indicator that rotates with the map
+        // never points anywhere, and nobody wants to read sideways.
+        val rotated = cam.bearing != 0f
+        if (rotated) {
+            canvas.save()
+            canvas.rotate(-cam.bearing, cam.width / 2f, cam.height / 2f)
+        }
+        drawTiles(canvas, cam, f.base)
         f.areas.sortedByDescending { it.area.level }.forEach { a ->
             path.rewind()
             // Every piece of an area in parts, as one path.
@@ -224,11 +250,14 @@ class CoverageRenderer(private val tiles: OsmTiles) {
             drawLine(canvas, cam, n.street.shape, targetPaint)
             f.position?.let { drawLine(canvas, cam, listOf(it, n.point), targetArrowPaint) }
         }
-        f.position?.let { drawCar(canvas, cam, it, f.bearing) }
+        if (rotated) canvas.restore()
+        // Driving-up means the car is always pointing up the screen, so the marker's own
+        // rotation is whatever the map has taken out.
+        f.position?.let { drawCar(canvas, cam, it, f.bearing?.minus(cam.bearing)) }
         drawStatus(canvas, f)
     }
 
-    private fun drawTiles(canvas: Canvas, cam: MapCamera) {
+    private fun drawTiles(canvas: Canvas, cam: MapCamera, base: MapBase) {
         // Tiles from one zoom level *out*, drawn at ~2x their native size: labels are legible
         // from the driver's seat and the geometry stays aligned with the overlay, which is
         // projected at the camera's true zoom.
@@ -236,10 +265,16 @@ class CoverageRenderer(private val tiles: OsmTiles) {
         val scale = MapCamera.scaleBetween(tz.toDouble(), cam.zoom).toFloat() // screen px per tile-zoom world px
         val centerT = WebMercator.project(cam.center, tz.toDouble())
         val tilePx = OsmTiles.TILE_PX.toDouble()
-        val left = centerT.x - cam.width / 2.0 / scale
-        val top = centerT.y - cam.height / 2.0 / scale
-        val right = centerT.x + cam.width / 2.0 / scale
-        val bottom = centerT.y + cam.height / 2.0 / scale
+        // A rotated viewport reaches into the corners, so fetch a wider box than the
+        // screen: at 45 degrees the diagonal is root two times the side, and without
+        // this the turned map has blank wedges at its edges.
+        val over = cam.rotationOverscan
+        val halfW = cam.width / 2.0 / scale * over
+        val halfH = cam.height / 2.0 / scale * over
+        val left = centerT.x - halfW
+        val top = centerT.y - halfH
+        val right = centerT.x + halfW
+        val bottom = centerT.y + halfH
         val maxTile = (1 shl tz) - 1
         for (ty in floor(top / tilePx).toInt()..floor(bottom / tilePx).toInt()) {
             for (tx in floor(left / tilePx).toInt()..floor(right / tilePx).toInt()) {
@@ -248,8 +283,17 @@ class CoverageRenderer(private val tiles: OsmTiles) {
                 val sy = ((ty * tilePx - centerT.y) * scale + cam.height / 2.0).toFloat()
                 val side = (tilePx * scale).toFloat()
                 val dest = RectF(sx, sy, sx + side, sy + side)
-                val bmp = tiles.get(OsmTiles.Key(tz, tx, ty))
-                if (bmp != null) canvas.drawBitmap(bmp, null, dest, if (nightNow) nightTilePaint else tilePaint)
+                val bmp = tiles.get(OsmTiles.Key(tz, tx, ty, base))
+                val paint = when {
+                    // Imagery is a photograph, not a drawing. The day filter pales it to
+                    // mush and the night stretch, which works by pulling apart two nearly
+                    // identical whites, has nothing to pull apart. It gets dimmed at
+                    // night and otherwise left alone.
+                    base == MapBase.SATELLITE -> if (nightNow) nightPhotoPaint else photoPaint
+                    nightNow -> nightTilePaint
+                    else -> tilePaint
+                }
+                if (bmp != null) canvas.drawBitmap(bmp, null, dest, paint)
                 else canvas.drawRect(dest, if (nightNow) nightTilePlaceholder else tilePlaceholder)
             }
         }

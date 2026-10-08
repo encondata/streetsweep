@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Log
 import android.util.LruCache
+import net.streetsweep.domain.MapBase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -23,8 +24,13 @@ class OsmTiles(
     private val scope: CoroutineScope,
     private val onTileLoaded: () -> Unit,
 ) {
-    data class Key(val zoom: Int, val x: Int, val y: Int) {
-        val fileName get() = "$zoom-$x-$y.png"
+    /**
+     * The layer is part of the key, not just the URL. Without it the street tile and the
+     * aerial tile for the same square share a cache entry, and switching between them
+     * shows whichever was fetched first.
+     */
+    data class Key(val zoom: Int, val x: Int, val y: Int, val base: MapBase = MapBase.MAP) {
+        val fileName get() = if (base == MapBase.SATELLITE) "sat-$zoom-$x-$y.png" else "$zoom-$x-$y.png"
     }
 
     private val diskDir = File(context.cacheDir, "car_tiles").apply { mkdirs() }
@@ -69,7 +75,12 @@ class OsmTiles(
     private fun download(key: Key): ByteArray? {
         // The server's tile cache when signed in, so the car screen does not ask
         // OpenStreetMap for tiles every phone and browser already has.
-        val conn = URL(net.streetsweep.ui.map.MapTiles.osmUrl(key.zoom, key.x, key.y)).openConnection() as HttpURLConnection
+        val url = if (key.base == MapBase.SATELLITE) {
+            net.streetsweep.ui.map.MapTiles.satelliteUrl(key.zoom, key.x, key.y)
+        } else {
+            net.streetsweep.ui.map.MapTiles.osmUrl(key.zoom, key.x, key.y)
+        }
+        val conn = URL(url).openConnection() as HttpURLConnection
         return try {
             conn.connectTimeout = 10_000
             conn.readTimeout = 15_000

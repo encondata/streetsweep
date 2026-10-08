@@ -33,6 +33,19 @@ object MapTiles {
     fun osmUrl(z: Int, x: Int, y: Int): String =
         serverBase?.let { "$it/api/tiles/osm/$z/$x/$y" } ?: "https://tile.openstreetmap.org/$z/$x/$y.png"
 
+    /**
+     * Aerial imagery. OpenStreetMap has none, so this is Esri's World Imagery, which is
+     * free of charge and free of keys — the same source the web uses, so the two show the
+     * same picture.
+     *
+     * Note the row and column are the other way round from the OSM convention. Through
+     * the server when signed in, so the tiles are fetched once for everyone and the
+     * attribution stays in one place.
+     */
+    fun satelliteUrl(z: Int, x: Int, y: Int): String =
+        serverBase?.let { "$it/api/tiles/sat/$z/$x/$y" }
+            ?: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/$z/$y/$x"
+
     /** The tile source for the phone's map. A different name keeps the two caches apart. */
     fun source(): ITileSource {
         val base = serverBase ?: return TileSourceFactory.MAPNIK

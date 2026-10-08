@@ -9,6 +9,8 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import net.streetsweep.domain.GuidanceMode
+import net.streetsweep.domain.MapBase
+import net.streetsweep.domain.MapRotation
 import net.streetsweep.domain.TrackingMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -32,6 +34,9 @@ data class TrackingSettings(
     val colourByRecency: Boolean = false,
     /** What the map points you towards while you drive. */
     val guidanceMode: GuidanceMode = GuidanceMode.NEAREST,
+    /** Which way up the car screen draws, and what it draws on. */
+    val mapRotation: MapRotation = MapRotation.NORTH_UP,
+    val mapBase: MapBase = MapBase.MAP,
     val inVehicleTriggerEnabled: Boolean = false,
     /** The StreetSweep server (v2). Defaults to the hosted one. */
     val serverUrl: String = DEFAULT_SERVER_URL,
@@ -78,6 +83,8 @@ class SettingsRepository(context: Context) {
     private object Keys {
         val MODE = stringPreferencesKey("tracking_mode")
         val GUIDANCE = stringPreferencesKey("guidance_mode")
+        val MAP_ROTATION = stringPreferencesKey("map_rotation")
+        val MAP_BASE = stringPreferencesKey("map_base")
         val BT_ADDRESS = stringPreferencesKey("bt_trigger_address")
         val BT_NAME = stringPreferencesKey("bt_trigger_name")
         val AA_ENABLED = booleanPreferencesKey("android_auto_trigger_enabled")
@@ -117,6 +124,10 @@ class SettingsRepository(context: Context) {
             colourByRecency = p[Keys.RECENCY] ?: false,
             guidanceMode = p[Keys.GUIDANCE]?.let { g -> GuidanceMode.entries.firstOrNull { it.name == g } }
                 ?: GuidanceMode.NEAREST,
+            mapRotation = p[Keys.MAP_ROTATION]?.let { v -> MapRotation.entries.firstOrNull { it.name == v } }
+                ?: MapRotation.NORTH_UP,
+            mapBase = p[Keys.MAP_BASE]?.let { v -> MapBase.entries.firstOrNull { it.name == v } }
+                ?: MapBase.MAP,
             inVehicleTriggerEnabled = p[Keys.IN_VEHICLE] ?: false,
             serverUrl = p[Keys.SERVER_URL]?.takeIf { it.isNotBlank() } ?: TrackingSettings.DEFAULT_SERVER_URL,
             serverToken = p[Keys.SERVER_TOKEN]?.takeIf { it.isNotBlank() },
@@ -138,6 +149,10 @@ class SettingsRepository(context: Context) {
     suspend fun setMode(mode: TrackingMode) = store.edit { it[Keys.MODE] = mode.name }
 
     suspend fun setGuidanceMode(mode: GuidanceMode) = store.edit { it[Keys.GUIDANCE] = mode.name }
+
+    suspend fun setMapRotation(mode: MapRotation) = store.edit { it[Keys.MAP_ROTATION] = mode.name }
+
+    suspend fun setMapBase(mode: MapBase) = store.edit { it[Keys.MAP_BASE] = mode.name }
 
     suspend fun setBluetoothTrigger(address: String?, name: String?) = store.edit { p ->
         if (address == null) {
