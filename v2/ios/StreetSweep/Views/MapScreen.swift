@@ -28,7 +28,7 @@ struct MapScreen: View {
                 HStack(spacing: 14) {
                     legend(colors.driven.color, "Driven or done")
                     legend(colors.undriven.color, "To do")
-                    legend("#9aa7b4", "Left out")
+                    stripeLegend(model.user?.preferences?.excludedColor ?? StripeColors.standard, "Left out")
                 }
                 .font(.caption)
             }
@@ -124,6 +124,23 @@ struct MapScreen: View {
                 .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
         }
         .buttonStyle(.plain)
+    }
+
+    /// Left out is drawn candy-striped on the map: the key shows it the same way.
+    private func stripeLegend(_ hex: String, _ label: String) -> some View {
+        HStack(spacing: 5) {
+            Canvas { ctx, size in
+                ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white))
+                var x: CGFloat = 0
+                while x < size.width {
+                    ctx.fill(Path(CGRect(x: x, y: 0, width: min(3, size.width - x), height: size.height)), with: .color(Color(hex: hex)))
+                    x += 6
+                }
+            }
+            .frame(width: 18, height: 5)
+            .clipShape(Capsule())
+            Text(label).foregroundStyle(.secondary)
+        }
     }
 
     private func legend(_ hex: String, _ label: String) -> some View {

@@ -91,6 +91,13 @@ final class AppModel {
         }
     }
 
+    /// The candy-stripe colour for left-out streets: a preference on the account, the same
+    /// one the website and the phone use, so it changes everywhere.
+    func setExcludedColor(_ hex: String) async throws {
+        guard let api else { return }
+        apply(try await api.patch("/api/me/preferences", ["excluded_color": hex], as: MeSummary.self))
+    }
+
     /// Sign out here, and tell the server to forget this iPad's token.
     func signOut() async {
         if let api, let deviceId { try? await api.delete("/api/devices/\(deviceId)") }

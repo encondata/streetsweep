@@ -33,6 +33,7 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
     private var streetsVersion = 0
     private var colorsPref: MapColors = .standard
     private var completeFill = StreetColor(color: "#39ff14", opacity: 0.1)
+    private var excludedStripe = StripeColors.standard
     private var shadeComplete = true
 
     var base: Basemap = .map { didSet { applyBase() } }
@@ -291,6 +292,26 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
         line.lineCap = NSExpression(forConstantValue: "round")
         line.lineJoin = NSExpression(forConstantValue: "round")
         if let below { style.insertLayer(line, below: below) } else { style.addLayer(line) }
+        if mode == .coverage {
+            // Left out (gated): candy-striped, bands of the person's colour over white, as on
+            // the website. The plain line underneath is hidden for these (applyStreetColors).
+            let stripeWidth: [Any] = ["interpolate", ["linear"], ["zoom"], 12, 2.2, 16, 5, 19, 10]
+            let excluded = NSPredicate(format: "state == 'excluded'")
+            let base = MLNLineStyleLayer(identifier: "streets-excluded-base", source: src)
+            base.sourceLayerIdentifier = "streets"
+            base.predicate = excluded
+            base.lineColor = NSExpression(forConstantValue: UIColor.white)
+            base.lineWidth = NSExpression(mglJSONObject: stripeWidth)
+            base.lineCap = NSExpression(forConstantValue: "butt")
+            style.insertLayer(base, above: line)
+            let stripe = MLNLineStyleLayer(identifier: "streets-excluded-stripe", source: src)
+            stripe.sourceLayerIdentifier = "streets"
+            stripe.predicate = excluded
+            stripe.lineWidth = NSExpression(mglJSONObject: stripeWidth)
+            stripe.lineCap = NSExpression(forConstantValue: "butt")
+            stripe.lineDashPattern = NSExpression(forConstantValue: [1.4, 1.4])
+            style.insertLayer(stripe, above: base)
+        }
         applyStreetColors()
     }
 
@@ -324,7 +345,11 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
         // highways the team doesn't count faint, the rest in the to-do colour.
         let c = colorsPref
         line.lineColor = NSExpression(mglJSONObject: ["match", ["get", "state"], ["done", "complete"], c.driven.color, "excluded", "#9aa7b4", c.undriven.color])
-        line.lineOpacity = NSExpression(mglJSONObject: ["match", ["get", "state"], ["done", "complete"], c.driven.opacity, "excluded", 0.7, "nc", 0.3, c.undriven.opacity])
+        // Left out: hidden here, drawn as candy stripes by the layers above.
+        line.lineOpacity = NSExpression(mglJSONObject: ["match", ["get", "state"], ["done", "complete"], c.driven.opacity, "excluded", 0, "nc", 0.3, c.undriven.opacity])
+        if let stripe = view?.style?.layer(withIdentifier: "streets-excluded-stripe") as? MLNLineStyleLayer {
+            stripe.lineColor = NSExpression(forConstantValue: UIColor(Color(hex: excludedStripe)))
+        }
     }
 
     private func applyAreaFill() {
@@ -341,6 +366,7 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
         colorsPref = p?.mapColors ?? .standard
         completeFill = p?.completeFill ?? StreetColor(color: "#39ff14", opacity: 0.1)
         shadeComplete = p?.shadeComplete ?? true
+        excludedStripe = p?.excludedColor ?? StripeColors.standard
         applyStreetColors()
         applyAreaFill()
     }
@@ -356,7 +382,9 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
     func reloadStreets() {
         streetsVersion += 1
         guard styleReady, let style = view?.style else { return }
-        for id in ["streets", "streets-casing"] { if let l = style.layer(withIdentifier: id) { style.removeLayer(l) } }
+        for id in ["streets", "streets-casing", "streets-excluded-base", "streets-excluded-stripe"] {
+            if let l = style.layer(withIdentifier: id) { style.removeLayer(l) }
+        }
         if let s = style.source(withIdentifier: "streets") { style.removeSource(s) }
         addStreets(style)
     }

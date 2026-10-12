@@ -14,6 +14,17 @@ struct Preferences: Codable, Equatable, Sendable {
     let mapColors: MapColors?
     let shadeComplete: Bool?
     let completeFill: StreetColor?
+    /// Left-out (gated) streets are drawn candy-striped: bands of this colour and white.
+    let excludedColor: String?
+}
+
+/// The candy-stripe colours for left-out streets, as on the website's Preferences page.
+enum StripeColors {
+    static let standard = "#dc2626"
+    static let presets: [(name: String, hex: String)] = [
+        ("Candy cane red", "#dc2626"), ("Traffic orange", "#ea580c"), ("Purple", "#7c3aed"),
+        ("Pink", "#db2777"), ("Black", "#111827"), ("Gold", "#ca8a04"),
+    ]
 }
 
 struct StreetColor: Codable, Equatable, Sendable {
