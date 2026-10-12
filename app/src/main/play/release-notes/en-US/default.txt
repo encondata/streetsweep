@@ -1,4 +1,2 @@
-Night map: the phone follows its own dark mode, the car follows the car's.
-Car screen: north up or driving up, street map or aerial imagery, both in the new View menu.
-Car screen: the map now glides to each GPS fix instead of jumping, so following reads smoothly.
-Car screen: Guide picks between no guidance, the nearest street owing, and a worked-out route.
+Left-out and gated streets are now drawn candy-striped, on the phone and in the car, so they stand out from driven and still-to-do streets.
+Pick the stripe colour in Settings → Map → Left-out streets. It's saved to your account, so the website and the iPad use the same colour.
