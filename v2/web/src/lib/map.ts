@@ -14,7 +14,7 @@ export type Base = "map" | "satellite" | "hybrid";
 /** Streets come from the server from this zoom in (a tile further out would hold a city). */
 export const STREETS_MIN_ZOOM = 12;
 
-import { DEFAULT_COLORS, DEFAULT_COMPLETE_FILL, EXCLUDED, completeFill, myColors, shadeComplete, type MapColors, type StreetColor } from "./colors";
+import { DEFAULT_COLORS, DEFAULT_COMPLETE_FILL, DEFAULT_EXCLUDED_STRIPE, EXCLUDED, completeFill, excludedStripe, myColors, shadeComplete, type MapColors, type StreetColor } from "./colors";
 /** Left-out streets go grey whatever colours someone picked for driven and not. */
 export const EXCLUDED_COLOR = EXCLUDED;
 export const TRACK_COLOR = "#e2721f";
@@ -86,6 +86,20 @@ function style(): StyleSpecification {
           "line-width": ["interpolate", ["linear"], ["zoom"], 12, 1.2, 16, 4, 19, 9],
           "line-opacity": underSelection(streetOpacity(DEFAULT_COLORS)),
         },
+      },
+      // Left-out (gated) streets, candy-striped: a white line under bands of the person's
+      // stripe colour (Preferences), so they read apart from every coverage colour.
+      {
+        id: "streets-excluded-base", type: "line", source: "streets", "source-layer": "streets",
+        filter: ["==", ["get", "state"], "excluded"],
+        layout: { "line-cap": "butt", "line-join": "round" },
+        paint: { "line-color": "#ffffff", "line-width": STRIPE_WIDTH },
+      },
+      {
+        id: "streets-excluded-stripe", type: "line", source: "streets", "source-layer": "streets",
+        filter: ["==", ["get", "state"], "excluded"],
+        layout: { "line-cap": "butt", "line-join": "round" },
+        paint: { "line-color": DEFAULT_EXCLUDED_STRIPE, "line-width": STRIPE_WIDTH, "line-dasharray": [1.4, 1.4] },
       },
       // Streets picked with shift-click: bright orange, pulsing (see setSelectedStreets).
       {
@@ -167,6 +181,9 @@ function style(): StyleSpecification {
   };
 }
 
+/** Candy stripes a little wider than a street, so the bands show at every zoom. */
+const STRIPE_WIDTH = ["interpolate", ["linear"], ["zoom"], 12, 2.2, 16, 5, 19, 10] as unknown as number;
+
 /** How faint a highway the team doesn't count is drawn (see migration 0015). */
 export const NOT_COUNTED_OPACITY = 0.3;
 
@@ -198,7 +215,8 @@ function streetColor(c: MapColors): any {
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function streetOpacity(c: MapColors): any {
-  return ["match", ["get", "state"], ["done", "complete"], c.driven.opacity, "excluded", 0.7, "nc", NOT_COUNTED_OPACITY, c.undriven.opacity];
+  // (Left out: hidden, the candy stripes are drawn instead; see "streets-excluded-*".)
+  return ["match", ["get", "state"], ["done", "complete"], c.driven.opacity, "excluded", 0, "nc", NOT_COUNTED_OPACITY, c.undriven.opacity];
 }
 
 export interface StreetHit {
@@ -247,6 +265,7 @@ export class MapController {
     this.map.addControl(new ScaleControl({ unit: "imperial" }), "bottom-left");
     // Every map draws streets in the person's own colours, and shades finished areas if they like.
     this.setStreetColors(myColors());
+    this.setExcludedStripe(excludedStripe());
     this.setShadeComplete(shadeComplete() ? completeFill() : null);
 
     this.map.on("mousemove", "streets", (e: MapLayerMouseEvent) => {
@@ -532,7 +551,9 @@ export class MapController {
     this.whenReady(() => {
       this.map.setPaintProperty("streets", "line-color", ["case", ["boolean", ["feature-state", "hover"], false], "#3d4b59", "#8b98a6"]);
       this.map.setPaintProperty("streets", "line-opacity", 0.75);
-      for (const id of ["drive-streets", "drive-track", "coverage-cells"]) this.map.setLayoutProperty(id, "visibility", "none");
+      for (const id of ["drive-streets", "drive-track", "coverage-cells", "streets-excluded-base", "streets-excluded-stripe"]) {
+        this.map.setLayoutProperty(id, "visibility", "none");
+      }
     });
   }
 
@@ -544,6 +565,11 @@ export class MapController {
       this.map.setPaintProperty("drive-streets", "line-color", c.driven.color);
       this.map.setPaintProperty("coverage-cells", "circle-color", c.driven.color);
     });
+  }
+
+  /** The candy-stripe colour for left-out streets (Preferences). */
+  setExcludedStripe(color: string) {
+    this.whenReady(() => this.map.setPaintProperty("streets-excluded-stripe", "line-color", color));
   }
 
   setBase(base: Base) {

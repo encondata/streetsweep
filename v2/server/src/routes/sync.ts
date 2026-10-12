@@ -142,7 +142,8 @@ export default async function syncRoutes(app: FastifyInstance) {
       // finished areas the same way the web does. Sent every time: changing them moves no cursor.
       const [{ preferences: p = {} } = {}] = await q<{ preferences: Record<string, unknown> }>(
         `SELECT preferences FROM users WHERE id = $1`, [me.id]);
-      const prefs = { map_colors: p.map_colors ?? null, shade_complete: p.shade_complete !== false, complete_fill: p.complete_fill ?? null };
+      const prefs = { map_colors: p.map_colors ?? null, shade_complete: p.shade_complete !== false, complete_fill: p.complete_fill ?? null,
+        excluded_color: p.excluded_color ?? null };
 
       await client.query("COMMIT");
       return {

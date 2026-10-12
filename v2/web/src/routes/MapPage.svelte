@@ -7,7 +7,8 @@
   import { errorText } from "../lib/api";
   import { syncFrom } from "../lib/forms";
   import { LEVEL_LABEL, type AreaLevel, type Place } from "../lib/types";
-  import { MapController, STREETS_MIN_ZOOM, EXCLUDED_COLOR, NOT_COUNTED_OPACITY, type Base, type StreetHit } from "../lib/map";
+  import { MapController, STREETS_MIN_ZOOM, NOT_COUNTED_OPACITY, type Base, type StreetHit } from "../lib/map";
+  import { excludedStripe, stripeCss } from "../lib/colors";
   import { myColors } from "../lib/colors";
   import { defaultTeam, mySettings } from "../lib/settings";
   import { areaFeatures, isComplete, loadTeamAreas } from "../lib/teamAreas";
@@ -522,7 +523,7 @@
       <div class="chip quiet legend">
         <span><i style:background={myColors().driven.color}></i>Driven</span>
         <span><i style:background={myColors().undriven.color}></i>Not yet</span>
-        <span><i style:background={EXCLUDED_COLOR}></i>Left out</span>
+        <span><i style:background={stripeCss(excludedStripe(), 3)}></i>Left out</span>
         {#if !teams.find((t) => t.id === coverageTeam)?.count_highways}
           <span title="Highways don't count for this team; change it under Teams → What counts">
             <i style:background={myColors().undriven.color} style:opacity={NOT_COUNTED_OPACITY}></i>Highway, not counted</span>

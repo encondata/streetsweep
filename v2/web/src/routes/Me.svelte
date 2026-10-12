@@ -11,7 +11,7 @@
   import { cropToBlob } from "../lib/image";
   import { formValues } from "../lib/forms";
   import { date } from "../lib/format";
-  import { DEFAULT_COLORS, DEFAULT_COMPLETE_FILL, completeFill, myColors, sameFill, samePair, shadeComplete, type MapColors } from "../lib/colors";
+  import { DEFAULT_COLORS, DEFAULT_COMPLETE_FILL, STRIPE_PRESETS, completeFill, excludedStripe, myColors, sameFill, samePair, shadeComplete, stripeCss, type MapColors } from "../lib/colors";
   import { mySettings, type AppSettings } from "../lib/settings";
   import type { Me } from "../lib/types";
 
@@ -77,6 +77,13 @@
   // Finished areas: the switch saves straight away; the colour and opacity with Save.
   let fill = $state({ ...completeFill() });
   let fillChanged = $derived(!sameFill(fill, completeFill()));
+  // Left-out streets' candy stripes: saved as soon as a colour is picked.
+  let stripe = $state(excludedStripe());
+  const saveStripe = (color: string) => {
+    stripe = color;
+    run(async () => session.set(await api<Me>("/api/me/preferences", { method: "PATCH", body: { excluded_color: color } })), "Saved.");
+  };
+
   const saveFill = () =>
     run(async () => session.set(await api<Me>("/api/me/preferences", { method: "PATCH", body: { complete_fill: fill } })), "Saved.");
 
@@ -210,6 +217,29 @@
       {/if}
     </section>
 
+    <section class="card pad stack">
+      <div>
+        <h2>Left-out streets</h2>
+        <p class="muted small">Streets left out or gated are drawn candy-striped, this colour banded with white, so they stand
+          apart from driven and still-to-do streets. The phone, the car screen and the iPad use it too.</p>
+      </div>
+      <div class="stripe-preview" aria-hidden="true">
+        <img src="/api/tiles/osm/16/14977/26881" alt="" />
+        <span class="cane" style:background={stripeCss(stripe, 9)}></span>
+      </div>
+      <div class="stripes" role="radiogroup" aria-label="Stripe colour">
+        {#each STRIPE_PRESETS as p (p.color)}
+          <button type="button" class="stripe" class:on={stripe.toLowerCase() === p.color} role="radio" aria-checked={stripe.toLowerCase() === p.color}
+            disabled={busy} onclick={() => saveStripe(p.color)} title={p.name}>
+            <span style:background={stripeCss(p.color, 5)}></span>{p.name}
+          </button>
+        {/each}
+        <label class="stripe custom" title="Your own colour">
+          <input type="color" value={stripe} disabled={busy} onchange={(e) => saveStripe(e.currentTarget.value)} aria-label="Your own stripe colour" />Your own
+        </label>
+      </div>
+    </section>
+
   {:else}
     <section class="card pad stack">
       <h2>When you open StreetSweep</h2>
@@ -268,6 +298,15 @@
   .toggle-row { display: flex; align-items: center; gap: 14px; }
   .toggle-row h2 { margin: 0 0 2px; }
   .toggle-row p { margin: 0; }
+  .stripe-preview { position: relative; height: 90px; max-width: 320px; overflow: hidden; border-radius: 10px; border: 1px solid var(--line); }
+  .stripe-preview img { position: absolute; top: -80px; left: 0; width: 320px; }
+  .cane { position: absolute; left: -10px; right: -10px; top: 38px; height: 12px; transform: rotate(-8deg); box-shadow: 0 0 0 1px rgba(0,0,0,.08); }
+  .stripes { display: flex; flex-wrap: wrap; gap: 8px; }
+  .stripe { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px 0 8px; font-weight: 400; font-size: 13px; }
+  .stripe span { width: 30px; height: 8px; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0,0,0,.12); }
+  .stripe.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--accent-soft); }
+  .stripe.custom { border: 1px solid var(--line-strong); border-radius: 8px; cursor: pointer; }
+  .stripe.custom input { width: 30px; height: 24px; padding: 0; border: 0; background: none; }
   .shade-swatch { width: 34px; height: 34px; border-radius: 8px; border: 2px solid; flex: none; }
   .err { color: var(--danger); margin: 0; }
 </style>

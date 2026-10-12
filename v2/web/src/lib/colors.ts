@@ -56,6 +56,21 @@ export const shadeComplete = () => session.me?.user.preferences?.shade_complete 
 export const completeFill = (): StreetColor => session.me?.user.preferences?.complete_fill ?? DEFAULT_COMPLETE_FILL;
 export const EXCLUDED = "#9aa7b4";
 
+/**
+ * Left-out (gated) streets are drawn candy-striped: bands of this colour and white, so
+ * they stand apart from every street colour. Red by default, like a candy cane.
+ */
+export const DEFAULT_EXCLUDED_STRIPE = "#dc2626";
+export const STRIPE_PRESETS: { color: string; name: string }[] = [
+  { color: "#dc2626", name: "Candy cane red" }, { color: "#ea580c", name: "Traffic orange" },
+  { color: "#7c3aed", name: "Purple" }, { color: "#db2777", name: "Pink" },
+  { color: "#111827", name: "Black" }, { color: "#ca8a04", name: "Gold" },
+];
+export const excludedStripe = (): string => session.me?.user.preferences?.excluded_color ?? DEFAULT_EXCLUDED_STRIPE;
+/** CSS for a swatch or legend chip that looks like the map's stripes. */
+export const stripeCss = (color: string, band = 6) =>
+  `repeating-linear-gradient(90deg, ${color} 0 ${band}px, #ffffff ${band}px ${band * 2}px)`;
+
 /** Yours, or the default until you've chosen. */
 export function myColors(): MapColors {
   const c = (session.me?.user.preferences as { map_colors?: MapColors } | undefined)?.map_colors;

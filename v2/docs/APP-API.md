@@ -17,7 +17,7 @@ A 401 means the token was revoked or the account changed: sign in again.
 
 | Field | Comes | The phone |
 |---|---|---|
-| `user` (with `preferences`: `map_colors` {driven, undriven: {color, opacity}} or null for the default, `shade_complete`, `complete_fill` {color, opacity} or null), `teams` (id, name, kind, role) | whole | replaces its copy; draw streets and finished areas in those colours |
+| `user` (with `preferences`: `map_colors` {driven, undriven: {color, opacity}} or null for the default, `shade_complete`, `complete_fill` {color, opacity} or null, `excluded_color` "#rrggbb" or null: left-out streets drawn candy-striped, this colour banded with white; red when null), `teams` (id, name, kind, role) | whole | replaces its copy; draw streets and finished areas in those colours |
 | `drive_types` (key, label, `team_counts` {team: bool}) | whole | replaces |
 | `vehicles` you may drive (incl. `permanent`, `checkout`) | whole | replaces |
 | `areas` your teams track: metadata (id, name, level, color, `version` of the outline, `build_status`, `built_version`, `segment_count`, `bbox`, `team_ids`) | whole | replaces. `geometry` only on a full sync; otherwise, when `version` differs from yours, `GET /api/areas/:id` for the outline |
