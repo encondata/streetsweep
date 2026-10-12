@@ -56,6 +56,11 @@
     ctl.showPlaces(false);
     const unwatch = ctl.watchSize(box);
     ctl.onAreaClick = (id) => panel?.open(id);
+    // Where you are is shared with the Map page: move here, switch over, and it's the same place.
+    ctl.map.on("moveend", () => {
+      const c = ctl!.map.getCenter();
+      try { localStorage.setItem("streetsweep.view", JSON.stringify({ center: [c.lng, c.lat], zoom: ctl!.map.getZoom() })); } catch { /* fine */ }
+    });
     // Street clicks belong to the Map page; here they'd only get in the way of drawing.
     ctl.onStreetClick = null;
     (window as unknown as { streetsweep?: object }).streetsweep = { map: ctl.map, ctl };

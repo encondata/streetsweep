@@ -48,6 +48,17 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
 
     /// The middle of the map, where a place being added goes.
     var centerCoordinate: CLLocationCoordinate2D? { view?.centerCoordinate }
+
+    /// The Map and Areas screens share where you are (Camera): coming to this one, go to
+    /// wherever the other was left, as the website's two pages do.
+    func followSavedCamera() {
+        guard let view else { return }
+        let s = Camera.load()
+        let here = view.centerCoordinate
+        guard abs(here.latitude - s.center.latitude) > 1e-7 || abs(here.longitude - s.center.longitude) > 1e-7
+                || abs(view.zoomLevel - s.zoom) > 0.001 else { return }
+        view.setCenter(s.center, zoomLevel: s.zoom, animated: false)
+    }
     /// The map stopped moving: what's in view now.
     var onSettle: ((MapFrame) -> Void)?
     /// Room the sidebar takes on the left, so fitting an area doesn't hide it underneath.

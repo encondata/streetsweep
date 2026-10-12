@@ -76,6 +76,12 @@ struct MainView: View {
             ws.attach(model)
             cw.attach(model)
         }
+        // Both maps stay alive (hidden, not gone), so "appearing" isn't enough: on switching
+        // between Areas and Map, the one coming up goes to wherever the other was left.
+        .onChange(of: section) { _, s in
+            if s == .areas { ws.map.followSavedCamera() }
+            if s == .map { cw.map.followSavedCamera() }
+        }
         // The team is known once the server has said who you are (straight away after
         // signing in, a moment after launch otherwise), and changes with the picker.
         .task(id: model.team?.id) {
@@ -184,6 +190,7 @@ struct AreasScreen: View {
         .animation(.spring(duration: 0.3), value: panelShown)
         .animation(.spring(duration: 0.3), value: ws.session == nil)
         .onAppear {
+            ws.map.followSavedCamera()
             ws.map.base = base
             ws.map.fingerDraws = fingerDraws
             ws.map.leftInset = panelShown ? panelWidth + 16 : 0

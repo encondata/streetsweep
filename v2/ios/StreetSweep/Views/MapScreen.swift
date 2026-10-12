@@ -84,6 +84,7 @@ struct MapScreen: View {
         .onAppear {
             cw.map.base = base
             cw.map.fingerDraws = fingerDraws
+            cw.map.followSavedCamera()
         }
         .onChange(of: base) { _, b in cw.map.base = b }
         .onChange(of: fingerDraws) { _, on in cw.map.fingerDraws = on }
