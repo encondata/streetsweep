@@ -241,7 +241,12 @@ class LayersOverlay : Overlay() {
     var layers = MapLayers()
 
     private val undriven = stroke(0xFFA7B3C0.toInt(), 7f)
-    private val excluded = stroke(0xFFC8D1DA.toInt(), 5f).apply { pathEffect = DashPathEffect(floatArrayOf(8f, 12f), 0f) }
+    // Left out (gated): candy-striped, bands of the person's colour (Preferences) over white.
+    private val excludedBase = stroke(0xFFFFFFFF.toInt(), 8f).apply { strokeCap = Paint.Cap.BUTT }
+    private val excludedStripe = stroke(MapPalette.DEFAULT_STRIPE, 8f).apply {
+        strokeCap = Paint.Cap.BUTT
+        pathEffect = DashPathEffect(floatArrayOf(12f, 12f), 0f)
+    }
     private val selectedHalo = stroke(0xFF10314F.toInt(), 20f).apply { alpha = 110 }
     private val targetStroke = stroke(0xFFE76F51.toInt(), 12f)
     private val targetHalo = stroke(0xFFE76F51.toInt(), 22f).apply { alpha = 70 }
@@ -270,6 +275,7 @@ class LayersOverlay : Overlay() {
         if (p == palette) return
         palette = p
         undriven.color = p.undriven
+        excludedStripe.color = p.excluded
         done.color = p.driven
         edge.color = p.driven
         agePaints[0].color = p.driven
@@ -433,8 +439,12 @@ class LayersOverlay : Overlay() {
         }
         l.streets.forEach { s ->
             if (!inView(s.shape)) return@forEach
+            if (s.excluded) {
+                line(s.shape, excludedBase)
+                line(s.shape, excludedStripe)
+                return@forEach
+            }
             val paint = when {
-                s.excluded -> excluded
                 s.isDone -> done
                 s.isPartial -> partial
                 else -> undriven

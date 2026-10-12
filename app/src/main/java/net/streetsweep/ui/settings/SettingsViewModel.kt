@@ -52,6 +52,21 @@ class SettingsViewModel(private val container: AppContainer, private val context
 
     fun setColourByRecency(on: Boolean) = viewModelScope.launch { container.settings.setColourByRecency(on) }
 
+    /**
+     * The candy-stripe colour for left-out streets. It's a preference on your account, the
+     * same one the web and the iPad use: shown here straight away, then saved to the server.
+     */
+    fun setExcludedColor(hex: String) = viewModelScope.launch {
+        val before = container.settings.current().mapPalette
+        container.settings.setMapPalette(before.copy(excluded = net.streetsweep.data.prefs.MapPalette.argb(hex, 1.0)))
+        try {
+            container.server.setPreferences(org.json.JSONObject().put("excluded_color", hex))
+        } catch (e: Exception) {
+            container.settings.setMapPalette(before)
+            _message.value = "Couldn't save the colour: ${e.message}"
+        }
+    }
+
     // ---- backup and export ----
 
     private inline fun work(crossinline block: suspend () -> String) = viewModelScope.launch {

@@ -123,9 +123,11 @@ class CoverageRenderer(private val tiles: OsmTiles) {
         strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
     }
     private val partialPaint = Paint(undrivenPaint).apply { color = 0xFFE9C46A.toInt(); strokeWidth = 8f }
-    private val excludedPaint = Paint(undrivenPaint).apply {
-        color = 0xFFC8D1DA.toInt(); strokeWidth = 5f
-        pathEffect = android.graphics.DashPathEffect(floatArrayOf(10f, 14f), 0f)
+    // Left out (gated): candy-striped, bands of the person's colour (Preferences) over white.
+    private val excludedBase = Paint(undrivenPaint).apply { color = Color.WHITE; strokeWidth = 9f; strokeCap = Paint.Cap.BUTT }
+    private val excludedStripe = Paint(excludedBase).apply {
+        color = MapPalette.DEFAULT_STRIPE
+        pathEffect = android.graphics.DashPathEffect(floatArrayOf(14f, 14f), 0f)
     }
     private val pendingGatePaint = Paint(undrivenPaint).apply { color = 0xFFB3261E.toInt(); strokeWidth = 14f }
     private val pendingGateHalo = Paint(undrivenPaint).apply { color = 0x55B3261E; strokeWidth = 26f }
@@ -157,6 +159,7 @@ class CoverageRenderer(private val tiles: OsmTiles) {
         set(p) {
             field = p
             undrivenPaint.color = p.undriven
+            excludedStripe.color = p.excluded
             donePaint.color = p.driven
             coveragePaint.color = p.driven
             p.completeFill?.let { completeFill.color = it }
@@ -205,8 +208,12 @@ class CoverageRenderer(private val tiles: OsmTiles) {
             canvas.drawPath(path, if (a.area.id == f.focusedArea?.area?.id) areaFocusedPaint else areaPaint)
         }
         f.streets.forEach { s ->
+            if (s.excluded) {
+                drawLine(canvas, cam, s.shape, excludedBase)
+                drawLine(canvas, cam, s.shape, excludedStripe)
+                return@forEach
+            }
             val paint = when {
-                s.excluded -> excludedPaint
                 s.isDone -> donePaint
                 s.isPartial -> partialPaint
                 else -> undrivenPaint

@@ -2,6 +2,19 @@
 
 package net.streetsweep.ui.settings
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import net.streetsweep.data.prefs.MapPalette
 import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -281,6 +294,28 @@ fun SettingsScreen(viewModel: SettingsViewModel = containerViewModel { c, ctx ->
                 headlineContent = { Text("Colour driven streets by age") },
                 supportingContent = { Text("Recent drives stay teal and older ones fade, so you can see what needs sweeping again") },
                 trailingContent = { Switch(checked = settings.colourByRecency, onCheckedChange = viewModel::setColourByRecency) },
+            )
+            ListItem(
+                headlineContent = { Text("Left-out streets") },
+                supportingContent = {
+                    Column {
+                        Text("Drawn candy-striped in this colour, here, in the car and on the web")
+                        Row(
+                            Modifier.padding(top = 8.dp).horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            MapPalette.STRIPE_PRESETS.forEach { (name, hex) ->
+                                val argb = MapPalette.argb(hex, 1.0)
+                                StripeSwatch(
+                                    color = Color(argb),
+                                    selected = settings.mapPalette.excluded == argb,
+                                    label = name,
+                                    onClick = { viewModel.setExcludedColor(hex) },
+                                )
+                            }
+                        }
+                    }
+                },
             )
 
             SectionHeader("Backup and export")
@@ -689,4 +724,28 @@ private fun CarScreenHealth() {
             }
         },
     )
+}
+
+/** A colour choice for left-out streets, drawn as the candy stripe it will be on the map. */
+@Composable
+private fun StripeSwatch(color: Color, selected: Boolean, label: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(width = 52.dp, height = 30.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .border(if (selected) 3.dp else 1.dp, if (selected) MaterialTheme.colorScheme.primary else Color(0x33000000), RoundedCornerShape(8.dp))
+            .clickable(onClickLabel = label, onClick = onClick)
+            .semantics { contentDescription = label; this.selected = selected },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.size(width = 40.dp, height = 10.dp)) {
+            drawRect(Color.White)
+            val band = size.height
+            var x = 0f
+            while (x < size.width) {
+                drawRect(color, topLeft = Offset(x, 0f), size = Size(minOf(band, size.width - x), size.height))
+                x += band * 2
+            }
+        }
+    }
 }

@@ -115,6 +115,11 @@ class ServerClient(
 
     suspend fun stats(): JSONObject = JSONObject(request("GET", "/api/stats"))
 
+    /** Change some of your preferences (the web's Preferences page); the rest stay as they are. */
+    suspend fun setPreferences(changes: JSONObject) {
+        request("PATCH", "/api/me/preferences", changes.toString().toByteArray())
+    }
+
     suspend fun checkout(vehicleId: String) {
         request("POST", "/api/vehicles/${enc(vehicleId)}/checkout", "{}".toByteArray())
     }
