@@ -46,6 +46,9 @@ final class Workspace {
 
     func reload() async {
         guard let api, let teamId else { return }
+        // The streets close in show this team's coverage, in your colours.
+        map.setTeam(teamId)
+        map.setPreferences(app?.user?.preferences)
         await store.load(api, team: teamId)
         redrawAreas()
     }

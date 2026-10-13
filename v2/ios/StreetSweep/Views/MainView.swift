@@ -79,9 +79,14 @@ struct MainView: View {
         // Both maps stay alive (hidden, not gone), so "appearing" isn't enough: on switching
         // between Areas and Map, the one coming up goes to wherever the other was left.
         .onChange(of: section) { _, s in
-            if s == .areas { ws.map.followSavedCamera() }
+            if s == .areas {
+                ws.map.followSavedCamera()
+                // Streets may have been marked on the Map screen since: fetch them fresh.
+                ws.map.reloadStreets()
+            }
             if s == .map { cw.map.followSavedCamera() }
         }
+        .onChange(of: model.user?.preferences) { _, p in ws.map.setPreferences(p) }
         // The team is known once the server has said who you are (straight away after
         // signing in, a moment after launch otherwise), and changes with the picker.
         .task(id: model.team?.id) {

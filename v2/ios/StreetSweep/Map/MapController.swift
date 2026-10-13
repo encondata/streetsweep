@@ -277,11 +277,12 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
 
     // MARK: - Streets
 
-    /// Streets from the server's tiles, under the area outlines: plain on the Areas map,
-    /// coloured for the team on the coverage map.
+    /// Streets from the server's tiles, under the area outlines: coloured for the team on the
+    /// coverage map; on the Areas map plain, except close in (AREAS_COVERAGE_ZOOM), where
+    /// what's driven and what's left out show too.
     private func addStreets(_ style: MLNStyle) {
         var url = "\(root)/api/tiles/streets/{z}/{x}/{y}"
-        if mode == .coverage, let teamId { url += "?team=\(teamId)&v=\(streetsVersion)" }
+        if let teamId { url += "?team=\(teamId)&v=\(streetsVersion)" }
         let src = MLNVectorTileSource(identifier: "streets", tileURLTemplates: [url],
                                       options: [.minimumZoomLevel: 12, .maximumZoomLevel: 16])
         style.addSource(src)
@@ -303,9 +304,10 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
         line.lineCap = NSExpression(forConstantValue: "round")
         line.lineJoin = NSExpression(forConstantValue: "round")
         if let below { style.insertLayer(line, below: below) } else { style.addLayer(line) }
-        if mode == .coverage {
+        do {
             // Left out (gated): candy-striped, bands of the person's colour over white, as on
             // the website. The plain line underneath is hidden for these (applyStreetColors).
+            // On the Areas map only close in, where single streets can be told apart.
             let stripeWidth: [Any] = ["interpolate", ["linear"], ["zoom"], 12, 2.2, 16, 5, 19, 10]
             let excluded = NSPredicate(format: "state == 'excluded'")
             let base = MLNLineStyleLayer(identifier: "streets-excluded-base", source: src)
@@ -321,6 +323,10 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
             stripe.lineWidth = NSExpression(mglJSONObject: stripeWidth)
             stripe.lineCap = NSExpression(forConstantValue: "butt")
             stripe.lineDashPattern = NSExpression(forConstantValue: [1.4, 1.4])
+            if mode == .areas {
+                base.minimumZoomLevel = Float(Self.areasCoverageZoom)
+                stripe.minimumZoomLevel = Float(Self.areasCoverageZoom)
+            }
             style.insertLayer(stripe, above: base)
         }
         applyStreetColors()
@@ -347,9 +353,17 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
     private func applyStreetColors() {
         guard let line = view?.style?.layer(withIdentifier: "streets") as? MLNLineStyleLayer else { return }
         if mode == .areas {
-            // Plain streets, as on the web's Areas page: no coverage while planning areas.
-            line.lineColor = NSExpression(forConstantValue: UIColor(red: 0.545, green: 0.596, blue: 0.651, alpha: 1))
-            line.lineOpacity = NSExpression(forConstantValue: 0.75)
+            // Plain streets while planning areas, as on the web's Areas page. Close in, though,
+            // what's been driven shows in your driven colour and what's left out as stripes:
+            // further out it would only be a blur of colour.
+            let grey = "#8b98a6", c = colorsPref
+            line.lineColor = NSExpression(mglJSONObject: ["step", ["zoom"], grey, Self.areasCoverageZoom,
+                ["match", ["get", "state"], ["done", "complete"], c.driven.color, grey]])
+            line.lineOpacity = NSExpression(mglJSONObject: ["step", ["zoom"], 0.75, Self.areasCoverageZoom,
+                ["match", ["get", "state"], ["done", "complete"], c.driven.opacity, "excluded", 0, 0.75]])
+            if let stripe = view?.style?.layer(withIdentifier: "streets-excluded-stripe") as? MLNLineStyleLayer {
+                stripe.lineColor = NSExpression(forConstantValue: UIColor(Color(hex: excludedStripe)))
+            }
             return
         }
         // As the web colours them: done or marked done in the driven colour, left out grey,
@@ -383,6 +397,9 @@ final class MapController: NSObject, @preconcurrency MLNMapViewDelegate, UIGestu
     }
 
     /// The coverage map's team: its streets come coloured for it.
+    /// From this zoom the Areas map shows coverage: single streets are clear by then.
+    static let areasCoverageZoom: Double = 15
+
     func setTeam(_ id: String?) {
         guard id != teamId else { return }
         teamId = id
