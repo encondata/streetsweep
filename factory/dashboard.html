@@ -1,0 +1,195 @@
+<!doctype html>
+<!-- The factory's board: every job as a card moving across the loop's stages. Polls
+     board.json (written only by the /factory orchestrator). Serve this folder:
+     cd factory && python3 -m http.server 8765  →  http://localhost:8765/dashboard.html -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StreetSweep Factory</title>
+<style>
+  :root {
+    --bg: #f5f7f6; --surface: #ffffff; --line: #e3e8e6; --ink: #15201c; --soft: #5f6d68;
+    --green: #16a34a; --green-bg: #e7f6ec; --amber: #b45309; --amber-bg: #fdf1dc;
+    --red: #c2410c; --red-bg: #fff1e8; --grey-bg: #eef1f0;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font: 14px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; padding: 24px 16px 40px; }
+  header { max-width: 1400px; margin: 0 auto 18px; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  h1 { font-size: 20px; letter-spacing: -.2px; }
+  .muted { color: var(--soft); font-size: 12.5px; }
+  .err { color: var(--red); }
+  .board { max-width: 1400px; margin: 0 auto; display: grid; grid-template-columns: repeat(6, minmax(150px, 1fr)); gap: 10px; overflow-x: auto; }
+  .col { background: var(--grey-bg); border-radius: 12px; padding: 10px; min-height: 160px; display: flex; flex-direction: column; gap: 8px; }
+  .col h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--soft); display: flex; justify-content: space-between; padding: 2px 4px 4px; }
+  .col.human { background: var(--red-bg); }
+  .col.human h2 { color: var(--red); }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 11px; cursor: pointer; display: grid; gap: 6px; text-align: left; font: inherit; color: inherit; width: 100%; }
+  .card:hover { border-color: #c9d3cf; box-shadow: 0 2px 8px rgba(20, 40, 30, .06); }
+  .card.human { border: 2px solid var(--red); }
+  .title { font-weight: 650; }
+  .id { font: 11px ui-monospace, Menlo, monospace; color: var(--soft); overflow-wrap: anywhere; }
+  .rounds { display: grid; gap: 4px; }
+  .round { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+  .round .n { font-size: 11px; color: var(--soft); width: 20px; }
+  .chip { font-size: 10px; font-weight: 650; padding: 1px 5px; border-radius: 99px; border: 1px solid var(--line); color: var(--soft); background: var(--surface); }
+  .chip.PASS { background: var(--green-bg); color: var(--green); border-color: transparent; }
+  .chip.CHANGES { background: var(--amber-bg); color: var(--amber); border-color: transparent; }
+  .chip.pending { border-style: dashed; }
+  .empty { color: var(--soft); font-size: 12.5px; padding: 6px 4px; }
+  .flag { font-size: 11.5px; font-weight: 650; color: var(--red); }
+  /* The job's files, opened from a card. */
+  .drawer { position: fixed; inset: 0; background: rgba(20, 30, 25, .25); display: none; justify-content: flex-end; }
+  .drawer.open { display: flex; }
+  .panel { background: var(--surface); width: min(760px, 100%); height: 100%; display: flex; flex-direction: column; }
+  .panel header { margin: 0; padding: 16px 18px 10px; border-bottom: 1px solid var(--line); justify-content: space-between; flex-wrap: nowrap; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 18px; border-bottom: 1px solid var(--line); }
+  .tab { font: inherit; font-size: 12.5px; border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 3px 10px; cursor: pointer; color: var(--soft); }
+  .tab.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .doc { padding: 16px 20px 40px; overflow: auto; }
+  .doc h1, .doc h2, .doc h3 { margin: 16px 0 6px; font-size: 16px; } .doc h1 { font-size: 19px; margin-top: 0; }
+  .doc p, .doc ul { margin: 6px 0; } .doc ul { padding-left: 20px; }
+  .doc code { font: 12.5px ui-monospace, Menlo, monospace; background: var(--grey-bg); padding: 1px 4px; border-radius: 4px; }
+  .doc pre { background: var(--grey-bg); padding: 10px; border-radius: 8px; overflow: auto; } .doc pre code { background: none; padding: 0; }
+  .verdict { display: inline-block; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
+  .x { font: inherit; border: 0; background: none; font-size: 20px; cursor: pointer; color: var(--soft); }
+  @media (max-width: 760px) { .board { grid-template-columns: repeat(6, 78vw); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>StreetSweep Factory</h1>
+  <span class="muted">feature → spec → build ⇄ review (security · ux · ui · code) → approve → merge to v2</span>
+  <span class="muted" id="status"></span>
+</header>
+<main class="board" id="board"></main>
+
+<div class="drawer" id="drawer" role="dialog" aria-modal="true">
+  <div class="panel">
+    <header><div><div class="title" id="d-title"></div><div class="id" id="d-id"></div></div><button class="x" id="d-close" aria-label="Close">×</button></header>
+    <nav class="tabs" id="d-tabs"></nav>
+    <article class="doc" id="d-doc"></article>
+  </div>
+</div>
+
+<script>
+const STAGES = [
+  ["spec", "Spec"], ["build", "Build"], ["review", "Review"], ["approve", "Approve"],
+  ["needs-human", "Needs human"], ["merged", "Merged"],
+];
+const REVIEWERS = [["security", "SEC"], ["ux", "UX"], ["ui", "UI"], ["code", "CODE"]];
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+let jobs = [];
+let open = null; // the job whose files are showing
+
+async function poll() {
+  try {
+    const r = await fetch("board.json?t=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) throw new Error(r.status);
+    jobs = (await r.json()).jobs ?? [];
+    document.getElementById("status").textContent = `${jobs.length} job${jobs.length === 1 ? "" : "s"} · updated ${new Date().toLocaleTimeString()}`;
+    document.getElementById("status").className = "muted";
+    render();
+  } catch {
+    const s = document.getElementById("status");
+    s.textContent = "Can't read board.json: serve this folder with python3 -m http.server";
+    s.className = "muted err";
+  }
+}
+
+function rounds(job) {
+  const list = job.rounds?.length ? job.rounds : job.reviews ? [{ round: job.round ?? 1, reviews: job.reviews }] : [];
+  return list.map((r) => `<div class="round"><span class="n">R${r.round}</span>${REVIEWERS.map(([k, label]) => {
+    const v = r.reviews?.[k] ?? "pending";
+    return `<span class="chip ${esc(v)}" title="${k}: ${esc(v)}">${label}</span>`;
+  }).join("")}</div>`).join("");
+}
+
+function render() {
+  const board = document.getElementById("board");
+  board.innerHTML = STAGES.map(([key, label]) => {
+    const here = jobs.filter((j) => (j.stage === "failed" ? "needs-human" : j.stage) === key);
+    const human = key === "needs-human";
+    return `<section class="col${human ? " human" : ""}"><h2><span>${label}</span><span>${here.length}</span></h2>${
+      here.length ? here.map((j) => `<button class="card${human ? " human" : ""}" data-id="${esc(j.id)}">
+        ${human ? `<span class="flag" title="/factory approve ${esc(j.id)} or /factory rework ${esc(j.id)} <note>">${j.stage === "failed" ? "Failed" : "Waiting for you"}</span>` : ""}
+        <span class="title">${esc(j.title ?? j.id)}</span>
+        <span class="id">${esc(j.branch ?? j.id)}</span>
+        <div class="rounds">${rounds(j)}</div>
+      </button>`).join("") : `<p class="empty">Nothing here</p>`
+    }</section>`;
+  }).join("");
+  board.querySelectorAll(".card").forEach((c) => (c.onclick = () => show(c.dataset.id)));
+  if (open) tabs(jobs.find((j) => j.id === open), false);
+}
+
+// ---- a job's files ----
+function files(job) {
+  const list = [["Feature", "feature.md"], ["Spec", "spec.md"], ["Build", "build.md"]];
+  const n = Math.max(job.round ?? 0, ...(job.rounds ?? []).map((r) => r.round));
+  for (let r = 1; r <= n; r++) for (const [k, label] of REVIEWERS) list.push([`R${r} ${label}`, `round-${r}/review-${k}.md`]);
+  list.push(["Decision", "decision.md"]);
+  return list;
+}
+
+let current = null;
+function show(id) {
+  open = id;
+  const job = jobs.find((j) => j.id === id);
+  document.getElementById("d-title").textContent = job.title ?? job.id;
+  document.getElementById("d-id").textContent = `${job.id} · ${job.branch ?? ""} · ${job.stage}`;
+  document.getElementById("drawer").classList.add("open");
+  current = null;
+  tabs(job, true);
+}
+
+async function tabs(job, pickFirst) {
+  if (!job) return;
+  const nav = document.getElementById("d-tabs");
+  // All at once; the ones that don't exist yet just come back 404.
+  const got = await Promise.all(files(job).map(async ([label, path]) => {
+    const r = await fetch(`jobs/${job.id}/${path}?t=${Date.now()}`, { cache: "no-store" }).catch(() => null);
+    return r?.ok ? [label, path, await r.text()] : null;
+  }));
+  const have = got.filter(Boolean);
+  nav.innerHTML = have.map(([label, path]) => `<button class="tab${path === current ? " on" : ""}" data-path="${path}">${label}</button>`).join("")
+    || `<span class="muted">No files yet.</span>`;
+  nav.querySelectorAll(".tab").forEach((t) => (t.onclick = () => { current = t.dataset.path; tabs(job, false); }));
+  if (pickFirst || !have.some(([, p]) => p === current)) current = have.at(-1)?.[1] ?? null;
+  nav.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.path === current));
+  const doc = have.find(([, p]) => p === current);
+  document.getElementById("d-doc").innerHTML = doc ? markdown(doc[2]) : "";
+}
+
+// Just enough Markdown for the factory's files: headings, lists, checkboxes, code, verdicts.
+function markdown(src) {
+  const out = []; let list = false, code = false;
+  for (const raw of src.split("\n")) {
+    if (raw.startsWith("```")) { if (list) { out.push("</ul>"); list = false; } out.push(code ? "</code></pre>" : "<pre><code>"); code = !code; continue; }
+    if (code) { out.push(esc(raw)); continue; }
+    let line = esc(raw).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    const v = raw.match(/^(VERDICT: )?(PASS|CHANGES|APPROVE|ESCALATE)\b/);
+    if (v) { const ok = v[2] === "PASS" || v[2] === "APPROVE"; out.push(`<p><span class="verdict" style="background:var(--${ok ? "green" : "amber"}-bg);color:var(--${ok ? "green" : "amber"})">${esc(raw)}</span></p>`); continue; }
+    const li = line.match(/^\s*(?:[-*]|\d+\.)\s+(?:\[( |x)\]\s+)?(.*)$/);
+    if (li) { if (!list) { out.push("<ul>"); list = true; } out.push(`<li>${li[1] === "x" ? "☑ " : li[1] === " " ? "☐ " : ""}${li[2]}</li>`); continue; }
+    if (list) { out.push("</ul>"); list = false; }
+    const h = line.match(/^(#{1,3})\s+(.*)$/);
+    if (h) out.push(`<h${h[1].length}>${h[2]}</h${h[1].length}>`);
+    else if (line.trim()) out.push(`<p>${line}</p>`);
+  }
+  if (list) out.push("</ul>");
+  if (code) out.push("</code></pre>");
+  return out.join("\n");
+}
+
+const close = () => { open = null; document.getElementById("drawer").classList.remove("open"); };
+document.getElementById("d-close").onclick = close;
+document.getElementById("drawer").onclick = (e) => { if (e.target.id === "drawer") close(); };
+addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+
+poll();
+setInterval(poll, 2000);
+</script>
+</body>
+</html>

@@ -41,3 +41,7 @@ keystore.properties
 # Google service account keys (Play publishing) must never be committed
 *-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].json
 *publisher*.json
+
+# The factory's working state: local to whoever runs /factory (its definition is tracked)
+factory/board.json
+factory/jobs/
